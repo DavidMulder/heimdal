@@ -2,6 +2,8 @@
 
 include $(top_srcdir)/Makefile.am.common
 
+AUTOMAKE_OPTIONS = subdir-objects
+
 AM_CPPFLAGS += -I$(srcdir)/libtommath -DUSE_HCRYPTO_LTM=1
 
 lib_LTLIBRARIES = libhcrypto.la
@@ -30,6 +32,7 @@ hcryptoinclude_HEADERS =	\
 	evp-hcrypto.h		\
 	evp-cc.h		\
 	hmac.h			\
+	cmac.h			\
 	md2.h			\
 	md4.h			\
 	md5.h			\
@@ -117,6 +120,8 @@ libhcrypto_la_SOURCES =	\
 	hash.h		\
 	hmac.c		\
 	hmac.h		\
+	cmac.c		\
+	cmac.h		\
 	md2.c		\
 	md2.h		\
 	md4.c		\

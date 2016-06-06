@@ -478,7 +478,7 @@ fortuna_reseed(void)
 #ifdef HAVE_ARC4RANDOM
     {
 	uint32_t buf[INIT_BYTES / sizeof(uint32_t)];
-	int i;
+	size_t i;
 
 	for (i = 0; i < sizeof(buf)/sizeof(buf[0]); i++)
 	    buf[i] = arc4random();
@@ -590,7 +590,7 @@ fortuna_bytes(unsigned char *outdata, int size)
 	goto out;
 
     resend_bytes += size;
-    if (resend_bytes > FORTUNA_RESEED_BYTE || resend_bytes < size) {
+    if (resend_bytes > FORTUNA_RESEED_BYTE || resend_bytes < (unsigned)size) { /* VAS Modification - explicit cast */
 	resend_bytes = 0;
 	fortuna_reseed();
     }

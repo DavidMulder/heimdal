@@ -31,6 +31,45 @@
  * SUCH DAMAGE.
  */
 
+/*===========================================================================
+ *
+ * Project:     VAS 3.0
+ *
+ * File:        changepw.c
+ *
+ * Author(s):   Matt Peterson <mpeterson@vintela.com>
+ *
+ * Description: Reimplemented origintal heimdal code to use krb5_sendto()
+ *
+ * Copyright:   Copyright 2005 Vintela, Inc.  -  All Rights Reserved
+ *=========================================================================*/
+
+/* IMPORTANT:  READ ME!
+ *
+ * Merging from Heimdal
+ * --------------------
+ * This reimplementation of changepw.c was made using Heimdal 0.7.1 as the
+ * intial version.  changepw.c has changed SIGNIFICANTLY with the 
+ * re-implemtation.  There is probably no chance that changes made to the
+ * heimdal changepw.c are going to be applicable to this new code.  
+ *
+ * So why did you do it?
+ * ---------------------
+ * The original heimdal sources uses a completely separate send, recv loop 
+ * -- which makes hard to allow VAS to do server select.  Most importantly, 
+ * it makes it difficult for VAS to force password change to occur against
+ * the same domain controller that was used to create the computer object.
+ * When looking at the problem, I had the choice of duplicating a ton of
+ * code from vasapi/sento.c for the purposes of creating a separate
+ * password set/change rqst/rply engine, -- OR -- I could do the right thing
+ * and just make password set/change re-use the krb5_send() code. 
+ *
+ * During the merge of v1.2.1 of the heimdal code base, I wrapped the
+ * original heimdal source in an #ifdef USE_HEIMDAL_ORIGINAL_SOURCE
+ * to maintain it, but added Matt's changes from VAS source to keep
+ * everything as it should.
+ */
+
 #include "krb5_locl.h"
 
 #undef __attribute__
@@ -56,6 +95,7 @@ str2data (krb5_data *d,
     d->data = str;
 }
 
+#ifdef USE_HEIMDAL_ORIGINAL_SOURCE
 /*
  * Change password protocol defined by
  * draft-ietf-cat-kerb-chg-password-02.txt
@@ -497,6 +537,17 @@ static struct kpwd_proc {
     { NULL, 0, NULL, NULL }
 };
 
+static struct kpwd_proc *
+find_chpw_proto(const char *name)
+{
+    struct kpwd_proc *p;
+    for (p = procs; p->name != NULL; p++) {
+    if (strcmp(p->name, name) == 0)
+        return p;
+    }
+    return NULL;
+}
+
 /*
  *
  */
@@ -656,18 +707,528 @@ change_password_loop (krb5_context	context,
     return ret;
 }
 
-#ifndef HEIMDAL_SMALLER
+#else
+/* This is the Matt's VAS change */
 
-static struct kpwd_proc *
-find_chpw_proto(const char *name)
+static krb5_error_code
+build_chgpw_request( krb5_context context,
+                     krb5_auth_context *auth_context,
+                     krb5_creds *creds,
+                     krb5_principal targprinc,
+                     char *passwd,
+                     krb5_data *chgpw_req )
 {
-    struct kpwd_proc *p;
-    for (p = procs; p->name != NULL; p++) {
-	if (strcmp(p->name, name) == 0)
-	    return p;
+    krb5_error_code ret;
+    krb5_data ap_req_data;
+    krb5_data krb_priv_data;
+    krb5_data passwd_data;
+    size_t len;
+    u_char *p;
+
+    /* Zero locals */
+    krb5_data_zero (&ap_req_data);
+    krb5_data_zero (&krb_priv_data);
+
+    /* Sanity check... Compare the target principal with client from the 
+     * credentials 
+     */
+    if( targprinc &&
+        krb5_principal_compare( context, creds->client, targprinc) != TRUE )
+    {
+        return KRB5_KPASSWD_MALFORMED;
     }
-    return NULL;
+
+    /* Make the AP-REQ */
+    ret = krb5_mk_req_extended( context,
+                                auth_context,
+                                AP_OPTS_MUTUAL_REQUIRED | AP_OPTS_USE_SUBKEY,
+                                NULL, /* in_data */
+                                creds,
+                                &ap_req_data );
+    if( ret )
+    {
+        goto CLEANUP;
+    }
+    
+    /* Make the KRB-PRIV */
+    passwd_data.data   = passwd;
+    passwd_data.length = strlen( passwd );
+    ret = krb5_mk_priv( context,
+                        *auth_context,
+                        &passwd_data,
+                        &krb_priv_data,
+                        NULL );
+    if( ret )
+    {
+        goto CLEANUP;
+    }
+	
+    /* Calculate the length of the message */
+    len = 6 + ap_req_data.length + krb_priv_data.length;
+
+    /* Allocate memory for the chgpw_req */
+    ret = krb5_data_alloc( chgpw_req, len );
+    if( ret )
+    {
+        goto CLEANUP;
+    }
+    p = (u_char*)chgpw_req->data;
+
+    /* Copy in the low 16 bites of the message length */
+    *p++ = (len >> 8) & 0xFF;
+    *p++ = (len >> 0) & 0xFF;
+    
+    /* Protocol version number (1) */
+    *p++ = 0;
+    *p++ = 1;
+    
+    /* Copy in the low 16 bites of the AP-REQ */
+    *p++ = (ap_req_data.length >> 8) & 0xFF;
+    *p++ = (ap_req_data.length >> 0) & 0xFF;
+    
+    /* Copy in the AP-REQ */
+    memcpy( p, ap_req_data.data, ap_req_data.length );
+    p += ap_req_data.length;
+    
+    /* Copy in the KRB-PRIV */
+    memcpy( p, krb_priv_data.data, krb_priv_data.length );
+    
+    /* Success */
+    ret = 0;
+    
+CLEANUP:
+
+    krb5_data_free (&krb_priv_data);
+    krb5_data_free (&ap_req_data);
+    
+    return ret;
 }
+
+
+static krb5_error_code
+build_setpw_request( krb5_context context,
+                     krb5_auth_context *auth_context,
+                     krb5_creds *creds,
+                     krb5_principal targprinc,
+                     char *passwd,
+                     krb5_data *setpw_req )
+{
+    krb5_error_code ret;
+    krb5_data ap_req_data;
+    krb5_data krb_priv_data;
+    krb5_data pwd_data;
+    ChangePasswdDataMS chpw;
+    size_t len;
+    u_char *p;
+    
+    /* Zero locals */
+    krb5_data_zero (&ap_req_data);
+    krb5_data_zero (&krb_priv_data);
+    krb5_data_zero (&pwd_data);
+
+    /* Make the AP-REQ */
+    ret = krb5_mk_req_extended (context,
+                                auth_context,
+                                AP_OPTS_MUTUAL_REQUIRED | AP_OPTS_USE_SUBKEY,
+                                NULL, /* in_data */
+                                creds,
+                                &ap_req_data);
+    if( ret )
+    {
+        goto CLEANUP;
+    }
+    
+    /* Make the ChangePasswdData */
+    chpw.newpasswd.length = strlen(passwd);
+    chpw.newpasswd.data = passwd;
+    if (targprinc) 
+    {
+        chpw.targname = &targprinc->name;
+        chpw.targrealm = &targprinc->realm;
+    }
+    else 
+    {
+    	chpw.targname = NULL;
+    	chpw.targrealm = NULL;
+    }
+    ASN1_MALLOC_ENCODE( ChangePasswdDataMS, 
+                        pwd_data.data, 
+                        pwd_data.length,
+                        &chpw, 
+                        &len, 
+                        ret);
+    if (ret) 
+    {
+        goto CLEANUP;
+    }
+
+    if(pwd_data.length != len)
+    {
+        krb5_abortx(context, "internal error in ASN.1 encoder");
+    }
+	
+
+    /* Make the KRB-PRIV */
+    ret = krb5_mk_priv( context,
+                        *auth_context,
+                        &pwd_data,
+                        &krb_priv_data,
+                        NULL );
+    if (ret)
+    {
+        goto CLEANUP;
+    }
+
+        /* Calculate the length of the message */
+    len = 6 + ap_req_data.length + krb_priv_data.length;
+
+    /* Allocate memory for the setpw_req */
+    ret = krb5_data_alloc( setpw_req, len );
+    if( ret )
+    {
+        goto CLEANUP;
+    }
+    p = (u_char*)setpw_req->data;
+
+    /* Copy in the low 16 bites of the message length */
+    *p++ = (len >> 8) & 0xFF;
+    *p++ = (len >> 0) & 0xFF;
+    
+    /* Protocol version number (0xFF80 as per RFC 3244) */
+    *p++ = 0xff;
+    *p++ = 0x80;
+    
+    /* Copy in the low 16 bites of the AP-REQ */
+    *p++ = (ap_req_data.length >> 8) & 0xFF;
+    *p++ = (ap_req_data.length >> 0) & 0xFF;
+    
+    /* Copy in the AP-REQ */
+    memcpy( p, ap_req_data.data, ap_req_data.length );
+    p += ap_req_data.length;
+    
+    /* Copy in the KRB-PRIV */
+    memcpy( p, krb_priv_data.data, krb_priv_data.length );
+    
+    /* Success */
+    ret = 0;
+    
+CLEANUP:
+
+    krb5_data_free (&krb_priv_data);
+    krb5_data_free (&ap_req_data);
+    krb5_data_free (&pwd_data);
+    
+    return ret;
+}
+    
+
+
+static krb5_error_code 
+parse_reply_as_krb_error( krb5_context context,
+                          krb5_auth_context auth_context,
+                          krb5_data *rep,
+                          int *result_code,
+                          krb5_data *result_string )
+{
+    krb5_error_code rval;
+    KRB_ERROR       error;
+    u_char          *p;  
+
+    if( (rval = krb5_rd_error( context, rep, &error )) == 0 )
+    {
+        rval = error.error_code;
+
+        if (error.e_data->length > 1) 
+        {
+            /* save the result code in outparam */
+            p = error.e_data->data;
+        	*result_code = (p[0] << 8) | p[1];
+
+            /* skip the error code */
+            p += 2;
+    
+            /* copy what's left to the result_string */
+            if( error.e_data->length - 2 && 
+                p < (u_char*)rep->data + rep->length )
+            {
+                str2data( result_string,
+                          "%.*s",
+                          (int)error.e_data->length - 2,
+                          p );
+    }
+}
+
+        krb5_free_error_contents( context, &error );
+    }
+
+    return rval;
+}
+
+
+static krb5_error_code
+parse_reply( krb5_context context,
+             krb5_auth_context auth_context,
+             krb5_data *rep,
+             int *result_code,
+             krb5_data *result_code_string,
+             krb5_data *result_string )
+             
+{
+    krb5_error_code ret;
+    size_t len;
+    u_char *p;
+    u_int16_t pkt_len;
+    u_int16_t pkt_ver;
+    krb5_data ap_rep_data;
+    krb5_data krb_priv_data;
+    krb5_ap_rep_enc_part *ap_rep = NULL;
+    
+    /* Zero locals */
+    krb5_data_zero (&ap_rep_data);
+    krb5_data_zero (&krb_priv_data);
+
+    /* Set up a pointer and length to the reply data */
+    p = (u_char*)rep->data;
+    len = rep->length;
+
+    /* Sanity check for messages that are too short */
+    if( rep->length < 6) 
+    {
+        *result_code = KRB5_KPASSWD_MALFORMED;
+        return ASN1_BAD_FORMAT;;
+    }
+    
+    /* Sanity check for length and version */
+    pkt_len = (p[0] << 8) | (p[1]);
+    pkt_ver = (p[2] << 8) | (p[3]);
+    if( pkt_len != len ||
+        pkt_ver != KRB5_KPASSWD_VERS_CHANGEPW )
+    {
+        /* If sanity check fails, try to parse this as a raw KRB_ERROR.  For 
+         * some reason, we see raw KRB5 errors being sent in response to 
+         * kpasswd requests (one such example is when a bad ap-req is sent)
+         */
+        if( (ret = parse_reply_as_krb_error( context,
+                                             auth_context,
+                                             rep,
+                                             result_code,
+                                             result_string )) == ASN1_BAD_FORMAT ) 
+        {
+            /* There's definately a problem with the reply. */
+            *result_code = KRB5_KPASSWD_MALFORMED;
+        }
+
+        goto CLEANUP;
+}
+
+    /* parse out the AP-REP length */
+    ap_rep_data.data = p + 6;
+    ap_rep_data.length  = (p[4] << 8) | (p[5]);
+  
+    /* sanity check for length */
+    if( p + len < (u_char *)ap_rep_data.data + ap_rep_data.length ) 
+    {
+        *result_code = KRB5_KPASSWD_MALFORMED;
+    	return ASN1_BAD_FORMAT;;
+    }
+
+    /* Check for an AP-REQ length that is zero */
+    if( ap_rep_data.length == 0) 
+    {
+        /* IF the AP-REQ is zero then the rest of the message is a KRB-ERROR */
+        ap_rep_data.length = len - 6;
+
+        ret = parse_reply_as_krb_error( context,
+                                        auth_context,
+                                        rep,
+                                        result_code,
+                                        result_string );
+        goto CLEANUP;
+    }
+    
+    /* Read the AP-REP */
+	ret = krb5_rd_rep( context,
+                       auth_context,
+                       &ap_rep_data,
+                       &ap_rep );
+	if (ret)
+    {
+        goto CLEANUP;
+    }
+    
+    /* parse out the KRB-PRIV length */
+    krb_priv_data.data = (u_char*)ap_rep_data.data + ap_rep_data.length;
+	krb_priv_data.length = len - ap_rep_data.length - 6;
+
+    /* Read the KRB-PRIV */
+	ret = krb5_rd_priv( context,
+                        auth_context,
+                        &krb_priv_data,
+                        result_code_string,
+                        NULL );
+	if (ret) 
+    {
+        krb5_data_free( result_code_string );
+        goto CLEANUP;
+	}
+
+	if (result_code_string->length < 2) 
+    {
+	    *result_code = KRB5_KPASSWD_MALFORMED;
+        str2data( result_string, "client: bad length in result" );
+        ret = ASN1_BAD_FORMAT;
+	    goto CLEANUP;
+	}
+
+    /* Parse out the result code */
+    p = result_code_string->data;
+    *result_code = (p[0] << 8) | p[1];
+    
+    /* set the result_code string */
+    if( result_code_string->length - 2 )
+    {
+        krb5_data_copy( result_string,
+                        (unsigned char *)result_code_string->data + 2,
+                        result_code_string->length - 2 );
+    }
+    
+    ret = 0;
+
+CLEANUP:
+    if( ap_rep) krb5_free_ap_rep_enc_part (context, ap_rep);
+
+    return ret;
+}
+
+
+static krb5_error_code
+process_kpasswd_rqst_rply( krb5_context context,
+                           krb5_creds *creds,
+                           krb5_principal targprinc,
+                           int setpw,
+                           char *newpw,
+                           int *result_code,
+                           krb5_data *result_code_string,
+                           krb5_data *result_string )
+{
+    krb5_error_code    ret;
+    size_t             i;
+    krb5_auth_context  auth_context = NULL;
+    krb5_krbhst_handle handle = NULL;
+    krb5_data          chgpw_req;
+    krb5_data          chgpw_rep;
+    krb5_addresses     clientaddrs;
+    krb5_realm         realm = creds->server->realm;
+    
+    /* Zero locals */
+    krb5_data_zero( &chgpw_req );
+    krb5_data_zero( &chgpw_rep );
+    memset( &clientaddrs, 0, sizeof(clientaddrs) );
+
+    /* Initialize the auth_context */
+    ret = krb5_auth_con_init( context, &auth_context );
+    if( ret ) goto CLEANUP;
+    krb5_auth_con_setflags( context, 
+                            auth_context, 
+                            KRB5_AUTH_CONTEXT_DO_SEQUENCE );
+
+    /* Get a the local host addresses */
+    ret = krb5_get_all_client_addrs( context, &clientaddrs );
+    if( ret ) goto CLEANUP;
+    
+    /* Initialize krbhst handle */
+    ret = krb5_krbhst_init (context, 
+                            realm,
+                            KRB5_KRBHST_CHANGEPW, 
+                            &handle);
+    if( ret ) goto CLEANUP;
+    
+    /* This loop allows iteration over all of the client_addrs so that
+     * on multi-homed machines we'll be able to call krb5_auth_con_setaddrs()
+     * for all possible source addresses.  FYI calling 
+     * krb5_auth_con_setaddrs() is the majic that ultimately generates the
+     * s-address of KRB-PRIV.   On single-homed this loop should never 
+     * execute more than once.
+     */
+    for( i = 0; i < clientaddrs.len; i++ )
+    {
+        ret = krb5_auth_con_setaddrs( context,
+                                      auth_context,
+                                      &(clientaddrs.val[i]),
+                                      NULL );
+
+        /* Generate the kpasswd req */
+        if( setpw )
+        {
+            ret = build_setpw_request( context, 
+                                       &auth_context, 
+                                       creds, 
+                                       targprinc, 
+                                       newpw, 
+                                       &chgpw_req ); 
+        }
+        else
+        {
+            ret = build_chgpw_request( context, 
+                                       &auth_context, 
+                                       creds, 
+                                       targprinc, 
+                                       newpw, 
+                                       &chgpw_req ); 
+        }
+        if( ret ) goto CLEANUP;
+        
+        /* Send to kpasswd server */
+        ret = krb5_sendto(context, &chgpw_req, handle, &chgpw_rep );
+        if( ret ) goto CLEANUP;
+    
+        /* Parse the reply */
+        ret = parse_reply( context,
+                           auth_context,
+                           &chgpw_rep,
+                           result_code,
+                           result_code_string,
+                           result_string );
+        if( ret ) goto CLEANUP;
+
+        /* If we get a KRB5_KPASSWD_HARDERROR then there is
+         * a possiblity that we used the wrong s-address in the
+         * KRB-PRIV.  If this is the case then we should 
+         * continue in the loop.
+         */
+        if( *result_code != KRB5_KPASSWD_HARDERROR )
+        {
+            /* We didn't get a KRB5_KPASSWD_HARDERROR this means that
+             * we had a valid kpasswd exchange.  We should  return the 
+             * caller now.
+             */
+            break;
+        }
+    }
+		
+    /* Success */
+    ret = 0;
+    
+CLEANUP:
+    if (ret == KRB5_KDC_UNREACH) 
+    {
+        krb5_set_error_message( context, ret,
+                               "unable to reach any changepw server "
+                               " in realm %s", realm );
+	    *result_code = KRB5_KPASSWD_HARDERROR;
+	}
+
+    if( handle ) krb5_krbhst_free (context, handle);
+    if( auth_context ) krb5_auth_con_free (context, auth_context);
+    krb5_data_free (&chgpw_rep);
+    krb5_data_free (&chgpw_req);
+    krb5_free_addresses( context, &clientaddrs );
+
+    return ret;
+}
+#endif
+
+#ifndef HEIMDAL_SMALLER
 
 /**
  * Deprecated: krb5_change_password() is deprecated, use krb5_set_password().
@@ -691,20 +1252,29 @@ krb5_change_password (krb5_context	context,
 		      int		*result_code,
 		      krb5_data		*result_code_string,
 		      krb5_data		*result_string)
-    KRB5_DEPRECATED_FUNCTION("Use X instead")
+//    KRB5_DEPRECATED_FUNCTION("Use X instead")
 {
-    struct kpwd_proc *p = find_chpw_proto("change password");
-
+    /* VAS Modification: Don't need the kpwd_proc struct
+     * struct kpwd_proc *p = find_chpw_proto("change password");
+     */
     *result_code = KRB5_KPASSWD_MALFORMED;
     result_code_string->data = result_string->data = NULL;
     result_code_string->length = result_string->length = 0;
 
-    if (p == NULL)
-	return KRB5_KPASSWD_MALFORMED;
-
-    return change_password_loop(context, creds, NULL, newpw,
-				result_code, result_code_string,
-				result_string, p);
+    /* VAS Modification, call process_kpasswd_rqst_rply instead
+     * of change_password_loop()
+     * return change_password_loop(context, creds, NULL, newpw, 
+     *                             result_code, result_code_string, 
+     *                             result_string, p);
+     */
+    return process_kpasswd_rqst_rply( context,
+                                      creds,
+                                      NULL,
+                                      0,
+                                      rk_UNCONST(newpw),
+                                      result_code,
+                                      result_code_string,
+                                      result_string );
 }
 #endif /* HEIMDAL_SMALLER */
 
@@ -737,7 +1307,6 @@ krb5_set_password(krb5_context context,
 {
     krb5_principal principal = NULL;
     krb5_error_code ret = 0;
-    int i;
 
     *result_code = KRB5_KPASSWD_MALFORMED;
     krb5_data_zero(result_code_string);
@@ -750,15 +1319,30 @@ krb5_set_password(krb5_context context,
     } else
 	principal = targprinc;
 
-    for (i = 0; procs[i].name != NULL; i++) {
-	*result_code = 0;
-	ret = change_password_loop(context, creds, principal, newpw,
-				   result_code, result_code_string,
-				   result_string,
-				   &procs[i]);
-	if (ret == 0 && *result_code == 0)
-	    break;
-    }
+    /* VAS Modification - use process_kpasswd_rqst_rply() instead of
+     * for (i = 0; procs[i].name != NULL; i++) {
+	 *  *result_code = 0;
+     *
+     * change_password_loop().
+	 * ret = change_password_loop(context, creds, principal, newpw, 
+	 * 			   result_code, result_code_string, 
+	 *			   result_string, 
+	 *			   &procs[i]);
+     */
+    ret = process_kpasswd_rqst_rply( context,
+                                     creds,
+                                     principal,
+                                     1,
+                                     rk_UNCONST(newpw),
+                                     result_code,
+                                     result_code_string,
+                                     result_string );
+    /* VAS Modification - no loop
+     *
+	 * if (ret == 0 && *result_code == 0)
+	 *    break;
+     * }
+     */
 
     if (targprinc == NULL)
 	krb5_free_principal(context, principal);

@@ -42,6 +42,17 @@ _gsskrb5_lifetime_left(OM_uint32 *minor_status,
     krb5_timestamp timeret;
     krb5_error_code kret;
 
+/* --- Begin modification by mpeterson@vintela.com --- */
+    /* If the lifetime of the credential is indefiniate, the time remaining
+     * is indenfinate.  Added to pass SAP gsstest 
+     */
+    if( lifetime == GSS_C_INDEFINITE )
+    {
+        *lifetime_rec = GSS_C_INDEFINITE;
+        return GSS_S_COMPLETE;
+    }
+/* --- End modification by mpeterson@vintela.com --- */
+
     if (lifetime == 0) {
 	*lifetime_rec = GSS_C_INDEFINITE;
 	return GSS_S_COMPLETE;
@@ -53,7 +64,7 @@ _gsskrb5_lifetime_left(OM_uint32 *minor_status,
 	return GSS_S_FAILURE;
     }
 
-    if (lifetime < timeret)
+    if (lifetime < (OM_uint32)timeret) 
 	*lifetime_rec = 0;
     else
 	*lifetime_rec = lifetime - timeret;

@@ -351,10 +351,10 @@ nl_getmsg(int sd, int request, int seq,
     if (read_size == 0) break;
     nh = (struct nlmsghdr *)buff;
     for (nh = (struct nlmsghdr *)buff;
-	 NLMSG_OK(nh, read_size);
+	 NLMSG_OK(nh, (u_int32_t)read_size);
 	 nh = (struct nlmsghdr *)NLMSG_NEXT(nh, read_size)){
-      if (nh->nlmsg_pid != pid ||
-	  nh->nlmsg_seq != seq)
+      if (nh->nlmsg_pid != (u_int32_t) pid ||
+	  nh->nlmsg_seq != (u_int32_t) seq)
 	continue;
       if (nh->nlmsg_type == NLMSG_DONE){
 	(*done)++;
@@ -586,7 +586,7 @@ rk_getifaddrs(struct ifaddrs **ifap)
       if (!(nlh0 = nlm->nlh))
 	continue;
       for (nlh = nlh0;
-	   NLMSG_OK(nlh, nlmlen);
+	   NLMSG_OK(nlh, (u_int32_t)nlmlen);
 	   nlh=NLMSG_NEXT(nlh,nlmlen)){
 	struct ifinfomsg *ifim = NULL;
 	struct ifaddrmsg *ifam = NULL;
@@ -602,8 +602,8 @@ rk_getifaddrs(struct ifaddrs **ifap)
 	memset(&ifamap, 0, sizeof(ifamap));
 
 	/* check if the message is what we want */
-	if (nlh->nlmsg_pid != pid ||
-	    nlh->nlmsg_seq != nlm->seq)
+	if (nlh->nlmsg_pid != (u_int32_t) pid ||
+	    nlh->nlmsg_seq != (u_int32_t) nlm->seq)
 	  continue;
 	if (nlh->nlmsg_type == NLMSG_DONE){
 	  break; /* ok */
@@ -642,6 +642,15 @@ rk_getifaddrs(struct ifaddrs **ifap)
 	}
 
 	rtasize = NLMSG_PAYLOAD(nlh, nlmlen) - NLMSG_ALIGN(nlm_struct_size);
+
+    /**** Quest fix --- check the return value if we are larger than nlmlen,
+     * meaning that a negative value was returned...
+     */
+    if( rtasize > (unsigned)nlh->nlmsg_len )
+        rtasize = NLMSG_ALIGN(nlh->nlmsg_len ) - NLMSG_ALIGN( nlm_struct_size );
+
+    /** end of Quest fix */
+
 	for (rta = (struct rtattr *)(((char *)NLMSG_DATA(nlh)) + NLMSG_ALIGN(nlm_struct_size));
 	     RTA_OK(rta, rtasize);
 	     rta = RTA_NEXT(rta, rtasize)){
@@ -911,8 +920,10 @@ getifaddrs2(struct ifaddrs **ifap,
 	 * be determined?
 	 */
 
-	if (ifconf.ifc_len < buf_size)
+	/* Vintela modification: cast ifc_len to size_t for aix compilation */
+	if ((size_t)ifconf.ifc_len < buf_size)
 	    break;
+    /* End Vintela Modification */
 	free (buf);
 	buf_size *= 2;
     }
@@ -1057,7 +1068,7 @@ getlifaddrs2(struct ifaddrs **ifap,
 	 * be determined?
 	 */
 
-	if (ifconf.lifc_len < buf_size)
+	if ((size_t)ifconf.lifc_len < buf_size)
 	    break;
 	free (buf);
 	buf_size *= 2;

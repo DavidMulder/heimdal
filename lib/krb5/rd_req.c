@@ -252,7 +252,16 @@ krb5_decrypt_ticket(krb5_context context,
 	    krb5_clear_error_message (context);
 	    return KRB5KRB_AP_ERR_TKT_EXPIRED;
 	}
-
+   /* Quest Modification <jayson.hurst@quest.com>
+     * June 16 2009
+     * 
+     * MS-KILE (Microsoftâs Kerberos Protocol Extensions spec) contains the following in section 3.1.5.5:
+     * The TRANSITED-POLICY-CHECKED flag ([RFC4120] section 2.7): KILE MUST NOT check for transited domains
+     * on servers or a KDC. Application servers MUST ignore the TRANSITED-POLICY-CHECKED setting.
+     * 
+     * Bug fix #17291 Transitive cross-forest trusts do not work without additional krb5.conf settings. [capaths]
+     */
+#if 0  
 	if(!t.flags.transited_policy_checked) {
 	    ret = check_transited(context, ticket, &t);
 	    if(ret) {
@@ -260,6 +269,8 @@ krb5_decrypt_ticket(krb5_context context,
 		return ret;
 	    }
 	}
+#endif
+    /* End of Quest Modification */
     }
 
     if(out)
@@ -276,7 +287,7 @@ krb5_verify_authenticator_checksum(krb5_context context,
 				   size_t len)
 {
     krb5_error_code ret;
-    krb5_keyblock *key;
+    krb5_keyblock *key = NULL;  /* VAS Modification - initialize this ptr */
     krb5_authenticator authenticator;
     krb5_crypto crypto;
 
@@ -448,6 +459,21 @@ krb5_verify_ap_req2(krb5_context context,
 	}
     }
 
+    /* QAS Modification for replay detection - jeff.webb@quest.com */
+    {
+        krb5_error_code     replay_ret = 0;
+        if( (replay_ret = krb5_rc_store( context,
+                                         context->rcache_ctx,
+                                         (krb5_donot_replay *)ac->authenticator ))
+                == KRB5_RC_REPLAY )
+        {
+            krb5_clear_error_string( context );
+            ret = KRB5KRB_AP_ERR_REPEAT;
+            goto out;
+        }
+    }
+    /* End of QAS Modification */
+
     if (ac->authenticator->seq_number)
 	krb5_auth_con_setremoteseqnumber(context, ac,
 					 *ac->authenticator->seq_number);
@@ -484,7 +510,7 @@ krb5_verify_ap_req2(krb5_context context,
 
     if (ap_req_options) {
 	*ap_req_options = 0;
-	if (ac->keytype != ETYPE_NULL)
+	if (ac->keytype != (krb5_keytype)ETYPE_NULL)
 	    *ap_req_options |= AP_OPTS_USE_SUBKEY;
 	if (ap_req->ap_options.use_session_key)
 	    *ap_req_options |= AP_OPTS_USE_SESSION_KEY;
@@ -926,7 +952,25 @@ krb5_rd_req_ctx(krb5_context context,
 				  server,
 				  id,
 				  &o->keyblock);
-	if (ret) {
+    /* VAS Modification 
+     * principal names can be different, but if they don't resolve out of the 
+     * keytab then throw a wrong principal error. */
+    if( server && service && ret && ret != KRB5_KT_NOTFOUND )
+    {
+        /* If these are not the same we are going to be using the kvno for one  *
+         * ticket to get another ticket.  This will most likely fail, but even  *
+         * if it didn't then we would eventually hit a decrypt integrity check  *
+         * failure -- This is a fix for the SAP GSS Test in version 1.29,       *
+         * it wasn't necessary in version 1.26 -- See BUG 22244                 */
+        if( krb5_principal_compare(context,server,service) == FALSE )
+        {
+            krb5_clear_error_string(context);
+            ret = KRB5KRB_AP_WRONG_PRINC;
+            goto out;
+        }
+    }
+    /* End VAS Modification */
+	if (ret && ret != KRB5_KT_NOTFOUND) {
 	    /* If caller specified a server, fail. */
 	    if (service == NULL && (context->flags & KRB5_CTX_F_RD_REQ_IGNORE) == 0)
 		goto out;
@@ -1063,6 +1107,13 @@ krb5_rd_req_ctx(krb5_context context,
 out:
 
     if (ret || outctx == NULL) {
+    /* VAS Modification */
+    if( o->ticket )                          
+    {
+        krb5_free_ticket(context, o->ticket );
+        o->ticket = NULL;
+    }
+    /* END VAS Modification */
 	krb5_rd_req_out_ctx_free(context, o);
     } else
 	*outctx = o;

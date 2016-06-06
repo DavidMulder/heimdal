@@ -68,11 +68,12 @@ krb5_mk_safe(krb5_context context,
 
     s.safe_body.user_data = *userdata;
 
-    krb5_us_timeofday (context, &rdata.timestamp, &rdata.usec);
+    /* VAS modification - add the cast */
+    krb5_us_timeofday (context, &rdata.timestamp, (int32_t *)&rdata.usec);
 
     if (auth_context->flags & KRB5_AUTH_CONTEXT_DO_TIME) {
 	s.safe_body.timestamp  = &rdata.timestamp;
-	s.safe_body.usec       = &rdata.usec;
+	s.safe_body.usec       = (int *)&rdata.usec; /* VAS modification - add the cast */
     } else {
 	s.safe_body.timestamp  = NULL;
 	s.safe_body.usec       = NULL;
@@ -135,5 +136,23 @@ krb5_mk_safe(krb5_context context,
     if (auth_context->flags & KRB5_AUTH_CONTEXT_DO_SEQUENCE)
 	auth_context->local_seqnumber =
 	    (auth_context->local_seqnumber + 1) & 0xFFFFFFFF;
+
+    /* QAS Modification - jeff.webb@quest.com
+     * Replay detection */
+    if (auth_context->flags & KRB5_AUTH_CONTEXT_DO_TIME ) {
+        krb5_error_code replay_ret = 0;
+
+        if( (replay_ret = krb5_rc_store( context,
+                                         context->rcache_ctx,
+                                         (krb5_donot_replay *)auth_context->authenticator ))
+             == KRB5_RC_REPLAY )
+        {
+            krb5_clear_error_string( context );
+            ret = KRB5KRB_AP_ERR_REPEAT;
+            return ret;
+        }
+    }
+    /* End Modification for replay detection */
+
     return 0;
 }

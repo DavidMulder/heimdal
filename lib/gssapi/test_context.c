@@ -90,7 +90,10 @@ init_o2n(void)
 static gss_OID
 string_to_oid(const char *name)
 {
-    int i;
+/* Vintela modification */
+    unsigned i;
+/* End Vintela modification */
+
     for (i = 0; i < sizeof(o2n)/sizeof(o2n[0]); i++)
 	if (strcasecmp(name, o2n[i].name) == 0)
 	    return o2n[i].oid;
@@ -100,7 +103,10 @@ string_to_oid(const char *name)
 static const char *
 oid_to_string(const gss_OID oid)
 {
-    int i;
+/* Vintela modification */
+    unsigned i;
+/* End Vintela modification */
+
     for (i = 0; i < sizeof(o2n)/sizeof(o2n[0]); i++)
 	if (gss_oid_equal(oid, o2n[i].oid))
 	    return o2n[i].name;

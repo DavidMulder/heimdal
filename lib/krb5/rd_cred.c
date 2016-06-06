@@ -60,7 +60,7 @@ krb5_rd_cred(krb5_context context,
 	     krb5_replay_data *outdata)
 {
     krb5_error_code ret;
-    size_t len;
+    size_t len = 0;
     KRB_CRED cred;
     EncKrbCredPart enc_krb_cred_part;
     krb5_data enc_krb_cred_part_data;
@@ -68,6 +68,10 @@ krb5_rd_cred(krb5_context context,
     size_t i;
 
     memset(&enc_krb_cred_part, 0, sizeof(enc_krb_cred_part));
+    /* VAS Modification - wynn.wilkes@quest.com
+     * Initialize these variables to avoid crashed during cleanup */
+    memset( &cred, 0, sizeof(cred) );
+    /* End VAS Modification */
     krb5_data_zero(&enc_krb_cred_part_data);
 
     if ((auth_context->flags &
@@ -217,17 +221,39 @@ krb5_rd_cred(krb5_context context,
     /* check timestamp */
     if (auth_context->flags & KRB5_AUTH_CONTEXT_DO_TIME) {
 	krb5_timestamp sec;
+    /* QAS Modification for replay detection. <jeff.webb@quest.com> */
+    krb5_error_code         replay_ret = 0;
+    /* End QAS Modification */
 
 	krb5_timeofday (context, &sec);
 
-	if (enc_krb_cred_part.timestamp == NULL ||
-	    enc_krb_cred_part.usec      == NULL ||
-	    abs(*enc_krb_cred_part.timestamp - sec)
-	    > context->max_skew) {
+    /* VAS Modification - dleonard@vintela.com
+     * Microsoft does not put a timestamp field into their delegated
+     * creds, but RFC 1510 s3.6.2 says that an omitted timestamp
+     * should yield KRB5KRB_AP_ERR_SKEW.  So we don't fail if there's no
+     * timestamp, but still check for skew if there is a timestamp. */
+    if( enc_krb_cred_part.timestamp != NULL && enc_krb_cred_part.usec != NULL )
+    {
+        if (abs(*enc_krb_cred_part.timestamp - sec) > context->max_skew) {
 	    krb5_clear_error_message (context);
 	    ret = KRB5KRB_AP_ERR_SKEW;
 	    goto out;
 	}
+    }
+    /* QAS Modification - jeff.webb@quest.com
+     * If the memory-based replay cache is initialized in the context,
+     * then check to see if we've seen this authenticator before.
+     */
+    if( (replay_ret = krb5_rc_store( context,
+                                     context->rcache_ctx,
+                                     (krb5_donot_replay *)auth_context->authenticator ))
+        == KRB5_RC_REPLAY )
+    {
+        krb5_clear_error_string( context );
+        ret = KRB5KRB_AP_ERR_REPEAT;
+        goto out;
+    }
+    /* End QAS Modification for replay detection */
     }
 
     if ((auth_context->flags &

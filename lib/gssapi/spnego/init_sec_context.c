@@ -230,13 +230,22 @@ spnego_initial
 	return sub;
     }
 
+    /* --- Begin modification by dan.peterson@quest.com ---
+     * In order for our CIFS implementation to support the EMC Celerra
+     * file server, we have to list the broken Microsoft Kerberos OID
+     * because their stupid server fails if you don't have it.  If we
+     * don't have the Microsoft Kerberos OID in our Session Setup request
+     * they will return RPC_NT_UNSUPPORTED_AUTHN_LEVEL which means that
+     * they can't support our authentication type (GSS_KRB5_MECHANISM).
+     * I changed this sequence to include the broken Microsoft OID */
     sub = _gss_spnego_indicate_mechtypelist(&minor,
 					    ctx->target_name,
 					    initiator_approved,
-					    0,
+					    1,
 					    cred,
 					    &ni.mechTypes,
 					    &ctx->preferred_mech_type);
+    /* --- End VAS modification */
     if (GSS_ERROR(sub)) {
 	*minor_status = minor;
 	_gss_spnego_internal_delete_sec_context(&minor, &context, GSS_C_NO_BUFFER);
@@ -371,6 +380,7 @@ spnego_initial
     return GSS_S_CONTINUE_NEEDED;
 }
 
+gss_OID GSSAPI_LIB_VARIABLE GSS_MSKRB5_MECHANISM;
 static OM_uint32
 spnego_reply
            (OM_uint32 * minor_status,
@@ -465,9 +475,22 @@ spnego_reply
 		   ctx->preferred_mech_type->elements,
 		   ctx->oidlen) != 0)
 	{
+        /* VAS Modification - handle the case where ctx->oidbuf is the
+         * GSS_MSKRB5_MECHANISM, and the preferred mech type is GSS_KRB5_MECHANISM
+         * (which are really one and the same)
+         *
+         * The original heimdal code did not do this comparison
+         */
+        if( memcmp( ctx->oidbuf + sizeof(ctx->oidbuf) - ctx->oidlen,
+                    GSS_MSKRB5_MECHANISM->elements,
+                    ctx->oidlen ) ||
+            !gss_oid_equal( ctx->preferred_mech_type, GSS_KRB5_MECHANISM ) )
+        /* End VAS Modification */
+        {
 	    gss_delete_sec_context(&minor, &ctx->negotiated_ctx_id,
 				   GSS_C_NO_BUFFER);
 	    ctx->negotiated_ctx_id = GSS_C_NO_CONTEXT;
+	}
 	}
     } else if (ctx->oidlen == 0) {
 	free_NegotiationToken(&resp);

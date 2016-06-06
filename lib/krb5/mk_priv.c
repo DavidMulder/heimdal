@@ -66,11 +66,12 @@ krb5_mk_priv(krb5_context context,
 
     part.user_data = *userdata;
 
-    krb5_us_timeofday (context, &rdata.timestamp, &rdata.usec);
+    /* VAS modification - cast rdata.usec to int32_t, for gcc 4.x changes */
+    krb5_us_timeofday (context, &rdata.timestamp, (int32_t *)&rdata.usec);
 
     if (auth_context->flags & KRB5_AUTH_CONTEXT_DO_TIME) {
 	part.timestamp = &rdata.timestamp;
-	part.usec      = &rdata.usec;
+	part.usec      = (int *)&rdata.usec; /* VAS modification - added cast */
     } else {
 	part.timestamp = NULL;
 	part.usec      = NULL;
@@ -144,6 +145,20 @@ krb5_mk_priv(krb5_context context,
     if (auth_context->flags & KRB5_AUTH_CONTEXT_DO_SEQUENCE)
 	auth_context->local_seqnumber =
 	    (auth_context->local_seqnumber + 1) & 0xFFFFFFFF;
+    /* QAS Modification for replay detection - jeff.webb@quest.com */
+    if( auth_context->flags & KRB5_AUTH_CONTEXT_DO_TIME ) {
+        krb5_error_code replay_ret = 0;
+        if( (replay_ret = krb5_rc_store( context,
+                                         context->rcache_ctx,
+                                         (krb5_donot_replay *)auth_context->authenticator ))
+            == KRB5_RC_REPLAY )
+        {
+            krb5_clear_error_string( context );
+            ret = KRB5KRB_AP_ERR_REPEAT;
+            goto fail;
+        }
+    }
+    /* End of QAS Modification */
     return 0;
 
   fail:

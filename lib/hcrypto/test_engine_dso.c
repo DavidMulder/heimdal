@@ -263,7 +263,9 @@ main(int argc, char **argv)
 
     if (dh_flag) {
 	DH *server, *client;
-	int i;
+/* Vintela modification */
+	unsigned i;
+/* End Vintela modification */
 
 	/* RFC2412-MODP-group2 */
 	const char *p =

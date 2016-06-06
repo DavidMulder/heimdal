@@ -101,7 +101,7 @@ check_config_files(void)
 {
     krb5_context context;
     krb5_error_code ret;
-    int i;
+    size_t i;   /* VAS Modification - change from int to size_t */
 
     ret = krb5_init_context(&context);
     if (ret)

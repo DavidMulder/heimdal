@@ -45,7 +45,10 @@ noinst_PROGRAMS = asn1_gen
 
 libexec_heimdal_PROGRAMS = asn1_compile asn1_print
 
-TESTS = check-der check-gen check-timegm check-ber check-template
+# Vintela modification
+# not using _der_timegm
+# check-timegm
+TESTS = check-der check-gen check-ber check-template
 check_PROGRAMS = $(TESTS)
 
 asn1_gen_SOURCES = asn1_gen.c
@@ -115,7 +118,7 @@ check_der_LDADD = \
 check_template_LDADD = $(check_der_LDADD)
 asn1_print_LDADD = $(check_der_LDADD) $(LIB_com_err)
 asn1_gen_LDADD = $(check_der_LDADD)
-check_timegm_LDADD = $(check_der_LDADD)
+#check_timegm_LDADD = $(check_der_LDADD)
 
 check_gen_LDADD = \
 	libasn1.la \

@@ -42,10 +42,17 @@ static struct _krb5_key_type keytype_null = {
     "null",
     0,
     0,
+    0, /* VAS Modification */
     0,
     NULL,
     NULL,
+    NULL,
     NULL
+/* VAS Modification -- for parameters */
+    ,
+    NULL,
+    NULL
+/* End VAS Modification */
 };
 
 static krb5_error_code
@@ -83,7 +90,10 @@ NULL_encrypt(krb5_context context,
 
 struct _krb5_encryption_type _krb5_enctype_null = {
     ETYPE_NULL,
-    "null",
+    /* VAS Modification, old name was NULL.  That didn't looks so good in the SAP tests */
+    "any",
+    /* End VAS modification */
+    NULL,
     1,
     1,
     0,

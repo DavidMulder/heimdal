@@ -113,6 +113,7 @@ libroken_la_SOURCES =		\
 	timeval.c		\
 	tm2time.c		\
 	unvis.c			\
+	vasstrdup.c		\
 	verify.c		\
 	vis.c			\
 	warnerr.c		\

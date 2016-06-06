@@ -148,6 +148,40 @@ krb5_string_to_key_data (krb5_context context,
     return ret;
 }
 
+/* --- Begin addition by mpeterson@vintela.com --- */
+krb5_error_code
+krb5_string_to_key_data_use_pwsalt (krb5_context context,
+                                    krb5_enctype enctype,
+                                    krb5_data pw,
+                                    const char* pwsalt,
+                                    krb5_keyblock *key)
+{
+    krb5_error_code ret;
+    krb5_salt salt;
+
+    salt.salttype = KRB5_PW_SALT;
+    ret = krb5_data_alloc (&salt.saltvalue, strlen(pwsalt));
+    if ( ret )
+    {
+        return ret;
+    }
+    memcpy(salt.saltvalue.data,pwsalt,salt.saltvalue.length);
+
+/* matt's debug stuff I disabled... */
+#if 0
+    fprintf(stderr,
+            "krb5_string_to_key_data using salt:\n   %s\n",
+            pwsalt);
+#endif
+
+    ret = krb5_string_to_key_data_salt(context, enctype, pw, salt, key);
+
+    krb5_data_free(&salt.saltvalue);
+
+    return ret;
+}
+/* --- End addition by mpeterson@vintela.com --- */
+
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_string_to_key (krb5_context context,
 		    krb5_enctype enctype,
@@ -160,6 +194,21 @@ krb5_string_to_key (krb5_context context,
     pw.length = strlen(password);
     return krb5_string_to_key_data(context, enctype, pw, principal, key);
 }
+
+/* --- Begin addition by mpeterson@vintela.com --- */
+krb5_error_code
+krb5_string_to_key_use_pwsalt (krb5_context context,
+                               krb5_enctype enctype,
+                               const char *password,
+                               const char *pwsalt,
+                               krb5_keyblock *key)
+{
+    krb5_data pw;
+    pw.data = (void*)password;
+    pw.length = strlen(password);
+    return krb5_string_to_key_data_use_pwsalt(context, enctype, pw, pwsalt, key);
+}
+/* --- End addition by mpeterson@vintela.com --- */
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_string_to_key_data_salt (krb5_context context,

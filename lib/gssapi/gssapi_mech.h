@@ -477,6 +477,24 @@ typedef OM_uint32 GSSAPI_CALLCONV _gss_authorize_localname_t (
 /* mechglue internal */
 struct gss_mech_compat_desc_struct;
 
+/*--- Begin addition by mpeterson@vintela.com ---
+ *
+ * Necessary to implement VAS 3.0 MRD 3.6.8 (Users allow/User deny support
+ * for gssapi authentication)
+ */
+typedef OM_uint32 (*gssapi_vas_authorize_funct_t)( void *gssapi_vas_ctx,
+                                                   OM_uint32 *minor_status,
+                                                   gss_cred_id_t cred_handle,
+                                                   gss_ctx_id_t context_handle );
+extern gssapi_vas_authorize_funct_t gssapi_vas_authorize_funct;
+extern void *gssapi_vas_ctx;
+
+OM_uint32 _gssapi_set_vas_ctx( void *vas_ctx );
+
+OM_uint32 _gssapi_set_auth_vas_authorize_funct( gssapi_vas_authorize_funct_t  funct );
+
+/*--- End addition --- */
+
 #define GMI_VERSION 5
 
 /* gm_flags */

@@ -57,13 +57,13 @@ static struct testcase {
 int
 main(int argc, char **argv)
 {
-    int i;
+    size_t i;
     int ret = 0;
+    int len = 0;
 
     for (i = 0; i < sizeof(tests)/sizeof(tests[0]); ++i) {
 	char buf[256];
 	int val = parse_bytes (tests[i].str, tests[i].def_unit);
-	int len;
 
 	if (val != tests[i].val) {
 	    printf ("parse_bytes (%s, %s) = %d != %d\n",

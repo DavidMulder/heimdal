@@ -44,6 +44,7 @@ struct krb5_dh_moduli {
 };
 
 #ifdef PKINIT
+#if 0 /* VAS Modification -- disable heimdal's pkinit */
 
 #include <cms_asn1.h>
 #include <pkcs8_asn1.h>
@@ -2002,6 +2003,7 @@ pk_copy_error(krb5_context context,
     free(s);
     free(f);
 }
+#endif /* End VAS Modification -- disable heimdal's pkinit */
 
 static int
 parse_integer(krb5_context context, char **p, const char *file, int lineno,
@@ -2638,4 +2640,19 @@ krb5_pk_enterprise_cert(krb5_context context,
 			   N_("no support for PKINIT compiled in", ""));
     return EINVAL;
 #endif
+}
+
+krb5_error_code KRB5_LIB_FUNCTION
+_krb5_get_init_creds_opt_set_pkinit_ctx(krb5_context context,
+                                       krb5_get_init_creds_opt *opt,
+                                       krb5_pkinit_ctx *pkinit_ctx)
+{
+    if (opt->opt_private == NULL) {
+        krb5_set_error_string(context, "PKINIT: on non extendable opt");
+        return EINVAL;
+    }
+
+    opt->opt_private->pk_init_ctx = pkinit_ctx;
+
+    return 0;
 }

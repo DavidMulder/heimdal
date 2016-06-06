@@ -149,12 +149,12 @@ _gss_string_to_oid(const char* s, gss_OID oid)
 	return (0);
 }
 
+/* VAS modifications - removed unnecessary output */
 #define SYM(name)							\
 do {									\
 	m->gm_mech.gm_ ## name = dlsym(so, "gss_" #name);		\
 	if (!m->gm_mech.gm_ ## name ||					\
 	    m->gm_mech.gm_ ##name == gss_ ## name) {			\
-		fprintf(stderr, "can't find symbol gss_" #name "\n");	\
 		goto bad;						\
 	}								\
 } while (0)
@@ -251,9 +251,15 @@ _gss_load_mech(void)
 		return;
 	}
 
-	add_builtin(__gss_krb5_initialize());
-	add_builtin(__gss_spnego_initialize());
+    /* VAS Modification: Reorder these with Kerberos 5 first and, importantly,
+     * NTLM last. Actually add_builtin() inserts at the head of the list so they
+     * appear in the opposite order here. Last=first, first=last. This makes
+     * gsstest do everything with krb5 instead of trying to use NTLM and failing
+     * completely. */
 	add_builtin(__gss_ntlm_initialize());
+	add_builtin(__gss_spnego_initialize());
+	add_builtin(__gss_krb5_initialize());
+    /* End VAS Modification */
 
 #ifdef HAVE_DLOPEN
 	fp = fopen(_PATH_GSS_MECH, "r");
@@ -424,6 +430,7 @@ _gss_load_mech(void)
 	HEIMDAL_MUTEX_unlock(&_gss_mech_mutex);
 }
 
+gss_OID GSSAPI_LIB_VARIABLE GSS_MSKRB5_MECHANISM;
 gssapi_mech_interface
 __gss_get_mechanism(gss_const_OID mech)
 {
@@ -433,6 +440,13 @@ __gss_get_mechanism(gss_const_OID mech)
 	HEIM_SLIST_FOREACH(m, &_gss_mechs, gm_link) {
 		if (gss_oid_equal(&m->gm_mech.gm_mech_oid, mech))
 			return &m->gm_mech;
+        /* VAS Modification - handle the MS Broken krb5 OID.
+         * Treat it like it is the krb5 mech
+         */
+        if( gss_oid_equal( mech, GSS_MSKRB5_MECHANISM ) &&
+            gss_oid_equal( &m->gm_mech.gm_mech_oid, GSS_KRB5_MECHANISM ) )
+            return &m->gm_mech ;
+        /* End VAS Modification */
 	}
 	return NULL;
 }

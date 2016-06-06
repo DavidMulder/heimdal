@@ -140,7 +140,9 @@ struct test md2_tests[] = {
      "\xda\x33\xde\xf2\xa4\x2d\xf1\x39\x75\x35\x28\x46\xc3\x03\x38\xcd" },
     {"12345678901234567890123456789012345678901234567890123456789012345678901234567890",
      "\xd5\x97\x6f\x79\xd8\x3d\x3a\x0d\xc9\x80\x6c\x3c\x66\xf3\xef\xd8" },
-    {NULL }
+/* Vintela modification */
+    {NULL, { 0x0 }}
+/* End Vintela modification */
 };
 
 struct test md4_tests[] = {
@@ -184,7 +186,9 @@ struct test sha1_tests[] = {
       {0x34, 0xaa, 0x97, 0x3c, 0xd4, 0xc4, 0xda, 0xa4,
        0xf6, 0x1e, 0xeb, 0x2b, 0xdb, 0xad, 0x27, 0x31,
        0x65, 0x34, 0x01, 0x6f}},
-    { NULL }
+/* Vintela modification */
+    { NULL, { 0 }}
+/* End Vintela modification */
 };
 
 struct test sha256_tests[] = {
@@ -203,7 +207,9 @@ struct test sha256_tests[] = {
        0x81,0xa1,0xc7,0xe2, 0x84,0xd7,0x3e,0x67,
        0xf1,0x80,0x9a,0x48, 0xa4,0x97,0x20,0x0e,
        0x04,0x6d,0x39,0xcc, 0xc7,0x11,0x2c,0xd0 }},
-    { NULL }
+/* Vintela modification */
+    { NULL, { 0 } }
+/* End Vintela modification */
 };
 
 struct test sha384_tests[] = {
@@ -295,7 +301,9 @@ hash_test (struct hash_foo *hash, struct test *tests)
 
 	(*hash->final) (res, ctx);
 	if (memcmp (res, t->hash, hash->hsize) != 0) {
-	    int i;
+/* Vintela modification */
+	    unsigned i;
+/* End Vintela modification */
 
 	    printf ("%s(\"%s\") failed\n", hash->name, t->str);
 	    printf("should be:  ");

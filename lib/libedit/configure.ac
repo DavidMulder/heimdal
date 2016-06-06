@@ -33,10 +33,6 @@ AC_PROG_AWK
 EL_MANTYPE
 
 
-AC_CHECK_LIB(curses, tgetent,,
-   [AC_CHECK_LIB(ncurses, tgetent,,
-      [AC_MSG_ERROR([libcurses or libncurses are required!])] )] )
-
 
 ### use option --enable-widec to turn on use of wide-character support
 EL_ENABLE_WIDEC
@@ -46,7 +42,7 @@ AC_FUNC_ALLOCA
 AC_HEADER_DIRENT
 AC_HEADER_STDC
 AC_HEADER_SYS_WAIT
-AC_CHECK_HEADERS([fcntl.h limits.h malloc.h stdlib.h string.h sys/ioctl.h sys/param.h unistd.h curses.h ncurses.h sys/cdefs.h])
+AC_CHECK_HEADERS([fcntl.h limits.h malloc.h stdlib.h string.h sys/ioctl.h sys/param.h unistd.h sys/cdefs.h])
 
 AC_CHECK_HEADER([termios.h], [], [AC_MSG_ERROR([termios.h is required!])],[])
 

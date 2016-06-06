@@ -173,7 +173,7 @@ const_v6 (struct addrinfo *a, void *data, int port)
    for in6addr_loopback but no actual symbol in libc */
 #if defined(HAVE_IPV6) && !defined(HAVE_IN6ADDR_LOOPBACK) && defined(IN6ADDR_LOOPBACK_INIT)
 #define in6addr_loopback _roken_in6addr_loopback
-struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;
+struct in6_addr in6addr_loopback = { { IN6ADDR_LOOPBACK_INIT } };
 #endif
 
 static int
@@ -188,7 +188,6 @@ get_null (const struct addrinfo *hints,
     struct addrinfo *first = NULL;
     struct addrinfo **current = &first;
     int family = PF_UNSPEC;
-    int ret;
 
     if (hints != NULL)
 	family = hints->ai_family;
@@ -207,12 +206,12 @@ get_null (const struct addrinfo *hints,
 
 #ifdef HAVE_IPV6
     if (family == PF_INET6 || family == PF_UNSPEC) {
-	ret = add_one (port, protocol, socktype,
+	add_one (port, protocol, socktype,
 		       &current, const_v6, &v6_addr, NULL);
     }
 #endif
     if (family == PF_INET || family == PF_UNSPEC) {
-	ret = add_one (port, protocol, socktype,
+	add_one (port, protocol, socktype,
 		       &current, const_v4, &v4_addr, NULL);
     }
     *res = first;
@@ -267,6 +266,45 @@ add_hostent (int port, int protocol, int socktype,
     return 0;
 }
 
+#ifdef HAVE_IPV6
+static void map_v4_v6 (const struct in_addr *v4addr,
+			 struct in6_addr *v6addr)
+{
+    memset(v6addr, 0, sizeof(*v6addr));
+    /* The only standard accessor for the address fields appears to be
+     * s6_addr which is an array of unsigned 8-bit chars. */
+    v6addr->s6_addr[10] = 0xff;
+    v6addr->s6_addr[11] = 0xff;
+    //v6addr->__u6_addr.__u6_addr32[3] = v4addr->s_addr;
+#ifdef WORDS_BIGENDIAN
+    v6addr->s6_addr[12] = (v4addr->s_addr & 0xff000000) >> 24;
+    v6addr->s6_addr[13] = (v4addr->s_addr & 0x00ff0000) >> 16;
+    v6addr->s6_addr[14] = (v4addr->s_addr & 0x0000ff00) >> 8;
+    v6addr->s6_addr[15] = (v4addr->s_addr & 0x000000ff);
+#else /* little endian */
+    v6addr->s6_addr[12] = (v4addr->s_addr & 0x000000ff);
+    v6addr->s6_addr[13] = (v4addr->s_addr & 0x0000ff00) >> 8;
+    v6addr->s6_addr[14] = (v4addr->s_addr & 0x00ff0000) >> 16;
+    v6addr->s6_addr[15] = (v4addr->s_addr & 0xff000000) >> 24;
+#endif
+}
+
+/**
+ * Given the address family, flags, and whether any addresses have been found,
+ * determine whether IPv6-mapped-IPv4 addresses should be returned.
+ * Returns nonzero if IPv4 address mapping should be done.
+ */
+static int is_v4mapping (int family, int flags, const struct addrinfo *first) {
+#if defined(AI_V4MAPPED) && defined(AI_ALL)
+    /* Only platforms that define these flags will ever be able to use them. */
+    return ((family == PF_INET6 && (flags & AI_V4MAPPED))
+	    && (!first || (flags & AI_ALL)));
+#else
+    return 0;
+#endif
+}
+#endif /* HAVE_IPV6 */
+
 static int
 get_number (const char *nodename,
 	    const struct addrinfo *hints,
@@ -276,10 +314,12 @@ get_number (const char *nodename,
     struct addrinfo *first = NULL;
     struct addrinfo **current = &first;
     int family = PF_UNSPEC;
+    int flags = 0;
     int ret;
 
     if (hints != NULL) {
 	family = hints->ai_family;
+	flags = hints->ai_flags;
     }
 
 #ifdef HAVE_IPV6
@@ -304,6 +344,19 @@ get_number (const char *nodename,
 	    return ret;
 	}
     }
+#ifdef HAVE_IPV6
+    if (is_v4mapping (family, flags, first)) {
+	struct in_addr v4_addr;
+	if (inet_pton (PF_INET, nodename, &v4_addr) == 1) {
+	    struct in6_addr mapped_addr;
+	    map_v4_v6 (&v4_addr, &mapped_addr);
+	    ret = add_one (port, protocol, socktype,
+			   &current, const_v6, &mapped_addr, NULL);
+	    *res = first;
+	    return ret;
+	}
+    }
+#endif /* HAVE_IPV6 */
     return EAI_NONAME;
 }
 
@@ -348,7 +401,51 @@ get_nodes (const char *nodename,
 			       &current, const_v4, he, &flags);
 	    freehostent (he);
 	}
+        /* VAS Modification by mpeterson@vintela.com
+         * HP-UX has a lot of brokenness and this helps
+         */
+        else
+        {
+            he = gethostbyname(nodename);
+            if(he != NULL)
+            {
+                ret = add_hostent(port,
+                                  protocol,
+                                  socktype,
+                                  &current,
+                                  const_v4,
+                                  he,
+                                  &flags);
+                /* To the poor soul who notices that under
+                 * weird circumstances this causes segfaults,
+                 * please refer to bug #349250.
+                 * To leak memory on some platforms or segfault
+                 * on random occassions, that is the question.
+                 */
+                freehostent (he);
+            }
+        }
+        /* End VAS modification */
     }
+
+#ifdef HAVE_IPV6
+    if (is_v4mapping (family, flags, first)) {
+	struct hostent *he;
+
+	he = getipnodebyname (nodename, PF_INET, 0, &error);
+
+	if (he != NULL) {
+	    if (he->h_addr_list && he->h_addr_list[0]) {
+		struct in6_addr mapped_addr;
+		map_v4_v6 ((struct in_addr*) he->h_addr_list[0], &mapped_addr);
+		ret = add_one (port, protocol, socktype,
+			       &current, const_v6, &mapped_addr, NULL);
+    }
+	    freehostent (he);
+    }
+	/* XXX: Does HP-UX require a fallback call to gethostbyname? */
+    }
+#endif
     *res = first;
     return ret;
 }

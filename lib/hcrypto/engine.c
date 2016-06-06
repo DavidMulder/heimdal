@@ -88,7 +88,7 @@ ENGINE_finish(ENGINE *engine)
     if(engine->destroy)
 	(*engine->destroy)(engine);
 
-    memset(engine, 0, sizeof(engine));
+    memset(engine, 0, sizeof(*engine));
     engine->references = -1;
 
 
@@ -380,7 +380,7 @@ ENGINE_by_id(const char *id)
 {
     int i;
 
-    for (i = 0; i < num_engines; i++) {
+    for (i = 0; (unsigned int)i < num_engines; i++) { /* VAS Modification - explicit cast */
 	if (strcmp(id, engines[i]->id) == 0) {
 	    ENGINE_up_ref(engines[i]);
 	    return engines[i];

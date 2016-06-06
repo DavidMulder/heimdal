@@ -47,6 +47,12 @@
 #include <roken.h>
 
 #ifdef HAVE_PTHREAD_H
+// The AIX43 compiler uses it's own sys/types rather than the system.
+// These needed types are missing from it though.
+#if AIX43
+typedef int crid_t;
+typedef unsigned int class_id_t;
+#endif
 #include <pthread.h>
 #endif
 

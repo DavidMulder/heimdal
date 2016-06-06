@@ -24,12 +24,9 @@ TESTS =						\
 	aes-test				\
 	derived-key-test			\
 	n-fold-test				\
-	parse-name-test				\
 	store-test				\
-	string-to-key-test			\
 	test_acl				\
 	test_addr				\
-	test_cc					\
 	test_config				\
 	test_fx					\
 	test_prf				\
@@ -39,9 +36,7 @@ TESTS =						\
 	test_mem				\
 	test_pac				\
 	test_plugin				\
-	test_princ				\
 	test_pkinit_dh2key			\
-	test_pknistkdf				\
 	test_time				\
 	test_x500
 
@@ -121,6 +116,7 @@ dist_libkrb5_la_SOURCES =			\
 	changepw.c				\
 	codec.c					\
 	config_file.c				\
+	qas_krb5_util.c				\
 	convert_creds.c				\
 	constants.c				\
 	context.c				\
@@ -141,6 +137,7 @@ dist_libkrb5_la_SOURCES =			\
 	crypto-rand.c				\
 	doxygen.c				\
 	data.c					\
+	dcache.c				\
 	deprecated.c				\
 	digest.c				\
 	eai_to_heim_errno.c			\
@@ -367,7 +364,8 @@ EXTRA_DIST = \
 	$(man_MANS) \
 	version-script.map \
 	test_config_strings.cfg \
-	krb5.moduli
+	krb5.moduli \
+	qas_krb5_util.h
 
 #sysconf_DATA = krb5.moduli
 

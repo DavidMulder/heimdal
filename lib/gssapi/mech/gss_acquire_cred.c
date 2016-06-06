@@ -63,14 +63,14 @@ gss_acquire_cred(OM_uint32 *minor_status,
 	 * mechanisms is one that we support.
 	 */
 	if (mechs) {
-		for (i = 0; i < mechs->count; i++) {
+		for (i = 0; (size_t)i < mechs->count; i++) { /* VAS Modification - explicit cast */
 			int t;
 			gss_test_oid_set_member(minor_status,
 			    &mechs->elements[i], _gss_mech_oids, &t);
 			if (t)
 				break;
 		}
-		if (i == mechs->count) {
+		if ((size_t)i == mechs->count) { /* VAS Modification - explicit cast */
 			*minor_status = 0;
 			return (GSS_S_BAD_MECH);
 		}
@@ -97,7 +97,7 @@ gss_acquire_cred(OM_uint32 *minor_status,
 
 	set.count = 1;
 	min_time = GSS_C_INDEFINITE;
-	for (i = 0; i < mechs->count; i++) {
+	for (i = 0; (size_t)i < mechs->count; i++) { /* VAS Modification - explicit cast */
 		struct _gss_mechanism_name *mn = NULL;
 
 		m = __gss_get_mechanism(&mechs->elements[i]);
@@ -156,7 +156,11 @@ gss_acquire_cred(OM_uint32 *minor_status,
 		free(cred);
 		if (actual_mechs)
 			gss_release_oid_set(minor_status, actual_mechs);
-		*minor_status = 0;
+        /* VAS Modification -- Don't set the minor status to zero if  *
+         * there was an error in this case.  There could easily have  *
+         * been an error.                                             */
+        /* *minor_status = 0; */
+        /* End VAS Modification */
 		return (GSS_S_NO_CRED);
 	}
 

@@ -32,7 +32,6 @@
  */
 
 #include "ntlm.h"
-
 /*
  *
  */
@@ -64,6 +63,7 @@ _gss_ntlm_allocate_ctx(OM_uint32 *minor_status, ntlm_ctx *ctx)
  *
  */
 
+GSSAPI_LIB_VARIABLE gss_OID_desc __gss_ntlm_mechanism_oid_desc;
 OM_uint32 GSSAPI_CALLCONV
 _gss_ntlm_accept_sec_context
 (OM_uint32 * minor_status,
@@ -212,6 +212,13 @@ _gss_ntlm_accept_sec_context
 		heim_ntlm_free_type3(&type3);
 		_gss_ntlm_delete_sec_context(minor_status,
 					     context_handle, NULL);
+                /* QAS Modification: Don't leak. */
+                if (n) {
+                    free(n->user);
+                    free(n->domain);
+                    free(n);
+                }
+                /* End QAS Modification */
 		return maj_stat;
 	    }
 	    *src_name = (gss_name_t)n;

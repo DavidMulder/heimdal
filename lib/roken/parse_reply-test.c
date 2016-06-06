@@ -42,9 +42,6 @@
 #include "roken.h"
 #include "resolve.h"
 
-struct dns_reply*
-parse_reply(const unsigned char *, size_t);
-
 enum { MAX_BUF = 36};
 
 static struct testcase {

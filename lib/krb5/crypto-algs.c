@@ -32,6 +32,7 @@
  */
 
 #include "krb5_locl.h"
+#include "../asn1/cms_asn1.h"
 
 #ifndef HEIMDAL_SMALLER
 #define DES3_OLD_ENCTYPE 1
@@ -63,6 +64,171 @@ int _krb5_num_checksums
  * these should currently be in reverse preference order.
  * (only relevant for !F_PSEUDO) */
 
+/* VAS Modification -- RC2 is needed for smart card */
+struct _RC2_params {
+    int maximum_effective_key;
+};
+
+static krb5_error_code
+rc2_get_params(krb5_context context,
+           const krb5_data *data,
+           void **params,
+           krb5_data *ivec)
+{
+    CMSRC2CBCParameter rc2params;
+    struct _RC2_params *p;
+    krb5_error_code ret;
+    size_t size;
+
+    ret = decode_CMSRC2CBCParameter(data->data, data->length, &rc2params, &size);
+    if (ret) {
+    krb5_set_error_message(context, ret, "Can't decode RC2 parameters");
+    return ret;
+    }
+    p = malloc(sizeof(*p));
+    if (p == NULL) {
+    free_CMSRC2CBCParameter(&rc2params);
+    krb5_set_error_message(context, ENOMEM, "malloc - out of memory");
+    return ENOMEM;
+    }
+    /* XXX  */
+    switch(rc2params.rc2ParameterVersion) {
+    case 160:
+    p->maximum_effective_key = 40;
+    break;
+    case 120:
+    p->maximum_effective_key = 64;
+    break;
+    case 58:
+    p->maximum_effective_key = 128;
+    break;
+
+    }
+    if (ivec)
+    ret = der_copy_octet_string(&rc2params.iv, ivec);
+    free_CMSRC2CBCParameter(&rc2params);
+    *params = p;
+
+    return ret;
+}
+
+static krb5_error_code
+rc2_set_params(krb5_context context,
+           const void *params,
+           const krb5_data *ivec,
+           krb5_data *data)
+{
+    CMSRC2CBCParameter rc2params;
+    const struct _RC2_params *p = params;
+    int maximum_effective_key = 128;
+    krb5_error_code ret;
+    size_t size;
+
+    memset(&rc2params, 0, sizeof(rc2params));
+
+    if (p)
+    maximum_effective_key = p->maximum_effective_key;
+
+    /* XXX */
+    switch(maximum_effective_key) {
+    case 40:
+    rc2params.rc2ParameterVersion = 160;
+    break;
+    case 64:
+    rc2params.rc2ParameterVersion = 120;
+    break;
+    case 128:
+    rc2params.rc2ParameterVersion = 58;
+    break;
+    }
+    ret = der_copy_octet_string(ivec, &rc2params.iv);
+    if (ret)
+    return ret;
+
+    ASN1_MALLOC_ENCODE(CMSRC2CBCParameter, data->data, data->length,
+               &rc2params, &size, ret);
+    if (ret == 0 && size != data->length)
+    krb5_abortx(context, "Internal asn1 encoder failure");
+    free_CMSRC2CBCParameter(&rc2params);
+
+    return ret;
+}
+
+static void
+rc2_schedule(krb5_context context,
+         struct _krb5_key_type *kt,
+         struct _krb5_key_data *kd,
+         const void *params)
+{
+    const struct _RC2_params *p = params;
+    int maximum_effective_key = 128;
+    if (p)
+    maximum_effective_key = p->maximum_effective_key;
+    RC2_set_key (kd->schedule->data,
+         kd->key->keyvalue.length,
+         kd->key->keyvalue.data,
+         maximum_effective_key);
+}
+/* End VAS Modification */
+
+/* VAS Modification */
+static krb5_error_code
+RC2_CBC_encrypt(krb5_context context,
+                struct _krb5_key_data *key,
+                void *data,
+                size_t len,
+                krb5_boolean encrypt,
+                int usage,
+                void *ivec)
+{
+    unsigned char local_ivec[8];
+    RC2_KEY *s = key->schedule->data;
+    if(ivec == NULL) {
+        ivec = &local_ivec;
+        memset(local_ivec, 0, sizeof(local_ivec));
+    }
+    RC2_cbc_encrypt(data, data, len, s, ivec, encrypt);
+    return 0;
+}
+/* End VAS Modification */
+
+/* VAS Modification -- RC2 is needed for smart card */
+static struct _krb5_key_type keytype_rc2 = {
+    KEYTYPE_RC2,
+    "rc2",
+    128,
+    16,
+    1,
+    sizeof(RC2_KEY),
+    NULL,
+    rc2_schedule,
+    NULL, /* XXX salt */
+    NULL,
+    rc2_get_params,
+    rc2_set_params
+};
+/* End VAS Modification */
+
+/* VAS Modification -- RC2 is required by smart card */
+static unsigned rc2CBC_num[] = { 1, 2, 840, 113549, 3, 2 };
+static heim_oid rc2CBC_oid = kcrypto_oid_enc(rc2CBC_num);
+static struct _krb5_encryption_type enctype_rc2_cbc_none = {
+    ETYPE_RC2_CBC_NONE,
+    "rc2-cbc-none",
+    &rc2CBC_oid,
+    8,
+    8,
+    0,
+    &keytype_rc2,
+    &_krb5_checksum_none,
+    NULL,
+    F_PSEUDO|F_PADCMS,
+    RC2_CBC_encrypt,
+    0,
+    NULL
+};
+/* End VAS Modification */
+
 struct _krb5_encryption_type *_krb5_etypes[] = {
     &_krb5_enctype_aes256_cts_hmac_sha1,
     &_krb5_enctype_aes128_cts_hmac_sha1,
@@ -81,7 +247,8 @@ struct _krb5_encryption_type *_krb5_etypes[] = {
     &_krb5_enctype_des_cfb64_none,
     &_krb5_enctype_des_pcbc_none,
 #endif
-    &_krb5_enctype_null
+    &_krb5_enctype_null,
+    &enctype_rc2_cbc_none /* VAS Modification -- added for smart card */
 };
 
 int _krb5_num_etypes = sizeof(_krb5_etypes) / sizeof(_krb5_etypes[0]);

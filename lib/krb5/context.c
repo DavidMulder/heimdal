@@ -222,6 +222,10 @@ init_context_from_config_file(krb5_context context)
     INIT_FIELD(context, int, large_msg_size, 1400, "large_message_size");
     INIT_FLAG(context, flags, KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME, TRUE, "dns_canonicalize_hostname");
     INIT_FLAG(context, flags, KRB5_CTX_F_CHECK_PAC, TRUE, "check_pac");
+    /* VAS Modification */
+    if( context->default_cc_name )
+        free( context->default_cc_name );
+    /* END VAS Modification */
     context->default_cc_name = NULL;
     context->default_cc_name_set = 0;
 
@@ -256,6 +260,7 @@ cc_ops_register(krb5_context context)
     krb5_cc_register(context, &krb5_acc_ops, TRUE);
 #endif
     krb5_cc_register(context, &krb5_fcc_ops, TRUE);
+    krb5_cc_register(context, &krb5_dcc_ops, TRUE);
     krb5_cc_register(context, &krb5_mcc_ops, TRUE);
 #ifdef HAVE_SCC
     krb5_cc_register(context, &krb5_scc_ops, TRUE);
@@ -374,6 +379,19 @@ init_context_once(void *ctx)
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_init_context(krb5_context *context)
 {
+    return _krb5_init_context_with_vasctx2(context, NULL, NULL);
+}
+
+/* VAS Modification (david.mulder@software.dell.com)
+ * We used to push in a vasctx here, and also an errmsg pointer.
+ * Now we ignore the vasctx, but return the error message.
+ * This function is exactly like krb5_init_context, which
+ * has been refactored to call this one.
+ */
+krb5_error_code _krb5_init_context_with_vasctx2( krb5_context *context,
+                                                 void         *vasctx,
+                                                 char         **krb5_errmsg )
+{
     static heim_base_once_t init_context = HEIM_BASE_ONCE_INIT;
     krb5_context p;
     krb5_error_code ret;
@@ -417,6 +435,17 @@ krb5_init_context(krb5_context *context)
 
 out:
     if(ret) {
+        size_t  len = 0;
+
+        /* If caller wants an appropriate error message, which we have this
+         * point (before torching our allocated context), then let him have it.
+         */
+        if( krb5_errmsg &&
+            p->error_string &&
+            (len = strlen(p->error_string)) )
+        {
+            *krb5_errmsg = strdup(p->error_string);
+        }
 	krb5_free_context(p);
 	p = NULL;
     } else {
@@ -596,6 +625,12 @@ krb5_free_context(krb5_context context)
 
     HEIMDAL_MUTEX_destroy(context->mutex);
     free(context->mutex);
+
+    if( context->rcache_ctx )
+    {
+        krb5_rc_destroy( context, context->rcache_ctx );
+    }
+
     if (context->flags & KRB5_CTX_F_SOCKETS_INITIALIZED) {
  	rk_SOCK_EXIT();
     }

@@ -48,6 +48,7 @@ _krb5_load_ccache_plugins(krb5_context context)
     if (code)
         return code;
 
+#if 0
     for (p = plist; p != NULL; p = _krb5_plugin_get_next(p)) {
         krb5_cc_ops * ccops;
         krb5_error_code c_load;
@@ -59,6 +60,7 @@ _krb5_load_ccache_plugins(krb5_context context)
                 code = c_load;
         }
     }
+#endif
 
     _krb5_plugin_free(plist);
 

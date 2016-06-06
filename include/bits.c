@@ -141,9 +141,13 @@ int main(int argc, char **argv)
 	}
 	f = fopen(argv[1], "w");
     }
+    /* VAS modification: don't put this in the header */
+#if 0
     fprintf(f, "/* %s -- this file was generated for %s by\n", fn, HOST);
     fprintf(f, "   %*s    %s */\n\n", (int)strlen(fn), "",
 	    "$Id$");
+#endif
+    /* End VAS Modification */
     fprintf(f, "#ifndef %s\n", hb);
     fprintf(f, "#define %s\n", hb);
     fprintf(f, "\n");

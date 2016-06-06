@@ -504,7 +504,30 @@ krb5_cc_set_default_name(krb5_context context, const char *name)
     char *p = NULL, *exp_p = NULL;
 
     if (name == NULL) {
+
 	const char *e = NULL;
+
+/* --- Begin VAS Modification --- */
+        if ( context->cc_generate_default_name_func )
+        {
+            if (context->default_cc_name)
+            {
+                free(context->default_cc_name);
+                context->default_cc_name = NULL;
+            }
+
+            return context->cc_generate_default_name_func( context,
+                                                           NULL,
+                                                           &(context->default_cc_name) );
+        }
+        /* The code below is just failover, but probably won't be called much because the
+           function pointer above is nearly always registered, see set_krb5ctx_function_ptrs()
+           in src/libs/api/ctx.c.  However, I've fixed the code below to properly support
+           default_cc_type again.  Unfortunately, libvas_krb5_cc_generate_default_name(),
+           which is registered in this function pointer, doesn't support it properly.  On Mac
+           it calls into the API CCache implementation, but on other platforms it just hacks
+           together a string pointing to the /tmp directory and returns it.  -- Dan P. */
+/* --- end VAS Modification --- */
 
 	if(!issuid()) {
 	    e = getenv("KRB5CCNAME");
@@ -1199,7 +1222,7 @@ krb5_cc_move(krb5_context context, krb5_ccache from, krb5_ccache to)
 
     if (strcmp(from->ops->prefix, to->ops->prefix) != 0) {
 	krb5_set_error_message(context, KRB5_CC_NOSUPP,
-			       N_("Moving credentials between diffrent "
+			       N_("Moving credentials between different "
 				 "types not yet supported", ""));
 	return KRB5_CC_NOSUPP;
     }

@@ -87,7 +87,9 @@ static struct testcase {
       0x08, 0xa5, 0x08, 0x41, 0x22, 0x9a, 0xd7, 0x98, 0xfa, 0xb9, 0x54,
       0x0c, 0x1b}
     },
-    {NULL, 0}
+/* Vintela modification */
+    {NULL, 0, {0}}
+/* End Vintela modification */
 };
 
 int
@@ -98,7 +100,9 @@ main(int argc, char **argv)
     int ret = 0;
 
     for (t = tests; t->str; ++t) {
-	int i;
+/* Vintela modification */
+	unsigned i;
+/* End Vintela modification */
 
 	ret = _krb5_n_fold (t->str, strlen(t->str), data, t->n);
 	if (ret)

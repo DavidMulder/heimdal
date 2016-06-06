@@ -167,7 +167,9 @@ parse_record(const unsigned char *data, const unsigned char *end_data,
 	return -1;
     }
     rr->type = type;
-    rr->class = class;
+/* Vintela modification */
+    rr->resource_class = class;
+/* End Vintela modification */
     rr->ttl = ttl;
     rr->size = size;
     switch(type){
@@ -467,7 +469,9 @@ parse_reply(const unsigned char *data, size_t len)
     p += status;
     r->q.type = (p[0] << 8 | p[1]);
     p += 2;
-    r->q.class = (p[0] << 8 | p[1]);
+/* Vintela modification */
+    r->q.dns_class = (p[0] << 8 | p[1]);
+/* End Vintela modification */
     p += 2;
 
     rr = &r->head;
@@ -665,7 +669,8 @@ rk_dns_srv_order(struct rk_dns_reply *r)
 	/* find the last record with the same priority and count the
            sum of all weights */
 	for(sum = 0, tt = ss; tt < srvs + num_srv; tt++) {
-	    assert(*tt != NULL);
+	    if(*tt == NULL)
+            continue;
 	    if((*tt)->u.srv->priority != (*ss)->u.srv->priority)
 		break;
 	    sum += (*tt)->u.srv->weight;

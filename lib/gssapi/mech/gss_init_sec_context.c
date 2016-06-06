@@ -28,6 +28,7 @@
 
 #include "mech_locl.h"
 
+gss_OID GSSAPI_LIB_VARIABLE GSS_MSKRB5_MECHANISM;
 static gss_cred_id_t
 _gss_mech_cred_find(gss_cred_id_t cred_handle, gss_OID mech_type)
 {
@@ -40,6 +41,13 @@ _gss_mech_cred_find(gss_cred_id_t cred_handle, gss_OID mech_type)
 	HEIM_SLIST_FOREACH(mc, &cred->gc_mc, gmc_link) {
 		if (gss_oid_equal(mech_type, mc->gmc_mech_oid))
 			return mc->gmc_cred;
+        /* VAS Modification - make GSS_MSKRB5_MECHANISM really mean
+         * GSS_KRB5_MECHANISM
+         */
+        if( gss_oid_equal(mech_type, GSS_MSKRB5_MECHANISM) &&
+            gss_oid_equal(mc->gmc_mech_oid, GSS_KRB5_MECHANISM) )
+            return mc->gmc_cred;
+        /* End VAS Modification */
 	}
 	return GSS_C_NO_CREDENTIAL;
 }

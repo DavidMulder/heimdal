@@ -205,6 +205,16 @@ krb5_parse_name_flags(krb5_context context,
     int first_at = 1;
     int enterprise = (flags & KRB5_PRINCIPAL_PARSE_ENTERPRISE);
 
+    /* VAS Modification -- SAP Validation was complaining    *
+     * that we should not be accepting empty principal names */
+    if( !name || (name && strlen(name) == 0) )
+    {
+        krb5_set_error_message(context, KRB5_PARSE_MALFORMED,
+                       "empty principal name");
+        return KRB5_PARSE_MALFORMED;
+    }
+    /* END VAS Modification john.bowers@quest.com */
+
     *principal = NULL;
 
 #define RFLAGS (KRB5_PRINCIPAL_PARSE_NO_REALM|KRB5_PRINCIPAL_PARSE_REQUIRE_REALM)
@@ -275,8 +285,17 @@ krb5_parse_name_flags(krb5_context context,
 	}else if((c == '/' && !enterprise) || c == '@'){
 	    if(got_realm){
 		ret = KRB5_PARSE_MALFORMED;
+            /* VAS Modification -- SAP validation was complaining that the
+             * original error wasn't accurate in all cases */
+            if( c == '/' ) {
 		krb5_set_error_message(context, ret,
 				       N_("part after realm in principal name", ""));
+            } else {
+               krb5_set_error_message(context, KRB5_PARSE_MALFORMED,
+                                      "Bad or inappropriately escaped '@' "
+                                       "symbols in realm name");
+            }
+            /* END VAS Modification john.bowers@quest.com */
 		goto exit;
 	    }else{
 		comp[n] = malloc(q - start + 1);
@@ -298,12 +317,18 @@ krb5_parse_name_flags(krb5_context context,
 	if(got_realm && (c == '/' || c == '\0')) {
 	    ret = KRB5_PARSE_MALFORMED;
 	    krb5_set_error_message(context, ret,
-				   N_("part after realm in principal name", ""));
+        /* VAS Modification -- SAP test verification states that        *
+         * the old error message was misleading.  john.bowers@quest.com */
+                    "principal name %s contains invalid characters", start ? start : "Not Set" );
+        /* End VAS Modification */
 	    goto exit;
 	}
 	*q++ = c;
     }
     if(got_realm){
+        /* VAS Modification */
+        int realm_size = q - start;
+        /* End VAS Modification */
 	if (flags & KRB5_PRINCIPAL_PARSE_NO_REALM) {
 	    ret = KRB5_PARSE_MALFORMED;
 	    krb5_set_error_message(context, ret,
@@ -311,6 +336,15 @@ krb5_parse_name_flags(krb5_context context,
 				      "expected to be without one", ""));
 	    goto exit;
 	}
+    /* VAS Modification -- SAP Validation suggests we should fail on       *
+     * principals like '@' which we were not doing. John.Bowers@quest.com  */
+    if( realm_size <= 0 )
+    {
+        krb5_set_error_message(context, KRB5_PARSE_MALFORMED, "empty realm");
+        ret = KRB5_PARSE_MALFORMED;
+        goto exit;
+    }
+    /* End VAS Modification */
 	realm = malloc(q - start + 1);
 	if (realm == NULL) {
 	    ret = ENOMEM;
@@ -320,6 +354,34 @@ krb5_parse_name_flags(krb5_context context,
 	}
 	memcpy(realm, start, q - start);
 	realm[q - start] = 0;
+
+    /* VAS Modification - wwilkes@vintela.com
+     * always upper case the realm name. */
+    /* Modifed by Seth Ellsworth. Lets not be too hasty.
+     * What if the customer is interacting with an MIT domain with mixed case, for
+     * example, Lehman.COM. So lets be very specific.
+     * If the first character is upper, and the next lower, and the very last
+     * one is upper, then its very unlikely the customer is mis-typing the domain case-wise,
+     * so leave it as-is. But in every other case, uppercase it. */
+    /* Even newer, now there is a vas.conf option jsut for this. */
+#if 0
+    /* Old styles */
+    if( !( isupper((int)realm[0]) &&
+                islower((int)realm[1]) &&
+                isupper((int)realm[strlen(realm) - 1] ) ) )
+        strupr( realm );
+#endif
+    {
+        const char *p;
+
+        p = krb5_config_get_string(context, NULL, "libvas", "mit-realm", NULL );
+        if( p && *p != '\0' && strcasecmp( p, realm ) == 0 )
+            strcpy( realm, p );
+        else
+            strupr( realm );
+    }
+    /* End VAS Modification */
+
     }else{
 	if (flags & KRB5_PRINCIPAL_PARSE_REQUIRE_REALM) {
 	    ret = KRB5_PARSE_MALFORMED;
@@ -355,6 +417,18 @@ krb5_parse_name_flags(krb5_context context,
     }
     if (enterprise)
 	(*principal)->name.name_type = KRB5_NT_ENTERPRISE_PRINCIPAL;
+    /* VAS Modification: According to MS, ALL tgt requests should be of type
+     * KRB5_NT_SRV_INST.  This fixes the broken case against a 2008 R2 RODC
+     * that yields a BAD_INTEGRITY error is you use a tgt that was requested
+     * with KRB5_NT_PRINCIPAL type to get a service ticket...
+     * Bug 21711.
+     * <jeff.webb@quest.com>
+     */
+    else if (ncomp > 1 && !strncasecmp(comp[0], KRB5_TGS_NAME, KRB5_TGS_NAME_SIZE))
+        (*principal)->name.name_type = KRB5_NT_SRV_INST;
+    else if (ncomp > 1 && !strncasecmp(comp[0], "host", 4))
+        (*principal)->name.name_type = KRB5_NT_SRV_HST;
+    /* END VAS Modification */
     else
 	(*principal)->name.name_type = KRB5_NT_PRINCIPAL;
     (*principal)->name.name_string.val = comp;
@@ -392,9 +466,14 @@ krb5_parse_name(krb5_context context,
     return krb5_parse_name_flags(context, name, 0, principal);
 }
 
+/* VAS Modification -- Remove the space character from  *
+ * quotable characters, as defined by rfc1964 2.1.3     *
+ * we should not escape a space character with a quote. *
+ * Change made for SAP GSSAPI test suite compliance     */
 static const char quotable_chars[] = " \n\t\b\\/@";
 static const char replace_chars[] = " ntb\\/@";
 static const char nq_chars[] = "    \\/@";
+/* End VAS Modification */
 
 #define add_char(BASE, INDEX, LEN, C) do { if((INDEX) < (LEN)) (BASE)[(INDEX)++] = (C); }while(0);
 
@@ -404,9 +483,15 @@ quote_string(const char *s, char *out, size_t idx, size_t len, int display)
     const char *p, *q;
     for(p = s; *p && idx < len; p++){
 	q = strchr(quotable_chars, *p);
+/* VAS Modification - SAP Certification - This is how it 
+ * always worked in 3.5 */
+#if 0
 	if (q && display) {
-	    add_char(out, idx, len, replace_chars[q - quotable_chars]);
-	} else if (q) {
+	    add_char(out, idx, len, nq_chars[q - quotable_chars]);
+	} else 
+#endif
+/* End VAS Modification */
+    if (q) {
 	    add_char(out, idx, len, '\\');
 	    add_char(out, idx, len, replace_chars[q - quotable_chars]);
 	}else
@@ -438,7 +523,7 @@ unparse_name_fixed(krb5_context context,
 	return ERANGE;
     }
 
-    for(i = 0; i < princ_num_comp(principal); i++){
+    for(i = 0; (size_t)i < princ_num_comp(principal); i++){ /* VAS Modification - explicit cast */
 	if(i)
 	    add_char(name, idx, len, '/');
 	idx = quote_string(princ_ncomp(principal, i), name, idx, len, display);
@@ -561,7 +646,7 @@ unparse_name(krb5_context context,
 	    len += 2*plen;
 	len++; /* '@' */
     }
-    for(i = 0; i < princ_num_comp(principal); i++){
+    for(i = 0; (size_t)i < princ_num_comp(principal); i++){ /* VAS Modification - explicit cast */
 	plen = strlen(princ_ncomp(principal, i));
 	if(strcspn(princ_ncomp(principal, i), quotable_chars) == plen)
 	    len += plen;
@@ -920,8 +1005,11 @@ krb5_principal_compare_any_realm(krb5_context context,
     size_t i;
     if(princ_num_comp(princ1) != princ_num_comp(princ2))
 	return FALSE;
-    for(i = 0; i < princ_num_comp(princ1); i++){
-	if(strcmp(princ_ncomp(princ1, i), princ_ncomp(princ2, i)) != 0)
+    for(i = 0; i < (int)princ_num_comp(princ1); i++){ /* VAS modification - added cast */
+    /* VAS modification - matt.peterson@quset.com
+     * change to case insensitive compare */
+	if(strcasecmp(princ_ncomp(princ1, i), princ_ncomp(princ2, i)) != 0)
+    /* End VAS Modification */
 	    return FALSE;
     }
     return TRUE;
@@ -935,7 +1023,7 @@ _krb5_principal_compare_PrincipalName(krb5_context context,
     size_t i;
     if (princ_num_comp(princ1) != princ2->name_string.len)
 	return FALSE;
-    for(i = 0; i < princ_num_comp(princ1); i++){
+    for(i = 0; (size_t)i < princ_num_comp(princ1); i++){ /* VAS Modification - explicit cast */
 	if(strcmp(princ_ncomp(princ1, i), princ2->name_string.val[i]) != 0)
 	    return FALSE;
     }
@@ -987,7 +1075,9 @@ krb5_realm_compare(krb5_context context,
 		   krb5_const_principal princ1,
 		   krb5_const_principal princ2)
 {
-    return strcmp(princ_realm(princ1), princ_realm(princ2)) == 0;
+    /** Changed by Matt.Peterson@quest.com **/
+    return strcasecmp(princ_realm(princ1), princ_realm(princ2)) == 0;
+    /** End Change (changed to case insensitive) */
 }
 
 /**
@@ -1006,7 +1096,7 @@ krb5_principal_match(krb5_context context,
 	return FALSE;
     if(fnmatch(princ_realm(pattern), princ_realm(princ), 0) != 0)
 	return FALSE;
-    for(i = 0; i < princ_num_comp(princ); i++){
+    for(i = 0; i < (int)princ_num_comp(princ); i++){    /* VAS modification - added cast */
 	if(fnmatch(princ_ncomp(pattern, i), princ_ncomp(princ, i), 0) != 0)
 	    return FALSE;
     }
@@ -1062,8 +1152,17 @@ krb5_sname_to_principal (krb5_context context,
     if(type == KRB5_NT_SRV_HST) {
 	ret = krb5_expand_hostname_realms (context, hostname,
 					   &host, &realms);
+    /* Quest Modification: <jeff.webb@quest.com>
+     * krb5_expand_hostname_realms() could fail after allocating memory
+     * for the new_hostname argument, so we need to check and free it
+     * if necessary.
+     */
 	if (ret)
+    {
+        if (host)  free (host);
 	    return ret;
+    }
+    /* End of Quest Modification */
 	strlwr(host);
 	hostname = host;
     } else {

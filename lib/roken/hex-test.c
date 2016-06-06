@@ -36,6 +36,10 @@
 #include "roken.h"
 #include <hex.h>
 
+/* VAS Modification: Added all fields for the final (NULL) entry in tests[],
+ * and change len from an int to a size_t
+ */
+
 int
 main(int argc, char **argv)
 {
@@ -55,11 +59,11 @@ main(int argc, char **argv)
 	{ "abcdef", 6, "616263646566" },
 	{ "abcdefg", 7, "61626364656667" },
 	{ "=", 1, "3D" },
-	{ NULL }
+	{ NULL, 0, NULL }
     };
     for(t = tests; t->data; t++) {
 	char *str;
-	int len;
+	size_t len;
 	len = hex_encode(t->data, t->len, &str);
 	if(strcmp(str, t->result) != 0) {
 	    fprintf(stderr, "failed test %d: %s != %s\n", numtest,
@@ -84,7 +88,7 @@ main(int argc, char **argv)
 
     {
 	unsigned char buf[2] = { 0, 0xff } ;
-	int len;
+	size_t len;
 
 	len = hex_decode("A", buf, 1);
 	if (len != 1) {

@@ -34,10 +34,52 @@
  */
 
 #include "krb5_locl.h"
-#include <krb5_ccapi.h>
 #ifdef HAVE_DLFCN_H
 #include <dlfcn.h>
 #endif
+
+/* VAS Modification -- John Bowers
+ * On OSX (which is conincidentally the only platform on which this code really 
+ * matters), we will use the system krb5_ccapi header.  There are a bunch of 
+ * problems this solves for 10.6, but realistically this is they way it should
+ * be done anyhow.  NOTE.... This required all the function table pointers to 
+ * be renamed from "func" to "functions".  Since this would have involved commenting
+ * 50+ different locations, all of these changes are untagged with the traditional
+ * VAS modification tag */
+#ifdef DARWIN
+#include <CredentialsCache.h>
+
+typedef cc_int32 
+(*cc_initialize_func)(cc_context_t*, cc_int32, cc_int32 *, char const **);
+
+#define    KRB5_CCAPI_TKT_FLG_FORWARDABLE          0x40000000
+#define    KRB5_CCAPI_TKT_FLG_FORWARDED            0x20000000
+#define    KRB5_CCAPI_TKT_FLG_PROXIABLE            0x10000000
+#define    KRB5_CCAPI_TKT_FLG_PROXY            0x08000000
+#define    KRB5_CCAPI_TKT_FLG_MAY_POSTDATE         0x04000000
+#define    KRB5_CCAPI_TKT_FLG_POSTDATED            0x02000000
+#define    KRB5_CCAPI_TKT_FLG_INVALID          0x01000000
+#define    KRB5_CCAPI_TKT_FLG_RENEWABLE            0x00800000
+#define    KRB5_CCAPI_TKT_FLG_INITIAL          0x00400000
+#define    KRB5_CCAPI_TKT_FLG_PRE_AUTH         0x00200000
+#define    KRB5_CCAPI_TKT_FLG_HW_AUTH          0x00100000
+#define    KRB5_CCAPI_TKT_FLG_TRANSIT_POLICY_CHECKED   0x00080000
+#define    KRB5_CCAPI_TKT_FLG_OK_AS_DELEGATE       0x00040000
+#define    KRB5_CCAPI_TKT_FLG_ANONYMOUS            0x00020000
+
+
+//On 10.4 these errors don't exist in the system CredentialsCache.h
+#ifndef ccErrBadInternalMessage
+#define ccErrBadInternalMessage 227
+#endif
+#ifndef ccErrNotImplemented
+#define ccErrNotImplemented 228
+#endif
+
+#else
+#include <krb5_ccapi.h>
+#endif
+/* END VAS Modification */
 
 #ifndef KCM_IS_API_CACHE
 
@@ -60,29 +102,65 @@ static krb5_error_code KRB5_CALLCONV acc_close(krb5_context, krb5_ccache);
 
 #define ACACHE(X) ((krb5_acc *)(X)->data.data)
 
+/* VAS Modification - jbowers, tperciva
+ * Try to provide more helpful error messages when ccapi functions fail.
+ * KRB5_FCC_INTERNAL is used as the "default" error code. Feel free to
+ * find better KRB5_* error codes.
+ */
 static const struct {
     cc_int32 error;
     krb5_error_code ret;
+    const char *string;
 } cc_errors[] = {
-    { ccErrBadName,		KRB5_CC_BADNAME },
-    { ccErrCredentialsNotFound,	KRB5_CC_NOTFOUND },
-    { ccErrCCacheNotFound,	KRB5_FCC_NOFILE },
-    { ccErrContextNotFound,	KRB5_CC_NOTFOUND },
-    { ccIteratorEnd,		KRB5_CC_END },
-    { ccErrNoMem,		KRB5_CC_NOMEM },
-    { ccErrServerUnavailable,	KRB5_CC_NOSUPP },
-    { ccErrInvalidCCache,	KRB5_CC_BADNAME },
-    { ccNoError,		0 }
+    { ccNoError,       0,          "No error" },
+    { ccIteratorEnd,       KRB5_CC_END,        "Iterator end" },
+    { ccErrBadParam,       KRB5_FCC_INTERNAL,  "Bad parameter" },
+    { ccErrNoMem,      KRB5_CC_NOMEM,      "Out of memory" },
+    { ccErrInvalidContext, KRB5_FCC_INTERNAL,  "Invalid context" },
+    { ccErrInvalidCCache,  KRB5_CC_BADNAME,    "Invalid credential cache" },
+    { ccErrInvalidString,  KRB5_FCC_INTERNAL,  "Invalid string" },
+    { ccErrInvalidCredentials, KRB5_FCC_INTERNAL,  "Invalid credentials" },
+    { ccErrInvalidCCacheIterator,KRB5_FCC_INTERNAL,    "Invalid credential cache iterator" },
+    { ccErrInvalidLock,        KRB5_FCC_INTERNAL,  "Invalid lock" },
+    { ccErrBadName,        KRB5_CC_BADNAME,    "Bad name" },
+    { ccErrBadCredentialsVersion,KRB5_FCC_INTERNAL,    "Bad credentials version" },
+    { ccErrBadAPIVersion,  KRB5_FCC_INTERNAL,  "Bad API version" },
+    { ccErrContextLocked,  KRB5_FCC_INTERNAL,  "Context locked" },
+    { ccErrContextUnlocked,    KRB5_FCC_INTERNAL,  "Context unlocked" },
+    { ccErrCCacheLocked,   KRB5_FCC_INTERNAL,  "Credential cache locked" },
+    { ccErrCCacheUnlocked, KRB5_FCC_INTERNAL,  "Credential cache unlocked" },
+    { ccErrBadLockType,        KRB5_FCC_INTERNAL,  "Bad lock type" },
+    { ccErrNeverDefault,   KRB5_FCC_INTERNAL,  "Never default" },
+    { ccErrCredentialsNotFound,    KRB5_CC_NOTFOUND,   "Credentials not found" },
+    { ccErrCCacheNotFound, KRB5_FCC_NOFILE,    "Credential cache not found" },
+    { ccErrContextNotFound,    KRB5_CC_NOTFOUND,   "Context not found" },
+    /* Heimdal uses KRB5_CC_NOSUPP for ServerUnavailable,
+     * but VAS uses the more logical KRB5_CC_IO. */
+    { ccErrServerUnavailable,  KRB5_CC_IO,     "Server unavailable" },
+    { ccErrServerInsecure, KRB5_FCC_INTERNAL,  "Server insecure" },
+    { ccErrServerCantBecomeUID,    KRB5_FCC_INTERNAL,  "Server can't become UID" },
+    { ccErrTimeOffsetNotSet,   KRB5_FCC_INTERNAL,  "Time offset not set" },
+    { ccErrBadInternalMessage, KRB5_FCC_INTERNAL,  "Bad internal message" },
+    { ccErrNotImplemented, KRB5_CC_NOSUPP,     "Not implemented" },
 };
 
 static krb5_error_code
-translate_cc_error(krb5_context context, cc_int32 error)
+translate_cc_error(krb5_context context, cc_int32 error, const char *error_string)
 {
     size_t i;
     krb5_clear_error_message(context);
-    for(i = 0; i < sizeof(cc_errors)/sizeof(cc_errors[0]); i++)
-	if (cc_errors[i].error == error)
+
+    for(i = 0; i < sizeof(cc_errors)/sizeof(cc_errors[0]); i++) {
+        if (cc_errors[i].error == error) {
+            krb5_set_error_message( context, cc_errors[i].ret, "%s",
+                error_string ? error_string : cc_errors[i].string);
 	    return cc_errors[i].ret;
+        }
+    }
+
+    krb5_set_error_message( context, KRB5_FCC_INTERNAL, "Unknown CCAPI error %d", error );
+/* End VAS Modification */
+
     return KRB5_FCC_INTERNAL;
 }
 
@@ -113,7 +191,16 @@ init_ccapi(krb5_context context)
 #endif
     }
 
-#ifdef HAVE_DLOPEN
+/** Vintela modification - wynn.wilkes@quest.com
+ * dlopen isn't always available on HP-UX - our build machines have it.
+ * We don't currently use any of this cc stuff, so it's easiest to 
+ * disable it on HPUX as it's a compile time decision, and the problem
+ * comes when some platforms don't have dlopen, just the shl_load() 
+ * routines. 
+ **/
+#if defined(HAVE_DLOPEN) && !defined(HPUX)
+/* End Vintela Modification */
+    cc_handle = dlopen(lib, 0);
 
 #ifndef RTLD_LAZY
 #define RTLD_LAZY 0
@@ -331,6 +418,23 @@ free_ccred(cc_credentials_v5_t *cred)
     memset(cred, 0, sizeof(*cred));
 }
 
+static cc_int32
+get_cc_name(krb5_acc *a)
+{
+    cc_string_t name;
+    cc_int32 error;
+
+    error = (*a->ccache->functions->get_name)(a->ccache, &name);
+    if (error)
+    return error;
+
+    a->cache_name = strdup(name->data);
+    (*name->functions->release)(name);
+    if (a->cache_name == NULL)
+    return ccErrNoMem;
+    return ccNoError;
+}
+
 static krb5_error_code
 make_ccred_from_cred(krb5_context context,
 		     const krb5_creds *incred,
@@ -375,7 +479,7 @@ make_ccred_from_cred(krb5_context context,
 	goto fail;
     }
 
-    for (i = 0; i < incred->addresses.len; i++) {
+    for (i = 0; (size_t)i < incred->addresses.len; i++) { /* VAS Modification - explicit cast */
 	cc_data *addr;
 	addr = malloc(sizeof(*addr));
 	if (addr == NULL) {
@@ -435,24 +539,14 @@ fail:
     return ret;
 }
 
-static cc_int32
-get_cc_name(krb5_acc *a)
-{
-    cc_string_t name;
-    cc_int32 error;
-
-    error = (*a->ccache->func->get_name)(a->ccache, &name);
-    if (error)
-	return error;
-
-    a->cache_name = strdup(name->data);
-    (*name->func->release)(name);
-    if (a->cache_name == NULL)
-	return ccErrNoMem;
-    return ccNoError;
-}
-
-
+#if 0
+/* VAS Modification
+ * In Heimdal 0.7, there was no concept of "Switching" ccaches, whatever
+ * ccache you resolved was that user's default.  None of our code takes into
+ * account the possibility of having a non default ccache.  So if we are going
+ * to just create a new ccache like we do in acc_get_name() it had better be a 
+ * default ccache to avoid screwing up all of our existing code.
+ */
 static const char* KRB5_CALLCONV
 acc_get_name(krb5_context context,
 	     krb5_ccache id)
@@ -474,7 +568,7 @@ acc_get_name(krb5_context context,
 	if (ret)
 	    return NULL;
 
-	error = (*a->context->func->create_new_ccache)(a->context,
+	error = (*a->context->functions->create_new_ccache)(a->context,
 						       cc_credentials_v5,
 						       name,
 						       &a->ccache);
@@ -489,6 +583,42 @@ acc_get_name(krb5_context context,
 
     return a->cache_name;
 }
+#else
+static const char*
+acc_get_name(krb5_context context,
+             krb5_ccache id)
+{
+    krb5_acc *a = ACACHE(id);
+    int32_t  error;
+    const char* name = NULL;
+
+    if( a->cache_name )
+    {
+        name = a->cache_name;
+}
+    else
+    if( a->ccache && a->ccache->functions )
+    {
+        error = get_cc_name( a );
+        name = a->cache_name;
+    }
+    else
+    {
+        error = (*a->context->functions->open_default_ccache)(a->context, &a->ccache);
+        if (error == ccNoError)
+        {
+            error = get_cc_name(a);
+            name = a->cache_name;
+        }
+    }
+    if (!name)
+    {
+        krb5_set_error_message(context, ENOMEM, "malloc: out of memory");
+    }
+    return name;
+}
+#endif
+/* END VAS Modification */
 
 static krb5_error_code KRB5_CALLCONV
 acc_alloc(krb5_context context, krb5_ccache *id)
@@ -512,7 +642,7 @@ acc_alloc(krb5_context context, krb5_ccache *id)
     error = (*init_func)(&a->context, ccapi_version_3, NULL, NULL);
     if (error) {
 	krb5_data_free(&(*id)->data);
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL );
     }
 
     a->cache_name = NULL;
@@ -520,6 +650,8 @@ acc_alloc(krb5_context context, krb5_ccache *id)
     return 0;
 }
 
+/* VAS Modification */
+#if 0
 static krb5_error_code KRB5_CALLCONV
 acc_resolve(krb5_context context, krb5_ccache *id, const char *res)
 {
@@ -533,17 +665,17 @@ acc_resolve(krb5_context context, krb5_ccache *id, const char *res)
 
     a = ACACHE(*id);
 
-    error = (*a->context->func->open_ccache)(a->context, res, &a->ccache);
+    error = (*a->context->functions->open_ccache)(a->context, res, &a->ccache);
     if (error == ccNoError) {
 	cc_time_t offset;
 	error = get_cc_name(a);
 	if (error != ccNoError) {
 	    acc_close(context, *id);
 	    *id = NULL;
-	    return translate_cc_error(context, error);
+	    return translate_cc_error(context, error, NULL );
 	}
 
-	error = (*a->ccache->func->get_kdc_time_offset)(a->ccache,
+	error = (*a->ccache->functions->get_kdc_time_offset)(a->ccache,
 							cc_credentials_v5,
 							&offset);
 	if (error == 0)
@@ -554,11 +686,147 @@ acc_resolve(krb5_context context, krb5_ccache *id, const char *res)
 	a->cache_name = NULL;
     } else {
 	*id = NULL;
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL );
     }
 
     return 0;
 }
+#else
+
+static krb5_error_code
+get_default_principal(krb5_context context, char **p)
+{
+    krb5_error_code ret = 0;
+    krb5_principal principal;
+
+    *p = NULL;
+
+    ret = _krb5_get_default_principal_local(context, &principal);
+    if (!ret)
+    {
+        ret = krb5_unparse_name(context, principal, p);
+        krb5_free_principal(context, principal);
+    }
+    else
+    {
+        /* This is a massive hack for BUG#25932 - Dan P
+         *
+         * I tried to figure out how to solve this correctly, but it just
+         * requires too much effort to remove all of the default credential
+         * cache assumptions that are made throughout QAS.
+         *
+         * In the case of the API cache, The hack for acc_resolve will only
+         * allow you to create a default credential cache if you can 
+         * generate a default principal name for the user authenticating.
+         * Can't be done if you're realm is not configured in vas.conf. In
+         * the end, it doesn't matter because the code in id_cred.c just
+         * blows the default credential cache away when you're logging
+         * in (see section marked "TRICKY and IMPORTANT").
+         * 
+         * If this same code gets called while you are joined to the domain
+         * and you're logged in as a local user (such as luser) this just
+         * returns luser@REALM.NAME, which in most cases doesn't exist
+         * anyway or even worse has the possibility of matching the
+         * principal name of a different employee at your company. 
+         */ 
+        *p = strdup( "ignoreme@see25932" );
+    }
+    return 0;
+}
+
+
+/* The basic change here is that we have to make sure that we init the default
+ * ccache if the name passed in matches the default ccache name (as aqcuired 
+ * by calling the ccapi get_default_ccache_name function.  If we pass in some
+ * other value make sure the ccache is created as well instead of failing
+ * if it is not 
+ */
+static krb5_error_code
+acc_resolve(krb5_context context, krb5_ccache *id, const char *res)
+{
+    krb5_error_code ret;
+    cc_int32 error;
+    krb5_acc *a;
+    cc_string_t name;
+
+    ret = acc_alloc(context, id);
+    if (ret)
+        return ret;
+
+    a = ACACHE(*id);
+
+    (*a->context->functions->get_default_ccache_name)(a->context, &name);
+	
+    if ( res == NULL || res[0] == '\0' || strlen(res) == 0 || 
+         (name && name->data && strcasecmp( res, name->data ) == 0) ) 
+    {
+        error = (*a->context->functions->open_default_ccache)(a->context,
+                                                         &a->ccache);
+        if (error == ccErrCCacheNotFound) 
+        {
+            char *p;
+            ret = get_default_principal(context, &p);
+            if (ret == 0) 
+            {
+                error = (*a->context->functions->create_default_ccache)(a->context,
+                                                                   cc_credentials_v5,
+                                                                   p,
+                                                                   &a->ccache);
+                free(p);
+            }
+        }
+    } 
+    else 
+    {
+        error = (*a->context->functions->open_ccache)(a->context, res, &a->ccache);
+        if (error == ccErrCCacheNotFound) 
+        {
+            char *p;
+            ret = get_default_principal(context, &p);
+            if (ret == 0) 
+            {
+                error = (*a->context->functions->create_ccache)( a->context,
+                                                            res,
+                                                            cc_credentials_v5,
+                                                            p,
+                                                            &a->ccache);
+                #if 0
+                if( error == 0 )
+                {
+                    error = (*a->ccache->functions->set_default)(a->ccache);
+                }
+                #endif
+                free(p);
+            }
+        }
+    }
+
+    if( error == 0 )
+    {
+        get_cc_name(a);
+    }
+    else
+    {
+        *id = NULL;
+        return translate_cc_error(context, error, NULL);
+    }
+
+    if (a->cache_name == NULL) {
+        acc_close(context, *id);
+        *id = NULL;
+        krb5_set_error_message(context, ENOMEM, "malloc: out of memory");
+        return ENOMEM;
+    }
+
+    if( name )
+    {
+        (*name->functions->release)(name);
+    }
+
+    return 0;
+}
+#endif
+/* END VAS Modification */
 
 static krb5_error_code KRB5_CALLCONV
 acc_gen_new(krb5_context context, krb5_ccache *id)
@@ -578,8 +846,10 @@ acc_gen_new(krb5_context context, krb5_ccache *id)
     return 0;
 }
 
+/* VAS Modification -- Alternate method for initialization that works around  * 
+ * a MacOS 10.5 bug...                                                        */
 static krb5_error_code KRB5_CALLCONV
-acc_initialize(krb5_context context,
+acc_initialize_2( krb5_context context,
 	       krb5_ccache id,
 	       krb5_principal primary_principal)
 {
@@ -587,49 +857,208 @@ acc_initialize(krb5_context context,
     krb5_error_code ret;
     int32_t error;
     char *name;
+    char* error_string = NULL;
 
     ret = krb5_unparse_name(context, primary_principal, &name);
     if (ret)
 	return ret;
 
-    if (a->cache_name == NULL) {
-	error = (*a->context->func->create_new_ccache)(a->context,
+    if (a->ccache == NULL)
+    {
+        error = (*a->context->functions->create_new_ccache)(a->context,
 						       cc_credentials_v5,
 						       name,
 						       &a->ccache);
+        asprintf( &error_string,
+                  "api ccache: create new ccache for %s failed with error %d",
+                  name, error );
+    }
+    else
+    {
+        error = (*a->ccache->functions->destroy)(a->ccache);
+        if( error )
+        {
+            asprintf( &error_string,
+                      "api ccache: destroy ccache failed with error %d",
+                      error );
+            ret = translate_cc_error(context, error, error_string);
+            if( error_string ) free( error_string );
+            return ret;
+        }
+        a->ccache = NULL;
+        error = (*a->context->functions->create_new_ccache)(a->context,
+						       cc_credentials_v5,
+						       name,
+						       &a->ccache);
+        if( error )
+        {
+            asprintf( &error_string,
+                      "api ccache: create new ccache for %s failed with error %d",
+                      name, error );
+        }
+    }
 	free(name);
+    ret = translate_cc_error(context, error, error_string);
+    if( error_string ) free( error_string );
+    return ret;
+}
+/* End VAS Modification */
+
+static krb5_error_code KRB5_CALLCONV
+acc_initialize(krb5_context context,
+           krb5_ccache id,
+           krb5_principal primary_principal)
+{
+    krb5_acc *a = ACACHE(id);
+    krb5_error_code ret;
+    int32_t error;
+    char *name = NULL;
+    /* VAS Modification - Handle a Mac OS X 10.5 bug in set principal
+     * (forward port of modification made in 0.7 by John Bowers)
+     */
+    cc_string_t curr_owner;
+    char *error_string = NULL;
+
+    ret = krb5_unparse_name(context, primary_principal, &name);
+
+    if (ret)
+    return ret;
+
+    if (a->cache_name == NULL) {
+    error = (*a->context->functions->create_new_ccache)(a->context,
+                               cc_credentials_v5,
+                               name,
+                               &a->ccache);
 	if (error == ccNoError)
+        {
 	    error = get_cc_name(a);
-    } else {
+        } 
+        else 
+        {
+            /* VAS Modification - set error string */
+            asprintf( &error_string,
+                      "api ccache: create new ccache for %s failed with error %d",
+                      name, error );
+            goto FINISHED;
+            /* End VAS Modification */
+        }
+    } 
+    else 
+    {
 	cc_credentials_iterator_t iter;
 	cc_credentials_t ccred;
-
-	error = (*a->ccache->func->new_credentials_iterator)(a->ccache, &iter);
-	if (error) {
-	    free(name);
-	    return translate_cc_error(context, error);
+        error = (*a->ccache->functions->new_credentials_iterator)(a->ccache, &iter);
+    if (error) 
+        {
+            /* VAS Modification - set error string */
+            asprintf( &error_string,
+                      "api ccache: new_credentials_iterator failed with %d",
+                      error );
+            goto FINISHED;
+            /* End VAS Modification */
 	}
 
-	while (1) {
-	    error = (*iter->func->next)(iter, &ccred);
-	    if (error)
+        while (1) 
+        {
+            error = (*iter->functions->next)(iter, &ccred);
+            /* VAS Modification */
+            if (error == ccIteratorEnd )
+            {
 		break;
-	    (*a->ccache->func->remove_credentials)(a->ccache, ccred);
-	    (*ccred->func->release)(ccred);
 	}
-	(*iter->func->release)(iter);
+            else
+            if( error == ccNoError )
+            {
+                asprintf( &error_string,
+                          "api_ccache: iterator_next returned an unexpected error (%d)",
+                          error );
+                goto FINISHED;
+            }
+            error = (*a->ccache->functions->remove_credentials)(a->ccache, ccred);
+            if( error == ccNoError )
+            {
+                error = (*ccred->functions->release)(ccred);
+                if( error != ccNoError )
+                {
+                    asprintf( &error_string,
+                              "api ccache: unexpected error releasing creds (%d)",
+                              error );
+                    goto FINISHED;
+                }
+            }
+            else
+            {
+                asprintf( &error_string,
+                          "api ccache: remove_credentials failed with unexpected error (%d)",
+                          error );
+                goto FINISHED;
+            }
+        }
+        error = (*iter->functions->release)(iter);
+        if( error != ccNoError )
+        {
+            asprintf( &error_string,
+                      "api ccache: unexpected error releasing iterator (%d)",
+                      error );
+            goto FINISHED;
+        }
 
-	error = (*a->ccache->func->set_principal)(a->ccache,
+        /* VAS Modification -- jbowers
+         * Mac OS 10.5 (at least in the seed) fails with an internal
+         * error when calling set principal.  We don't actually need
+         * to set the principal if it is already correct, so we are
+         * going to get the principal and see if they are the same first
+         * if they are, then there is no reason to call set and then
+         * possibly fail.  If it does fail try and work around the issue
+         * by destroying the cache and creating a new one with then given
+         * principal name. */
+        error = (*a->ccache->functions->get_principal)(a->ccache,
 						  cc_credentials_v5,
-						  name);
+                                                  &curr_owner );
+        if( error )
+        {
+            asprintf( &error_string,
+                      "api ccache: get principal for %s failed wth %d",
+                      name,
+                      error );
+            goto FINISHED;
     }
-
-    if (error == 0 && context->kdc_sec_offset)
-	error = (*a->ccache->func->set_kdc_time_offset)(a->ccache,
+        else
+        {
+            if( strcasecmp( name, curr_owner->data ) != 0 )
+            {
+                error = (*a->ccache->functions->set_principal)(a->ccache,
 							cc_credentials_v5,
-							context->kdc_sec_offset);
-
-    return translate_cc_error(context, error);
+                                                          name);
+                if( error == ccErrBadInternalMessage )
+                {
+                    /* This is  the stupid Leopard case where set principal *
+                     * fails with an internal error                         */
+                    free( name );
+                    name = NULL;
+                    (*curr_owner->functions->release)(curr_owner);
+                    return acc_initialize_2( context, id, primary_principal );
+                }
+                else
+                if( error )
+                {
+                    asprintf( &error_string,
+                              "api ccache: set principal for %s failed "
+                              "and default owner is %s (error %d)",
+                              name,
+                              curr_owner->data,
+                              error );
+                }
+                (*curr_owner->functions->release)(curr_owner);
+            }
+            /* End VAS Modification */
+        }
+    }
+FINISHED:
+    if (name) free( name );
+    ret = translate_cc_error(context, error, error_string);
+    if( error_string ) free( error_string );
+    return ret;
 }
 
 static krb5_error_code KRB5_CALLCONV
@@ -639,7 +1068,7 @@ acc_close(krb5_context context,
     krb5_acc *a = ACACHE(id);
 
     if (a->ccache) {
-	(*a->ccache->func->release)(a->ccache);
+	(*a->ccache->functions->release)(a->ccache);
 	a->ccache = NULL;
     }
     if (a->cache_name) {
@@ -647,7 +1076,7 @@ acc_close(krb5_context context,
 	a->cache_name = NULL;
     }
     if (a->context) {
-	(*a->context->func->release)(a->context);
+	(*a->context->functions->release)(a->context);
 	a->context = NULL;
     }
     krb5_data_free(&id->data);
@@ -662,14 +1091,14 @@ acc_destroy(krb5_context context,
     cc_int32 error = 0;
 
     if (a->ccache) {
-	error = (*a->ccache->func->destroy)(a->ccache);
+	error = (*a->ccache->functions->destroy)(a->ccache);
 	a->ccache = NULL;
     }
     if (a->context) {
-	error = (a->context->func->release)(a->context);
+	error = (a->context->functions->release)(a->context);
 	a->context = NULL;
     }
-    return translate_cc_error(context, error);
+    return translate_cc_error(context, error, NULL);
 }
 
 static krb5_error_code KRB5_CALLCONV
@@ -698,9 +1127,9 @@ acc_store_cred(krb5_context context,
     if (ret)
 	return ret;
 
-    error = (*a->ccache->func->store_credentials)(a->ccache, &cred);
+    error = (*a->ccache->functions->store_credentials)(a->ccache, &cred);
     if (error)
-	ret = translate_cc_error(context, error);
+	ret = translate_cc_error(context, error, NULL);
 
     free_ccred(&v5cred);
 
@@ -723,15 +1152,15 @@ acc_get_principal(krb5_context context,
 	return KRB5_CC_NOTFOUND;
     }
 
-    error = (*a->ccache->func->get_principal)(a->ccache,
+    error = (*a->ccache->functions->get_principal)(a->ccache,
 					      cc_credentials_v5,
 					      &name);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
 
     ret = krb5_parse_name(context, name->data, principal);
 
-    (*name->func->release)(name);
+    (*name->functions->release)(name);
     return ret;
 }
 
@@ -750,7 +1179,7 @@ acc_get_first (krb5_context context,
 	return KRB5_CC_NOTFOUND;
     }
 
-    error = (*a->ccache->func->new_credentials_iterator)(a->ccache, &iter);
+    error = (*a->ccache->functions->new_credentials_iterator)(a->ccache, &iter);
     if (error) {
 	krb5_clear_error_message(context);
 	return ENOENT;
@@ -772,18 +1201,18 @@ acc_get_next (krb5_context context,
     int32_t error;
 
     while (1) {
-	error = (*iter->func->next)(iter, &cred);
+	error = (*iter->functions->next)(iter, &cred);
 	if (error)
-	    return translate_cc_error(context, error);
+	    return translate_cc_error(context, error, NULL);
 	if (cred->data->version == cc_credentials_v5)
 	    break;
-	(*cred->func->release)(cred);
+	(*cred->functions->release)(cred);
     }
 
     ret = make_cred_from_ccred(context,
 			       cred->data->credentials.credentials_v5,
 			       creds);
-    (*cred->func->release)(cred);
+    (*cred->functions->release)(cred);
     return ret;
 }
 
@@ -793,7 +1222,7 @@ acc_end_get (krb5_context context,
 	     krb5_cc_cursor *cursor)
 {
     cc_credentials_iterator_t iter = *cursor;
-    (*iter->func->release)(iter);
+    (*iter->functions->release)(iter);
     return 0;
 }
 
@@ -829,18 +1258,18 @@ acc_remove_cred(krb5_context context,
 	return ret;
     }
 
-    error = (*a->ccache->func->new_credentials_iterator)(a->ccache, &iter);
+    error = (*a->ccache->functions->new_credentials_iterator)(a->ccache, &iter);
     if (error) {
 	free(server);
 	free(client);
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
     }
 
     ret = KRB5_CC_NOTFOUND;
     while (1) {
 	cc_credentials_v5_t *v5cred;
 
-	error = (*iter->func->next)(iter, &ccred);
+	error = (*iter->functions->next)(iter, &ccred);
 	if (error)
 	    break;
 
@@ -855,13 +1284,13 @@ acc_remove_cred(krb5_context context,
 	if (strcmp(v5cred->server, server) != 0)
 	    goto next;
 
-	(*a->ccache->func->remove_credentials)(a->ccache, ccred);
+	(*a->ccache->functions->remove_credentials)(a->ccache, ccred);
 	ret = 0;
     next:
-	(*ccred->func->release)(ccred);
+	(*ccred->functions->release)(ccred);
     }
 
-    (*iter->func->release)(iter);
+    (*iter->functions->release)(iter);
 
     if (ret)
 	krb5_set_error_message(context, ret,
@@ -913,10 +1342,10 @@ acc_get_cache_first(krb5_context context, krb5_cc_cursor *cursor)
     error = (*init_func)(&iter->context, ccapi_version_3, NULL, NULL);
     if (error) {
 	free(iter);
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
     }
 
-    error = (*iter->context->func->new_ccache_iterator)(iter->context,
+    error = (*iter->context->functions->new_ccache_iterator)(iter->context,
 							&iter->iter);
     if (error) {
 	free(iter);
@@ -936,19 +1365,19 @@ acc_get_cache_next(krb5_context context, krb5_cc_cursor cursor, krb5_ccache *id)
     krb5_error_code ret;
     int32_t error;
 
-    error = (*iter->iter->func->next)(iter->iter, &cache);
+    error = (*iter->iter->functions->next)(iter->iter, &cache);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
 
     ret = _krb5_cc_allocate(context, &krb5_acc_ops, id);
     if (ret) {
-	(*cache->func->release)(cache);
+	(*cache->functions->release)(cache);
 	return ret;
     }
 
     ret = acc_alloc(context, id);
     if (ret) {
-	(*cache->func->release)(cache);
+	(*cache->functions->release)(cache);
 	free(*id);
 	return ret;
     }
@@ -960,7 +1389,7 @@ acc_get_cache_next(krb5_context context, krb5_cc_cursor cursor, krb5_ccache *id)
     if (error) {
 	acc_close(context, *id);
 	*id = NULL;
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
     }
     return 0;
 }
@@ -970,9 +1399,9 @@ acc_end_cache_get(krb5_context context, krb5_cc_cursor cursor)
 {
     struct cache_iter *iter = cursor;
 
-    (*iter->iter->func->release)(iter->iter);
+    (*iter->iter->functions->release)(iter->iter);
     iter->iter = NULL;
-    (*iter->context->func->release)(iter->context);
+    (*iter->context->functions->release)(iter->context);
     iter->context = NULL;
     free(iter);
     return 0;
@@ -988,26 +1417,26 @@ acc_move(krb5_context context, krb5_ccache from, krb5_ccache to)
     if (ato->ccache == NULL) {
 	cc_string_t name;
 
-	error = (*afrom->ccache->func->get_principal)(afrom->ccache,
+	error = (*afrom->ccache->functions->get_principal)(afrom->ccache,
 						      cc_credentials_v5,
 						      &name);
 	if (error)
-	    return translate_cc_error(context, error);
+	    return translate_cc_error(context, error, NULL );
 
-	error = (*ato->context->func->create_new_ccache)(ato->context,
+	error = (*ato->context->functions->create_new_ccache)(ato->context,
 							 cc_credentials_v5,
 							 name->data,
 							 &ato->ccache);
-	(*name->func->release)(name);
+	(*name->functions->release)(name);
 	if (error)
-	    return translate_cc_error(context, error);
+	    return translate_cc_error(context, error, NULL );
     }
 
-    error = (*ato->ccache->func->move)(afrom->ccache, ato->ccache);
+    error = (*ato->ccache->functions->move)(afrom->ccache, ato->ccache);
 
     acc_destroy(context, from);
 
-    return translate_cc_error(context, error);
+    return translate_cc_error(context, error, NULL );
 }
 
 static krb5_error_code KRB5_CALLCONV
@@ -1024,17 +1453,17 @@ acc_get_default_name(krb5_context context, char **str)
 
     error = (*init_func)(&cc, ccapi_version_3, NULL, NULL);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL );
 
-    error = (*cc->func->get_default_ccache_name)(cc, &name);
+    error = (*cc->functions->get_default_ccache_name)(cc, &name);
     if (error) {
-	(*cc->func->release)(cc);
-	return translate_cc_error(context, error);
+	(*cc->functions->release)(cc);
+	return translate_cc_error(context, error, NULL );
     }
 
     error = asprintf(str, "API:%s", name->data);
-    (*name->func->release)(name);
-    (*cc->func->release)(cc);
+    (*name->functions->release)(name);
+    (*cc->functions->release)(cc);
 
     if (error < 0 || *str == NULL) {
 	krb5_set_error_message(context, ENOMEM, N_("malloc: out of memory", ""));
@@ -1055,9 +1484,9 @@ acc_set_default(krb5_context context, krb5_ccache id)
 	return KRB5_CC_NOTFOUND;
     }
 
-    error = (*a->ccache->func->set_default)(a->ccache);
+    error = (*a->ccache->functions->set_default)(a->ccache);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL );
 
     return 0;
 }
@@ -1075,9 +1504,9 @@ acc_lastchange(krb5_context context, krb5_ccache id, krb5_timestamp *mtime)
 	return KRB5_CC_NOTFOUND;
     }
 
-    error = (*a->ccache->func->get_change_time)(a->ccache, &t);
+    error = (*a->ccache->functions->get_change_time)(a->ccache, &t);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL );
 
     *mtime = t;
 

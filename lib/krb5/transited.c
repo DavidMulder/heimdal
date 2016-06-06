@@ -418,7 +418,7 @@ krb5_check_transited(krb5_context context,
 					client_realm,
 					server_realm,
 					NULL);
-    for(i = 0; i < num_realms; i++) {
+    for(i = 0; (unsigned) i < num_realms; i++) { /* VAS Modification - explicit cast */
 	for(p = tr_realms; p && *p; p++) {
 	    if(strcmp(*p, realms[i]) == 0)
 		break;
@@ -453,7 +453,7 @@ krb5_check_transited_realms(krb5_context context,
     if(bad_realms == NULL)
 	return 0;
 
-    for(i = 0; i < num_realms; i++) {
+    for(i = 0; (unsigned)i < num_realms; i++) { /* VAS Modification - explicit cast */
 	char **p;
 	for(p = bad_realms; *p; p++)
 	    if(strcmp(*p, realms[i]) == 0) {

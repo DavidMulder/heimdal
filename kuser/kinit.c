@@ -95,8 +95,10 @@ static struct getargs args[] = {
      * 4:
      * 9:
      */
+#ifdef KRB4
     { "afslog", 	0  , arg_flag, &do_afslog,
       NP_("obtain afs tokens", ""), NULL },
+#endif
 
     { "cache", 		'c', arg_string, &cred_cache,
       NP_("credentials cache", ""), "cachename" },
@@ -484,7 +486,7 @@ get_new_tickets(krb5_context context,
     if(etype_str.num_strings) {
 	int i;
 
-	enctype = malloc(etype_str.num_strings * sizeof(*enctype));
+	enctype = (krb5_enctype *) malloc(etype_str.num_strings * sizeof(*enctype));
 	if(enctype == NULL)
 	    errx(1, "out of memory");
 	for(i = 0; i < etype_str.num_strings; i++) {
@@ -580,7 +582,7 @@ get_new_tickets(krb5_context context,
     }
 
     if(ticket_life != 0) {
-	if(abs(cred.times.endtime - cred.times.starttime - ticket_life) > 30) {
+	if(labs(cred.times.endtime - cred.times.starttime - ticket_life) > 30) {
 	    char life[64];
 	    unparse_time_approx(cred.times.endtime - cred.times.starttime,
 				life, sizeof(life));
@@ -588,7 +590,7 @@ get_new_tickets(krb5_context context,
 	}
     }
     if(renew_life) {
-	if(abs(cred.times.renew_till - cred.times.starttime - renew) > 30) {
+	if(labs(cred.times.renew_till - cred.times.starttime - renew) > 30) {
 	    char life[64];
 	    unparse_time_approx(cred.times.renew_till - cred.times.starttime,
 				life, sizeof(life));
@@ -694,7 +696,7 @@ struct renew_ctx {
 static time_t
 renew_func(void *ptr)
 {
-    struct renew_ctx *ctx = ptr;
+    struct renew_ctx *ctx = (struct renew_ctx *) ptr;
     krb5_error_code ret;
     time_t expire;
     int new_tickets = 0;

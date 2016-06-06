@@ -82,7 +82,7 @@ unix_seed(const void *indata, int size)
     if (fd < 0)
 	return;
 
-    write(fd, indata, size);
+    if(write(fd, indata, size)){}
     close(fd);
 
 }

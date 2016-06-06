@@ -52,19 +52,16 @@ __RCSID("$NetBSD: term.c,v 1.57 2009/12/30 22:37:40 christos Exp $");
 #include <stdlib.h>
 #include <unistd.h>
 #include <limits.h>
-#ifdef HAVE_TERMCAP_H
-#include <termcap.h>
-#endif
-#ifdef HAVE_CURSES_H
-#include <curses.h>
-#elif HAVE_NCURSES_H
-#include <ncurses.h>
-#endif
+
+#define tputs(str, x, y) printf("%s\n", str)
+#define tgoto(str, x, y) str
+#define tgetflag(x) 0
+#define tgetent(x, y) 0
+#define tgetnum(x) -1
+#define tgetstr(x, y) NULL
+
 /* Solaris's term.h does horrid things. */
 
-#if defined(HAVE_TERM_H) && !defined(__sun)
-#include <term.h>
-#endif
 #include <sys/types.h>
 #include <sys/ioctl.h>
 

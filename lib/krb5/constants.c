@@ -36,6 +36,7 @@
 #include "krb5_locl.h"
 
 KRB5_LIB_VARIABLE const char *krb5_config_file =
+#if 0  /* disable by Wynn for now to avoid potential conflicts with the system krb5.conf file */
 #ifdef __APPLE__
 "~/Library/Preferences/com.apple.Kerberos.plist" PATH_SEP
 "/Library/Preferences/com.apple.Kerberos.plist" PATH_SEP
@@ -50,6 +51,11 @@ PATH_SEP "%{WINDOWS}/krb5.ini"
 #else
 PATH_SEP "/etc/krb5.conf"
 #endif
+#endif
+/* VAS Modification - wwilkes@vintela.com
+ * we use vas.conf in the sysconfdir. There's only one option to simplify support */
+SYSCONFDIR "/vas.conf"
+/* End VAS Modification */
 ;
 
 KRB5_LIB_VARIABLE const char *krb5_defkeyname = KEYTAB_DEFAULT;

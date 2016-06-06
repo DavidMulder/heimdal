@@ -74,7 +74,10 @@ expand_hostname(krb5_context context, const char *host)
 static int
 test_expand_hostname(krb5_context context)
 {
-    int i, errors = 0;
+/* Vintela modification */
+    unsigned i;
+    int errors = 0;
+/* End Vintela modification */
 
     struct t {
 	krb5_error_code ret;

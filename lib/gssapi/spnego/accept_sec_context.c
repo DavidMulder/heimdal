@@ -349,11 +349,11 @@ select_mech(OM_uint32 *minor_status, MechType *mechType, int verify_p,
     if (ret)
 	    return (ret);
 
-    for (i = 0; i < mechs->count; i++)
+    for (i = 0; (size_t)i < mechs->count; i++) /* VAS Modification - explicit cast */
 	    if (gss_oid_equal(&mechs->elements[i], oidp))
 		    break;
 
-    if (i == mechs->count) {
+    if ((size_t)i == mechs->count) { /* VAS Modification - explicit cast */
 	    gss_release_oid_set(&junk, &mechs);
 	    return GSS_S_BAD_MECH;
     }
@@ -466,6 +466,7 @@ acceptor_complete(OM_uint32 * minor_status,
 }
 
 
+gss_OID GSSAPI_LIB_VARIABLE GSS_MSKRB5_MECHANISM;
 static OM_uint32 GSSAPI_CALLCONV
 acceptor_start
 	   (OM_uint32 * minor_status,
@@ -581,6 +582,10 @@ acceptor_start
 
 	if (ret == GSS_S_COMPLETE || ret == GSS_S_CONTINUE_NEEDED) {
 	    ctx->preferred_mech_type = preferred_mech_type;
+            /* QAS Modification: NULL to avoid double-free, it's owned by ctx now. */
+            preferred_mech_type = GSS_C_NO_OID;
+            /* End QAS Modification */
+
 	    if (ret == GSS_S_COMPLETE)
 		ctx->open = 1;
 
@@ -598,8 +603,40 @@ acceptor_start
 	    first_ok = 1;
 	} else {
 	    gss_mg_collect_error(preferred_mech_type, ret, *minor_status);
+            /* QAS Modification -- when NOT to fail over to NTLM -- jeff.webb@quest.com
+             * If the gss_accept_sec_context() failed and the preferred mechanism
+             * was KRB5, and we received either a GSS_S_DUPLICATE_TOKEN error or
+             * the minor code was KRB5KRB_AP_ERR_SKEW, then we need to treat these
+             * as a hard error, and NOT fail over.  I can't find any documentation
+             * in the spnego rfc (4178) that indicates this behavior is valid, however
+             * I have a hard time seeing where one of these returned errors should
+             * NOT be brought to the attention of the caller.  The mechanism was a valid
+             * mech, and the attempt was made to accept using that mechanism, however
+             * failing over to NTLM will force this error condition to be hidden
+             * and the returning error will be some obscure NTLM ASN.1 type
+             * error which is not helpful in determining that a bigger problem exists.
+             * (of course this behavior will depend highly on whether or not this
+             * change affects the SAP gss test suite tests).
+             */
+            if( gss_oid_equal( preferred_mech_type, GSS_MSKRB5_MECHANISM ) ||
+                gss_oid_equal( preferred_mech_type, GSS_KRB5_MECHANISM ) )
+            {
+                if( ret == GSS_S_DUPLICATE_TOKEN ||
+                    *minor_status == 2529638949 ) /* KRB5KRB_AP_ERR_SKEW */
+                {
+                    /* FIXME: This should `goto out` to avoid leaking everything.
+                     * This is probably a memory exhaustion exploit until fixed. */
+                    return ret;
+                }
 	}
+            /* End QAS Modification */
     }
+    }
+
+    /* QAS Modification: release (free) preferred_mech_type */
+    gss_release_oid(NULL, &preferred_mech_type);
+    preferred_mech_type = GSS_C_NO_OID;
+    /* End QAS Modification */
 
     /*
      * If opportunistic token failed, lets try the other mechs.
@@ -612,6 +649,13 @@ acceptor_start
 
 	/* Call glue layer to find first mech we support */
 	for (j = 1; j < ni->mechTypes.len; ++j) {
+             /* QAS Modification: free previous */
+             if (preferred_mech_type != GSS_C_NO_OID) {
+                 gss_release_oid(NULL, &preferred_mech_type);
+        preferred_mech_type = GSS_C_NO_OID;
+        }
+        /* End QAS Modification */
+
 	    ret = select_mech(minor_status,
 			      &ni->mechTypes.val[j],
 			      1,
@@ -626,6 +670,8 @@ acceptor_start
 	}
 
 	ctx->preferred_mech_type = preferred_mech_type;
+    /* QAS Modification: NULL preferred_mech_type since ctx now owns it. */
+    preferred_mech_type = GSS_C_NO_OID;
     }
 
     /*

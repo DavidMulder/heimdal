@@ -495,6 +495,7 @@ null_rsa_finish(RSA *rsa)
     return 1;
 }
 
+/* VAS Modification - initialize all members */
 static const RSA_METHOD rsa_null_method = {
     "hcrypto null RSA",
     null_rsa_public_encrypt,
@@ -506,6 +507,7 @@ static const RSA_METHOD rsa_null_method = {
     null_rsa_init,
     null_rsa_finish,
     0,
+    NULL,
     NULL,
     NULL,
     NULL

@@ -77,6 +77,8 @@ error_code CLIENT_NOT_TRUSTED,	"Client not trusted"
 error_code KDC_NOT_TRUSTED,	"KDC not trusted"
 error_code INVALID_SIG,		"Invalid signature"
 error_code DH_KEY_PARAMETERS_NOT_ACCEPTED, "DH parameters not accepted"
+error_code KEY_SIZE,		"Key size too small/key too weak"
+error_code CERTIFICATE_MISMATCH, "Certificate mismatch"
 
 index 68
 prefix KRB5_KDC_ERR
@@ -94,17 +96,24 @@ error_code REVOKED_CERTIFICATE, "Certificate revoked"
 error_code REVOCATION_STATUS_UNKNOWN, "Revocation status unknown"
 error_code REVOCATION_STATUS_UNAVAILABLE, "Revocation status unavaible"
 error_code CLIENT_NAME_MISMATCH, "Client name mismatch in certificate"
+# Vintela Modification (dean.povey@quest.com). The KDC_NAME_MISMATCH code
+# was incorrectly indexed at 75 (rather than 76), and additional codes
+# from RFC4556 listed here were missing
+error_code KDC_NAME_MISMATCH,   "KDC name mismatch"
 error_code INCONSISTENT_KEY_PURPOSE, "Inconsistent key purpose"
 error_code DIGEST_IN_CERT_NOT_ACCEPTED, "Digest in certificate not accepted"
 error_code PA_CHECKSUM_MUST_BE_INCLUDED, "paChecksum must be included"
 error_code DIGEST_IN_SIGNED_DATA_NOT_ACCEPTED, "Digest in signedData not accepted"
 error_code PUBLIC_KEY_ENCRYPTION_NOT_SUPPORTED, "Public key encryption not supported"
 
+# Note: The following clash with PKINIT codes
 ## these are never used
 #index 80
 #prefix KRB5_IAKERB
 #error_code ERR_KDC_NOT_FOUND,	"IAKERB proxy could not find a KDC"
 #error_code ERR_KDC_NO_RESPONSE,	"IAKERB proxy never reeived a response from a KDC"
+
+# End Vintela Modification
 
 # 82-93 are reserved
 

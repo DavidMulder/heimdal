@@ -653,7 +653,7 @@ rk_vasnprintf (char **ret, size_t max_sz, const char *format, va_list args)
     state.append_char = as_append_char;
 
     st = xyzprintf (&state, format, args);
-    if (st > state.sz) {
+    if (st > (int)state.sz) {
 	free (state.str);
 	*ret = NULL;
 	return -1;

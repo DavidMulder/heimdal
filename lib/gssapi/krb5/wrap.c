@@ -314,7 +314,7 @@ wrap_des
   if(conf_req_flag) {
       memcpy (&deskey, key->keyvalue.data, sizeof(deskey));
 
-      for (i = 0; i < sizeof(deskey); ++i)
+      for (i = 0; (size_t)i < sizeof(deskey); ++i)
 	  deskey[i] ^= 0xf0;
 
       EVP_CIPHER_CTX_init(&des_ctx);

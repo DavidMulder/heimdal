@@ -310,7 +310,10 @@ int
 main(int argc, char **argv)
 {
     int ret = 0;
-    int i, idx = 0;
+/* Vintela modification */
+    unsigned i;
+    int idx = 0;
+/* End Vintela modification */
 
     setprogname(argv[0]);
 

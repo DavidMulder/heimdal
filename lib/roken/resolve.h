@@ -46,6 +46,12 @@
 #endif
 #endif
 
+/* Vintela modification */
+#ifdef __cplusplus
+extern "C" {
+#endif
+/* End Vintela modification */
+
 enum {
     rk_ns_c_in = 1
 };
@@ -121,7 +127,9 @@ enum {
 struct rk_dns_query{
     char *domain;
     unsigned type;
-    unsigned class;
+/* Vintela modification */
+    unsigned dns_class;
+/* End Vintela modification */
 };
 
 struct rk_mx_record{
@@ -183,7 +191,9 @@ struct rk_ds_record {
 struct rk_resource_record{
     char *domain;
     unsigned type;
-    unsigned class;
+/* Vintela modification */
+    unsigned resource_class;
+/* End Vintela modification */
     unsigned ttl;
     unsigned size;
     union {
@@ -228,6 +238,16 @@ struct rk_dns_reply{
     struct rk_resource_record *head;
 };
 
+#ifdef TEST_RESOLVE
+struct rk_dns_reply*
+parse_reply(const unsigned char *data, size_t len);
+#endif
+
+/* Vintela modification */
+#ifdef __cplusplus
+}
+#endif
+/* End Vintela modification */
 
 #ifdef __cplusplus
 extern "C" {

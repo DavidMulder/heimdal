@@ -100,7 +100,7 @@ unwrap_des
       memcpy (&deskey, key->keyvalue.data, sizeof(deskey));
       memset (&zero, 0, sizeof(zero));
 
-      for (i = 0; i < sizeof(deskey); ++i)
+      for (i = 0; (size_t)i < sizeof(deskey); ++i) /* VAS Modification - explicit cast */
 	  deskey[i] ^= 0xf0;
 
 

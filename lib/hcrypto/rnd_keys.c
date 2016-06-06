@@ -96,7 +96,11 @@ DES_set_random_generator_seed(DES_cblock *seed)
  * @ingroup hcrypto_des
  */
 
-int HC_DEPRECATED
+/* VAS Modification - Do not mark as deprecated 
+ * int HC_DEPRECATED
+ */
+int 
+/* End VAS Modification */
 DES_new_random_key(DES_cblock *key)
 {
     do {

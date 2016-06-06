@@ -56,7 +56,8 @@
  * See the library functions here: @ref hcrypto_rand
  */
 
-const static RAND_METHOD *selected_meth = NULL;
+/* VAS Modification - Swap the order from const static to static const */
+static const RAND_METHOD *selected_meth = NULL;
 static ENGINE *selected_engine = NULL;
 
 static void
@@ -396,7 +397,7 @@ RAND_file_name(char *filename, size_t size)
     else
 	ret = snprintf(filename, size, "%s", e);
 
-    if (ret <= 0 || ret >= size)
+    if (ret <= 0 || (size_t)ret >= size) /* VAS Modification - explicit cast */
 	return NULL;
 
     return filename;

@@ -55,12 +55,20 @@
 
 #include "crypto-headers.h"
 #include <krb5.h>
+#if 0
 #include <kadm5/admin.h>
 #include <kadm5/kadm5_err.h>
+#endif
 
 #include <sl.h>
 #include <getarg.h>
 #include <hex.h>
+
+/* --- Begin addition by mpeterson@vintela.com --- */
+#ifdef HAVE_STRINGS_H
+ #include <strings.h>
+#endif
+/* --- End addition by mpeterson@vintela.com --- */
 
 extern krb5_context context;
 
@@ -69,6 +77,14 @@ extern char *keytab_string;
 
 krb5_keytab ktutil_open_keytab(void);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "ktutil-commands.h"
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __KTUTIL_LOCL_H__ */

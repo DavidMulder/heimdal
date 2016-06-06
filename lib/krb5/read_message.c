@@ -60,7 +60,7 @@ krb5_read_message (krb5_context context,
 	krb5_clear_error_message(context);
 	return ret;
     }
-    if (krb5_net_read (context, p_fd, data->data, len) != len) {
+    if ((size_t)krb5_net_read (context, p_fd, data->data, len) != len) { /* VAS Modification - explicit cast */
 	ret = errno;
 	krb5_data_free (data);
 	krb5_clear_error_message (context);

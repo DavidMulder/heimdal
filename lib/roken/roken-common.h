@@ -78,12 +78,14 @@
 #define STDERR_FILENO 2
 #endif
 
+#ifndef __cplusplus
 #ifndef max
 #define max(a,b) (((a)>(b))?(a):(b))
 #endif
 
 #ifndef min
 #define min(a,b) (((a)<(b))?(a):(b))
+#endif
 #endif
 
 #ifndef TRUE
@@ -116,6 +118,18 @@
 
 #ifndef F_OK
 #define F_OK 0
+#endif
+
+#ifndef R_OK
+#define R_OK    004     /* Test for Read permission */
+#endif
+
+#ifndef W_OK
+#define W_OK    002     /* Test for Write permission */
+#endif
+
+#ifndef X_OK
+#define X_OK    001     /* Test for eXecute permission */
 #endif
 
 #ifndef O_ACCMODE
@@ -279,10 +293,12 @@
 ROKEN_CPP_START
 
 #ifndef IRIX4 /* fix for compiler bug */
+#if !defined(NeXT) && !defined(__APPLE__)
 #ifndef _WIN32
 #ifdef RETSIGTYPE
 typedef RETSIGTYPE (*SigAction)(int);
 SigAction signal(int iSig, SigAction pAction); /* BSD compatible */
+#endif
 #endif
 #endif
 #endif

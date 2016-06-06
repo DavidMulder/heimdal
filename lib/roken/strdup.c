@@ -34,6 +34,7 @@
 #include <config.h>
 #include <stdlib.h>
 #include <string.h>
+#include "roken.h"
 
 #ifndef HAVE_STRDUP
 ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL

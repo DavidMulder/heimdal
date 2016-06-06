@@ -246,6 +246,8 @@ any_remove_entry(krb5_context context,
     return 0;
 }
 
+#define NONSENSE_BEFORE_VAS_MOD
+
 const krb5_kt_ops krb5_any_ops = {
     "ANY",
     any_resolve,
@@ -257,5 +259,9 @@ const krb5_kt_ops krb5_any_ops = {
     any_next_entry,
     any_end_seq_get,
     any_add_entry,
-    any_remove_entry
+    any_remove_entry,
+    NULL,           /* VAS Modification - initialize all members */
+    0               /* VAS Modification - initialize all members */
 };
+
+#define NONSENSE_AFTER_VAS_MOD

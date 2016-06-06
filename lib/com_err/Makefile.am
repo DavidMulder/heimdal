@@ -17,7 +17,8 @@ bin_PROGRAMS = compile_et
 
 include_HEADERS = com_err.h com_right.h
 
-compile_et_SOURCES = compile_et.c compile_et.h parse.y lex.l lex.h
+compile_et.c: qas_krb5_util.h
+compile_et_SOURCES = compile_et.c compile_et.h parse.y lex.l lex.h qas_krb5_util.c
 
 libcom_err_la_CPPFLAGS = $(ROKEN_RENAME) $(INCLUDE_libintl)
 dist_libcom_err_la_SOURCES = error.c com_err.c roken_rename.h
@@ -39,6 +40,10 @@ snprintf.c:
 	$(LN_S) $(srcdir)/../roken/snprintf.c .
 strlcpy.c:
 	$(LN_S) $(srcdir)/../roken/strlcpy.c .
+qas_krb5_util.c: qas_krb5_util.h
+	if [ ! -h $@ ]; then $(LN_S) $(srcdir)/../krb5/$@ .; fi
+qas_krb5_util.h:
+	if [ ! -h $@ ]; then $(LN_S) $(srcdir)/../krb5/$@ .; fi
 
 EXTRA_DIST = \
 	NTMakefile \

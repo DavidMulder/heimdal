@@ -99,7 +99,7 @@ routine_error(OM_uint32 v)
 	"The referenced credentials have expired",
 	"The context has expired",
 	"Miscellaneous failure (see text)",
-	"The quality-of-protection requested could not be provide",
+	"The quality-of-protection requested could not be provided",
 	"The operation is forbidden by local security policy",
 	"The operation or option is not available",
 	"The requested credential element already exists",
@@ -166,10 +166,14 @@ gss_display_status(OM_uint32 *minor_status,
 		if (GSS_SUPPLEMENTARY_INFO(status_value))
 		    e = asprintf(&buf, "%s", supplementary_error(
 		        GSS_SUPPLEMENTARY_INFO(status_value)));
-		else
+		else {
+           if (GSS_CALLING_ERROR(status_value))
 		    e = asprintf (&buf, "%s %s",
 		        calling_error(GSS_CALLING_ERROR(status_value)),
 			routine_error(GSS_ROUTINE_ERROR(status_value)));
+           else
+           buf = strdup(routine_error(GSS_ROUTINE_ERROR(status_value)));
+       }
 
 		if (e < 0 || buf == NULL)
 		    break;
@@ -185,6 +189,18 @@ gss_display_status(OM_uint32 *minor_status,
 		char *buf = NULL;
 		int e;
 
+        /* VAS Modification
+         * This used to simply display the unknown mech code error regardless of what was passed into the
+         * function.  I can't understand why that would be the case.  You couldn't ever get a minor code
+         * translated from acquire_cred (which also failed to surface the minor code -- apparently intentionally.)
+         * I am not 100% sure that we should do this, as it appears an intentional ommission, but it
+         * just makes no sense to NOT load the mechs and call the mechanism specific display status function.
+         * So for now that is what I am doing.  SAP certification doesn't like us to leave minor errors out. */
+        gssapi_mech_interface m;
+        _gss_load_mech();
+        m = __gss_get_mechanism(mech_type);
+        if (!m || m->gm_display_status == NULL )
+        {
 		maj_junk = gss_oid_to_str(&min_junk, mech_type, &oid);
 		if (maj_junk != GSS_S_COMPLETE) {
 		    oid.value = rk_UNCONST("unknown");
@@ -196,6 +212,26 @@ gss_display_status(OM_uint32 *minor_status,
 			  (int)oid.length, (char *)oid.value);
 		if (maj_junk == GSS_S_COMPLETE)
 		    gss_release_buffer(&min_junk, &oid);
+        }
+        else
+        {
+            OM_uint32        message_content;
+            gss_buffer_desc  status_string;
+            
+            maj_junk = m->gm_display_status( &min_junk,
+                                             status_value, 
+                                             GSS_C_MECH_CODE,
+                                             &m->gm_mech_oid,
+                                             &message_content,
+                                             &status_string );
+            if( status_string.length > 0 )
+            {
+                buf = malloc(status_string.length+1);
+                memset( buf, 0, status_string.length+1);
+                memcpy( buf, status_string.value, status_string.length);
+            }
+        }
+        /* End VAS Modification */
 
 		if (e < 0 || buf == NULL)
 		    break;

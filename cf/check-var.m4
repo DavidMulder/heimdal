@@ -6,12 +6,14 @@ AC_MSG_CHECKING(for $1)
 AC_CACHE_VAL(ac_cv_var_$1, [
 m4_ifval([$2],[
 	AC_LINK_IFELSE([AC_LANG_PROGRAM([[$2
-	void * foo(void) { return &$1; }]],[[foo()]])],
+	#include <stdio.h>
+	void * foo(void) { return &$1; }]],[[printf("%p\n",foo())]])],
 	    [ac_cv_var_$1=yes],[ac_cv_var_$1=no])])
 if test "$ac_cv_var_$1" != yes ; then
 AC_LINK_IFELSE([AC_LANG_PROGRAM([[$2
+#include <stdio.h>
 extern int $1;
-int foo(void) { return $1; }]],[[foo()]])],
+int foo(void) { return $1; }]],[[print("%d\n",foo())]])],
 	    [ac_cv_var_$1=yes],[ac_cv_var_$1=no])
 fi
 ])

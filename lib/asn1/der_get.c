@@ -419,7 +419,14 @@ generalizedtime2time (const char *s, time_t *t)
     }
     tm.tm_year -= 1900;
     tm.tm_mon -= 1;
-    *t = _der_timegm (&tm);
+#ifdef HAVE_TIMEGM
+    *t = timegm (&tm);
+#else
+    /* Vintela Modification: Use our modified _heim_timegm function instead
+     * of the "der_timegm" function */
+    *t = _heim_timegm (&tm);
+    /* End Vintela Modification */
+#endif
     return 0;
 }
 

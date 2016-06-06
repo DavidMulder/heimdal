@@ -159,6 +159,17 @@ struct krb5_krbhst_data {
     unsigned int fallback_count;
 
     struct krb5_krbhst_info *hosts, **index, **end;
+
+    /* VAS Addition - wynn.wilkes@quest.com 
+     * This field will be set to the value passed to krb5_krbhst_init() to 
+     * indicate what type of server this is. It will be set to either 
+     * KRB5_KRBHST_KDC, KRB5_KRBHST_ADMIN, KRB5_KRBHST_CHANGEPW, or 
+     * KRB5_KRBHST_KRB524. This will be used by the VAS sendto override code
+     * to help determine what type of server we're communicating with so that
+     * we can decide what port should be used.
+     */
+    int krbhst_type;
+    /* End VAS Addition */
 };
 
 static krb5_boolean
@@ -920,24 +931,38 @@ krb5_krbhst_init_flags(krb5_context context,
     switch(type) {
     case KRB5_KRBHST_KDC:
 	next = kdc_get_next;
-	def_port = ntohs(krb5_getportbyname (context, "kerberos", "udp", 88));
+    /* Begin Quest Software Modification <seth.ellsworth@quest.com> 
+     * Hard-code these values so they can't hang up on invalid
+     * NIS setup, particularly AIX */
+    def_port = ntohs( KRB5_KDC_PORT );
+    /* End Quest Modification */
 	service = "kdc";
 	break;
     case KRB5_KRBHST_ADMIN:
 	next = admin_get_next;
-	def_port = ntohs(krb5_getportbyname (context, "kerberos-adm",
-					     "tcp", 749));
+    /* Begin Quest Software Modification <seth.ellsworth@quest.com> 
+     * Hard-code these values so they can't hang up on invalid
+     * NIS setup, particularly AIX */
+    def_port = ntohs( 749 );
+    /* End Quest Modification */
 	service = "admin";
 	break;
     case KRB5_KRBHST_CHANGEPW:
 	next = kpasswd_get_next;
-	def_port = ntohs(krb5_getportbyname (context, "kpasswd", "udp",
-					     KPASSWD_PORT));
+    /* Begin Quest Software Modification <seth.ellsworth@quest.com> 
+     * Hard-code these values so they can't hang up on invalid
+     * NIS setup, particularly AIX */
+    def_port = ntohs( KPASSWD_PORT );
+    /* End Quest Modification */
 	service = "change_password";
 	break;
     case KRB5_KRBHST_KRB524:
 	next = krb524_get_next;
-	def_port = ntohs(krb5_getportbyname (context, "krb524", "udp", 4444));
+    /* Begin Quest Software Modification <seth.ellsworth@quest.com> 
+     * Hard-code these values so they can't hang up on invalid
+     * NIS setup, particularly AIX */
+    def_port = ntohs( 4444 );
+    /* End Quest Modification */
 	service = "524";
 	break;
     default:
@@ -949,6 +974,13 @@ krb5_krbhst_init_flags(krb5_context context,
 	return ENOMEM;
     kd->get_next = next;
     kd->def_port = def_port;
+
+    /* VAS Modification - wwilkes@quest.com
+     * save off the krbhst type for later use in identifying what type of
+     * servers this krbhst structure is providing. */
+    kd->krbhst_type = type;
+    /* End VAS Modification */
+
     *handle = kd;
     return 0;
 }

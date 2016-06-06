@@ -50,7 +50,8 @@ krb5_DES_random_key(krb5_context context,
 static void
 krb5_DES_schedule_old(krb5_context context,
 		      struct _krb5_key_type *kt,
-		      struct _krb5_key_data *key)
+		      struct _krb5_key_data *key
+              /* VAS Modification */, const void *params)
 {
     DES_set_key_unchecked(key->key->keyvalue.data, key->schedule->data);
 }
@@ -73,11 +74,16 @@ static struct _krb5_key_type keytype_des_old = {
     "des-old",
     56,
     8,
+    8, /* VAS Modification */
     sizeof(DES_key_schedule),
     krb5_DES_random_key,
     krb5_DES_schedule_old,
     _krb5_des_salt,
     krb5_DES_random_to_key,
+/* VAS Modification -- for parameters */
+    NULL,
+    NULL,
+/* End VAS Modification */
     NULL,
     NULL
 };
@@ -87,11 +93,16 @@ static struct _krb5_key_type keytype_des = {
     "des",
     56,
     8,
+    8, /* VAS Modification */
     sizeof(struct _krb5_evp_schedule),
     krb5_DES_random_key,
     _krb5_evp_schedule,
     _krb5_des_salt,
     krb5_DES_random_to_key,
+/* VAS Modification -- for parameters */
+    NULL,
+    NULL,
+/* End VAS Modification */
     _krb5_evp_cleanup,
     EVP_des_cbc
 };
@@ -288,6 +299,7 @@ DES_PCBC_encrypt_key_ivec(krb5_context context,
 struct _krb5_encryption_type _krb5_enctype_des_cbc_crc = {
     ETYPE_DES_CBC_CRC,
     "des-cbc-crc",
+    NULL,
     8,
     8,
     8,
@@ -303,6 +315,7 @@ struct _krb5_encryption_type _krb5_enctype_des_cbc_crc = {
 struct _krb5_encryption_type _krb5_enctype_des_cbc_md4 = {
     ETYPE_DES_CBC_MD4,
     "des-cbc-md4",
+    NULL,
     8,
     8,
     8,
@@ -318,6 +331,7 @@ struct _krb5_encryption_type _krb5_enctype_des_cbc_md4 = {
 struct _krb5_encryption_type _krb5_enctype_des_cbc_md5 = {
     ETYPE_DES_CBC_MD5,
     "des-cbc-md5",
+    NULL,
     8,
     8,
     8,
@@ -333,6 +347,7 @@ struct _krb5_encryption_type _krb5_enctype_des_cbc_md5 = {
 struct _krb5_encryption_type _krb5_enctype_des_cbc_none = {
     ETYPE_DES_CBC_NONE,
     "des-cbc-none",
+    NULL,
     8,
     8,
     0,
@@ -348,6 +363,7 @@ struct _krb5_encryption_type _krb5_enctype_des_cbc_none = {
 struct _krb5_encryption_type _krb5_enctype_des_cfb64_none = {
     ETYPE_DES_CFB64_NONE,
     "des-cfb64-none",
+    NULL,
     1,
     1,
     0,
@@ -363,6 +379,7 @@ struct _krb5_encryption_type _krb5_enctype_des_cfb64_none = {
 struct _krb5_encryption_type _krb5_enctype_des_pcbc_none = {
     ETYPE_DES_PCBC_NONE,
     "des-pcbc-none",
+    NULL,
     8,
     8,
     0,

@@ -33,6 +33,11 @@
 
 #include "ntlm.h"
 
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ma_sasl_mech_name_oid_desc;
+int _gss_mo_get_ctx_as_string(gss_const_OID, gss_mo_desc *, gss_buffer_t);
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ma_mech_name_oid_desc;
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ma_mech_description_oid_desc;
+
 static gss_mo_desc ntlm_mo[] = {
     {
 	GSS_C_MA_SASL_MECH_NAME,

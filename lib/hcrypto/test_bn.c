@@ -160,7 +160,9 @@ test_BN_import_export(void)
 {
     BIGNUM *bn;
     int ret = 0;
-    int i;
+/* Vintela modification */
+    unsigned i;
+/* End Vintela modification */
 
     bn = BN_new();
 

@@ -47,7 +47,14 @@ struct krb5_crypto_data {
     struct _krb5_key_data key;
     int num_key_usage;
     struct _krb5_key_usage *key_usage;
+    /* VAS Modification */
+    void *params;
+    /* End VAS Modification */
 };
+
+/* VAS Modification -- Added for smart card */
+#define kcrypto_oid_enc(n) { sizeof(n)/sizeof(n[0]), n }
+/* End VAS Modification */
 
 #define CRYPTO_ETYPE(C) ((C)->et->type)
 
@@ -60,6 +67,9 @@ struct krb5_crypto_data {
 #define F_SPECIAL	32	/* backwards */
 #define F_DISABLED	64	/* enctype/checksum disabled */
 #define F_WEAK	       128	/* enctype is considered weak */
+/* VAS Modification -- Added for smart card */
+#define F_PADCMS   128 /* padding done like in CMS */
+/* End VAS Modification */
 
 struct salt_type {
     krb5_salttype type;
@@ -73,11 +83,18 @@ struct _krb5_key_type {
     const char *name;
     size_t bits;
     size_t size;
+    size_t minsize; /* VAS Modification -- Needed for RC2 */
     size_t schedule_size;
     void (*random_key)(krb5_context, krb5_keyblock*);
-    void (*schedule)(krb5_context, struct _krb5_key_type *, struct _krb5_key_data *);
+    void (*schedule)(krb5_context, struct _krb5_key_type *, struct _krb5_key_data *, /* VAS Modification */ const void *);
     struct salt_type *string_to_key;
     void (*random_to_key)(krb5_context, krb5_keyblock*, const void*, size_t);
+/* VAS Modification -- RC2 has a parameter */
+    krb5_error_code (*get_params)(krb5_context, const krb5_data *,
+                 void **, krb5_data *);
+    krb5_error_code (*set_params)(krb5_context, const void *,
+                 const krb5_data *, krb5_data *);
+/* End VAS Modification */
     void (*cleanup)(krb5_context, struct _krb5_key_data *);
     const EVP_CIPHER *(*evp)(void);
 };
@@ -103,6 +120,7 @@ struct _krb5_checksum_type {
 struct _krb5_encryption_type {
     krb5_enctype type;
     const char *name;
+    heim_oid *oid;
     size_t blocksize;
     size_t padsize;
     size_t confoundersize;
@@ -177,3 +195,8 @@ struct _krb5_evp_schedule {
     EVP_CIPHER_CTX ectx;
     EVP_CIPHER_CTX dctx;
 };
+
+krb5_error_code _krb5_derive_key(krb5_context context, struct _krb5_encryption_type *et, struct _krb5_key_data *key, const void *constant, size_t len);
+
+void _krb5_free_key_data(krb5_context context, struct _krb5_key_data *key, struct _krb5_encryption_type *et);
+

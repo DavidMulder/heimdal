@@ -84,7 +84,11 @@ enum {
     ccErrServerInsecure,
     ccErrServerCantBecomeUID,
 
-    ccErrTimeOffsetNotSet				/* 226 */
+    ccErrTimeOffsetNotSet,				/* 226 */
+    /* VAS Modification - Necessary values for Leopard (Mac OS X 10.5) */
+    ccErrBadInternalMessage,
+    ccErrNotImplemented
+    /* End VAS Modification */
 };
 
 typedef int32_t cc_int32;
@@ -141,7 +145,7 @@ typedef struct cc_string_functions {
 
 struct cc_string_t {
     const char *data;
-    const cc_string_functions *func;
+    const cc_string_functions *functions;
 };
 
 typedef struct cc_credentials_union {
@@ -158,7 +162,7 @@ struct cc_credentials_functions {
 
 struct cc_credentials_t {
     const cc_credentials_union* data;
-    const struct cc_credentials_functions* func;
+    const struct cc_credentials_functions* functions;
 };
 
 struct cc_credentials_iterator_functions {
@@ -167,7 +171,7 @@ struct cc_credentials_iterator_functions {
 };
 
 struct cc_credentials_iterator_t {
-    const struct cc_credentials_iterator_functions *func;
+    const struct cc_credentials_iterator_functions *functions;
 };
 
 struct cc_ccache_iterator_functions {
@@ -176,7 +180,7 @@ struct cc_ccache_iterator_functions {
 };
 
 struct cc_ccache_iterator_t {
-    const struct cc_ccache_iterator_functions* func;
+    const struct cc_ccache_iterator_functions* functions;
 };
 
 typedef struct cc_ccache_functions {
@@ -200,10 +204,11 @@ typedef struct cc_ccache_functions {
     cc_int32 (*get_kdc_time_offset)(cc_ccache_t, cc_int32, cc_time_t *);
     cc_int32 (*set_kdc_time_offset)(cc_ccache_t, cc_int32, cc_time_t);
     cc_int32 (*clear_kdc_time_offset)(cc_ccache_t, cc_int32);
+    cc_int32 (*wait_for_change) (cc_ccache_t);
 } cc_ccache_functions;
 
 struct cc_ccache_t {
-    const cc_ccache_functions *func;
+    const cc_ccache_functions *functions;
 };
 
 struct  cc_context_functions {
@@ -222,10 +227,11 @@ struct  cc_context_functions {
     cc_int32 (*lock)(cc_context_t, cc_uint32, cc_uint32);
     cc_int32 (*unlock)(cc_context_t);
     cc_int32 (*compare)(cc_context_t, cc_context_t, cc_uint32*);
+    cc_int32 (*wait_for_change) (cc_context_t);
 };
 
 struct cc_context_t {
-    const struct cc_context_functions* func;
+    const struct cc_context_functions* functions;
 };
 
 typedef cc_int32

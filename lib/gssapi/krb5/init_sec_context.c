@@ -137,6 +137,7 @@ _gsskrb5_create_ctx(
     if (kret) {
 	*minor_status = kret;
 	HEIMDAL_MUTEX_destroy(&ctx->ctx_id_mutex);
+    free(ctx);
 	return GSS_S_FAILURE;
     }
 
@@ -145,6 +146,7 @@ _gsskrb5_create_ctx(
 	*minor_status = kret;
 	krb5_auth_con_free(context, ctx->auth_context);
 	HEIMDAL_MUTEX_destroy(&ctx->ctx_id_mutex);
+    free(ctx);
 	return GSS_S_FAILURE;
     }
 
@@ -156,7 +158,7 @@ _gsskrb5_create_ctx(
 	krb5_auth_con_free(context, ctx->deleg_auth_context);
 
 	HEIMDAL_MUTEX_destroy(&ctx->ctx_id_mutex);
-
+    free(ctx);
 	return GSS_S_BAD_BINDINGS;
     }
 
@@ -168,7 +170,7 @@ _gsskrb5_create_ctx(
 	krb5_auth_con_free(context, ctx->deleg_auth_context);
 
 	HEIMDAL_MUTEX_destroy(&ctx->ctx_id_mutex);
-
+    free(ctx);
 	return GSS_S_BAD_BINDINGS;
     }
 
@@ -344,6 +346,14 @@ do_delegation (krb5_context context,
     fwd_flags.forwarded = 1;
     fwd_flags.forwardable = 1;
 
+    /** Quest Modification <seth.ellsworth@quest.com>
+     * Bug 17399, delegation wasn't passing renewable.
+     * If the original tgt isn't renewable, this does nothing
+     * ( the delegated tgt is also not renewable ).
+     */
+    fwd_flags.renewable = 1;
+    /** End of Quest Modification */
+       
     if ( /*target_name->name.name_type != KRB5_NT_SRV_HST ||*/
 	name->name.name_string.len < 2)
 	goto out;
@@ -863,6 +873,7 @@ repl_mutual
  * gss_init_sec_context
  */
 
+gss_OID GSSAPI_LIB_VARIABLE GSS_MSKRB5_MECHANISM;
 OM_uint32 GSSAPI_CALLCONV _gsskrb5_init_sec_context
 (OM_uint32 * minor_status,
  const gss_cred_id_t cred_handle,
@@ -907,7 +918,12 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_init_sec_context
     }
 
     if (mech_type != GSS_C_NO_OID &&
-	!gss_oid_equal(mech_type, GSS_KRB5_MECHANISM))
+    /* VAS Modification - compare GSS_KRB5_MECHANISM and
+     * GSS_MSKRB5_MECHANISM before determining a BAD MECH
+     */
+	(!gss_oid_equal(mech_type, GSS_KRB5_MECHANISM) &&
+     !gss_oid_equal(mech_type, GSS_MSKRB5_MECHANISM)) )
+    /* End VAS Modification */
 	return GSS_S_BAD_MECH;
 
     if (input_token == GSS_C_NO_BUFFER || input_token->length == 0) {

@@ -60,7 +60,9 @@ rk_timegm (struct tm *tm)
       return -1;
   if (tm->tm_mon < 0 || tm->tm_mon > 11)
       return -1;
-  if (tm->tm_mday < 1 || tm->tm_mday > ndays[is_leap(tm->tm_year)][tm->tm_mon])
+/* Vintela modification */
+  if (tm->tm_mday < 1 || (unsigned) tm->tm_mday > ndays[is_leap(tm->tm_year)][tm->tm_mon])
+/* End Vintela modification */
       return -1;
   if (tm->tm_hour < 0 || tm->tm_hour > 23)
       return -1;
@@ -69,10 +71,14 @@ rk_timegm (struct tm *tm)
   if (tm->tm_sec < 0 || tm->tm_sec > 59)
       return -1;
 
-  for (i = 70; i < tm->tm_year; ++i)
+/* Vintela modification */
+  for (i = 70; i < (unsigned) tm->tm_year; ++i)
+/* End Vintela modification */
     res += is_leap(i) ? 366 : 365;
 
-  for (i = 0; i < tm->tm_mon; ++i)
+/* Vintela modification */
+  for (i = 0; i < (unsigned) tm->tm_mon; ++i)
+/* End Vintela modification */
     res += ndays[is_leap(tm->tm_year)][i];
   res += tm->tm_mday - 1;
   res *= 24;

@@ -6,14 +6,12 @@ AM_CPPFLAGS += $(INCLUDE_readline) $(INCLUDE_hcrypto)
 
 man_MANS = ktutil.8
 
-sbin_PROGRAMS = ktutil
+noinst_PROGRAMS = ktutil
 
 dist_ktutil_SOURCES =				\
 	add.c					\
-	change.c				\
 	copy.c					\
 	destroy.c				\
-	get.c					\
 	ktutil.c				\
 	ktutil_locl.h				\
 	list.c					\
@@ -33,6 +31,7 @@ ktutil-commands.c ktutil-commands.h: ktutil-commands.in
 
 LDADD = \
 	$(top_builddir)/lib/kadm5/libkadm5clnt.la \
+    $(top_builddir)/lib/wind/libwind.la \
 	$(top_builddir)/lib/krb5/libkrb5.la \
 	$(LIB_hcrypto) \
 	$(top_builddir)/lib/asn1/libasn1.la \
@@ -41,3 +40,7 @@ LDADD = \
 	$(LIB_roken)
 
 EXTRA_DIST = NTMakefile ktutil-version.rc $(man_MANS) ktutil-commands.in
+
+install-data-local:
+	$(mkinstalldirs) $(DESTDIR)$(bindir)
+	$(INSTALL_PROGRAM) ktutil $(DESTDIR)$(bindir)/.ktutil

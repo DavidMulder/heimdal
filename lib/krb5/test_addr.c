@@ -41,7 +41,7 @@ print_addr(krb5_context context, const char *addr)
     char buf[38];
     char buf2[1000];
     size_t len;
-    int i;
+    size_t i;   /* VAS Modification - change from int to size_t */
 
     ret = krb5_parse_address(context, addr, &addresses);
     if (ret)

@@ -74,6 +74,9 @@ _krb5_xlock(krb5_context context, int fd, krb5_boolean exclusive,
 {
     int ret;
 #ifdef HAVE_FCNTL
+    /* VAS Modification - hack for libroken resymboling */
+    #undef flock
+    /* End VAS Modification */
     struct flock l;
 
     l.l_start = 0;
@@ -117,6 +120,9 @@ _krb5_xunlock(krb5_context context, int fd)
 {
     int ret;
 #ifdef HAVE_FCNTL
+    /* VAS Modification - hack for libroken resymboling */
+    #undef flock
+    /* End VAS Modification */
     struct flock l;
     l.l_start = 0;
     l.l_len = 0;
@@ -397,7 +403,16 @@ fcc_open(krb5_context context,
     fd = open(filename, flags, mode);
     if(fd < 0) {
 	char buf[128];
+        /* VAS Modification - it turns out that on HPUX at least some     *
+         * open failures leave errno set to 0.  Who knows what error it   *
+         * should actually be set to, but some error is better than       *
+         * returning success on error.  This fixed 11142                  */
+        if( errno != 0 ) {
 	ret = errno;
+        } else {
+            ret = -1;
+        }
+        /* End VAS Modification */
 	rk_strerror_r(ret, buf, sizeof(buf));
 	krb5_set_error_message(context, ret, N_("open(%s): %s", "file, error"),
 			       filename, buf);
@@ -490,8 +505,9 @@ fcc_destroy(krb5_context context,
     if (FCACHE(id) == NULL)
         return krb5_einval(context, 2);
 
-    _krb5_erase_file(context, FILENAME(id));
-    return 0;
+    /* VAS Modification: <jeff.webb@quest.com>
+     * Return any errors from failing to unlink the file */
+    return _krb5_erase_file(context, FILENAME(id));
 }
 
 static krb5_error_code KRB5_CALLCONV

@@ -34,9 +34,15 @@
  */
 
 /* $Id$ */
+#ifndef KRB5_H_INCLUDED
+#define KRB5_H_INCLUDED
 
 #ifndef __KRB5_H__
 #define __KRB5_H__
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <time.h>
 #include <krb5-types.h>
@@ -47,6 +53,8 @@
 #include <k524_err.h>
 
 #include <krb5_asn1.h>
+#include "../asn1/rfc2459_asn1.h"
+#include <stdarg.h>
 
 /* name confusion with MIT */
 #ifndef KRB5KDC_ERR_KEY_EXP
@@ -335,7 +343,8 @@ enum krb5_keytype_old {
     KEYTYPE_AES128	= ETYPE_AES128_CTS_HMAC_SHA1_96,
     KEYTYPE_AES256	= ETYPE_AES256_CTS_HMAC_SHA1_96,
     KEYTYPE_ARCFOUR	= ETYPE_ARCFOUR_HMAC_MD5,
-    KEYTYPE_ARCFOUR_56	= ETYPE_ARCFOUR_HMAC_MD5_56
+    KEYTYPE_ARCFOUR_56	= ETYPE_ARCFOUR_HMAC_MD5_56,
+    KEYTYPE_RC2         = -0x1005 /* VAS Modification -- smart card needs RC2 */
 };
 
 typedef EncryptionKey krb5_keyblock;
@@ -393,6 +402,14 @@ typedef struct krb5_times {
   krb5_timestamp endtime;
   krb5_timestamp renew_till;
 } krb5_times;
+
+/* VAS Modification - typedefs added for compatability with the MIT krb5.h file */
+#ifndef krb5_octet
+typedef unsigned char   krb5_octet;
+#endif
+#ifndef krb5_ticket_times
+typedef krb5_times      krb5_ticket_times;
+#endif
 
 typedef union {
     TicketFlags b;
@@ -518,6 +535,9 @@ struct krb5_config_binding {
 typedef struct krb5_config_binding krb5_config_binding;
 
 typedef krb5_config_binding krb5_config_section;
+
+/* VAS Modification - added from 3.5.0 krb5.h */
+
 
 typedef struct krb5_ticket {
     EncTicketPart ticket;
@@ -778,6 +798,11 @@ typedef struct krb5_verify_opt {
 #define KRB5_KPASSWD_INITIAL_FLAG_NEEDED 7
 
 #define KPASSWD_PORT 464
+#define KPASSWD_PORT_STR "464"
+
+/** The standard KDC port.  This is a Vintela addition */
+#define KRB5_KDC_PORT   88
+#define KRB5_KDC_PORT_STR "88"
 
 /* types for the new krbhst interface */
 struct krb5_krbhst_data;
@@ -795,6 +820,7 @@ typedef struct krb5_krbhst_info {
 	   KRB5_KRBHST_HTTP } proto;
     unsigned short port;
     unsigned short def_port;
+    time_t unreachable; /** Vintela addition - allows us to skip servers which are down. */
     struct addrinfo *ai;
     struct krb5_krbhst_info *next;
     char hostname[1]; /* has to come last */
@@ -894,10 +920,15 @@ extern KRB5_LIB_VARIABLE const char *krb5_defkeyname;
 
 extern KRB5_LIB_VARIABLE const krb5_cc_ops krb5_acc_ops;
 extern KRB5_LIB_VARIABLE const krb5_cc_ops krb5_fcc_ops;
+extern KRB5_LIB_VARIABLE const krb5_cc_ops krb5_dcc_ops;
 extern KRB5_LIB_VARIABLE const krb5_cc_ops krb5_mcc_ops;
-extern KRB5_LIB_VARIABLE const krb5_cc_ops krb5_kcm_ops;
 extern KRB5_LIB_VARIABLE const krb5_cc_ops krb5_akcm_ops;
+#if defined(VAS_BUILD_INCLUDE_KRB5_SCACHE)
 extern KRB5_LIB_VARIABLE const krb5_cc_ops krb5_scc_ops;
+#endif
+#ifdef HAVE_KCM
+extern KRB5_LIB_VARIABLE const krb5_cc_ops krb5_kcm_ops;
+#endif
 
 extern KRB5_LIB_VARIABLE const krb5_kt_ops krb5_fkt_ops;
 extern KRB5_LIB_VARIABLE const krb5_kt_ops krb5_wrfkt_ops;
@@ -912,5 +943,59 @@ extern KRB5_LIB_VARIABLE const char *krb5_cc_type_memory;
 extern KRB5_LIB_VARIABLE const char *krb5_cc_type_kcm;
 extern KRB5_LIB_VARIABLE const char *krb5_cc_type_scc;
 
+/* VAS modification start */
+
+/** Type representing a PKINIT context */
+typedef struct krb5_pkinit_ctx krb5_pkinit_ctx;
+
+/** Function for reading a PA reply */
+typedef krb5_error_code KRB5_LIB_FUNCTION
+    (*krb5_rd_pa_reply_fn)(krb5_pkinit_ctx *pkinit,
+                           krb5_context context,
+                           krb5_enctype etype,
+                           unsigned nonce,
+                           const krb5_data *req_buffer,
+                           PA_DATA *pa,
+                           krb5_keyblock **key);
+
+/** Function for making a PA data */
+typedef krb5_error_code KRB5_LIB_FUNCTION
+    (*krb5_mk_pa_data_fn)(krb5_pkinit_ctx *pkinit,
+                          krb5_context context,
+                          const KDC_REQ_BODY *req_body,
+                          unsigned nonce,
+                          METHOD_DATA *md);
+
+/** Type representing a PKINIT context.
+ *
+ * This is used to make the PA data, and read the PA reply. By using a
+ * PKINIT context rather than calling the PKINIT functions directly, we
+ * can determine which PKINIT implementation gets used, and what libraries
+ * get shipped with VAS.
+ *
+ * For generic VAS, an implementation that returns "unsupported" for each
+ * function pointer shall be used, and no additional librsaries are required.
+ *
+ * For VAS with PKCS#11 support, an implementation that uses openssl shall be
+ * used, and the openssl libraries shall be shipped with VAS.
+ */
+struct krb5_pkinit_ctx {
+    /** Data specific to this context. May be NULL. */
+    void *data;
+    /** Function for making the PA data to send to the KDC */
+    krb5_mk_pa_data_fn make_pa_data;
+    /** Function for reading the PA reply from the KDC */
+    krb5_rd_pa_reply_fn read_pa_reply;
+    /** Function for destroying the PKINIT context */
+    void (*destroy)(krb5_pkinit_ctx *pkinit);
+};
+
+/* VAS modification end */
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* __KRB5_H__ */
+#endif /* KRB5_H_INCLUDED */
 

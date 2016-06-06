@@ -97,7 +97,7 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_acquire_cred
 	goto out;
     }
 
-    for (i = 0, j = 0; i < mechs->count; i++) {
+    for (i = 0, j = 0; (size_t)i < mechs->count; i++) { /* VAS Modification - explicit cast */
 	if (gss_oid_equal(&mechs->elements[i], GSS_SPNEGO_MECHANISM))
 	    continue;
 

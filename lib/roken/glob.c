@@ -174,6 +174,8 @@ glob(const char *pattern,
 	int c;
 	Char *bufnext, *bufend, patbuf[MaxPathLen+1];
 
+    memset( patbuf, 0, (MaxPathLen+1) );
+
 	patnext = (const u_char *) pattern;
 	if (!(flags & GLOB_APPEND)) {
 		pglob->gl_pathc = 0;
@@ -494,7 +496,7 @@ static int
 glob1(Char *pattern, glob_t *pglob, size_t *limit)
 {
 	Char pathbuf[MaxPathLen+1];
-
+    memset( pathbuf, 0, (MaxPathLen+1) );
 	/* A null pathname is invalid -- POSIX 1003.1 sect. 2.4. */
 	if (*pattern == CHAR_EOS)
 		return(0);
@@ -574,6 +576,8 @@ glob3(Char *pathbuf, Char *pathend, Char *pattern, Char *restpattern,
 	DIR *dirp;
 	int err;
 	char buf[MaxPathLen];
+
+    memset( buf, 0, MaxPathLen );
 
 	/*
 	 * The readdirfunc declaration can't be prototyped, because it is
@@ -700,7 +704,7 @@ match(Char *name, Char *pat, Char *patend)
 
 	while (pat < patend) {
 		c = *pat++;
-		switch (c & M_MASK) {
+		switch ( c ) {
 		case M_ALL:
 			if (pat == patend)
 				return(1);

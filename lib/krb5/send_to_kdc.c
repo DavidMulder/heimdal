@@ -430,6 +430,19 @@ krb5_sendto (krb5_context context,
 
      krb5_data_zero(receive);
 
+     /* VAS Modification <jeff.webb@quest.com>
+      *
+      * VAS "overrides" many functions with libvas counterparts.
+      * In 1.2.1 it looks like they have put a send_to hook in, but
+      * because the sendto is only a small portion of what is overridden
+      * then VAS will not use their interface just yet. This means that it
+      * will continue doing what it was doing under the 0.7 source
+      */
+     if( context->sendto_func )
+     {
+         return( context->sendto_func(context, send_data, handle, receive ) );
+     }
+
      for (i = 0; i < context->max_retries; ++i) {
 	 krb5_krbhst_info *hi;
 
@@ -440,6 +453,7 @@ krb5_sendto (krb5_context context,
 			 "trying to communicate with host %s in realm %s",
 			 hi->hostname, _krb5_krbhst_get_realm(handle));
 
+#if 0
 	     if (context->send_to_kdc) {
 		 struct send_to_kdc *s = context->send_to_kdc;
 
@@ -449,6 +463,8 @@ krb5_sendto (krb5_context context,
 		     goto out;
 		 continue;
 	     }
+#endif
+         /* End VAS Modification */
 
 	     ret = send_via_plugin(context, hi, context->kdc_timeout,
 				   send_data, receive);

@@ -96,17 +96,19 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
 
     keylen = RSA_private_encrypt(len, in, res, rsa, padding);
     if (keylen <= 0)
-	errx(1, "failed to private encrypt: %d %d", (int)len, (int)keylen);
+	errx(1, "failed to private encrypt: %d %d", (int)len, keylen);
 
     if (keylen > RSA_size(rsa))
 	errx(1, "keylen > RSA_size(rsa)");
 
     keylen = RSA_public_decrypt(keylen, res, res2, rsa, padding);
     if (keylen <= 0)
-	errx(1, "failed to public decrypt: %d", (int)keylen);
+	errx(1, "failed to public decrypt: %d", keylen);
 
-    if (keylen != len)
-	errx(1, "output buffer not same length: %d", (int)keylen);
+/* Vintela modification */
+    if ((unsigned) keylen != len)
+/* End Vintela modification */
+	errx(1, "output buffer not same length: %d", keylen);
 
     if (memcmp(res2, in, len) != 0)
 	errx(1, "string not the same after decryption");
@@ -115,17 +117,19 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
 
     keylen = RSA_public_encrypt(len, in, res, rsa, padding);
     if (keylen <= 0)
-	errx(1, "failed to public encrypt: %d", (int)keylen);
+	errx(1, "failed to public encrypt: %d", keylen);
 
     if (keylen > RSA_size(rsa))
 	errx(1, "keylen > RSA_size(rsa)");
 
     keylen = RSA_private_decrypt(keylen, res, res2, rsa, padding);
     if (keylen <= 0)
-	errx(1, "failed to private decrypt: %d", (int)keylen);
+	errx(1, "failed to private decrypt: %d", keylen);
 
-    if (keylen != len)
-	errx(1, "output buffer not same length: %d", (int)keylen);
+/* Vintela modification */
+    if ((unsigned) keylen != len)
+/* End Vintela modification */
+	errx(1, "output buffer not same length: %d", keylen);
 
     if (memcmp(res2, in, len) != 0)
 	errx(1, "string not the same after decryption");

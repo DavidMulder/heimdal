@@ -87,7 +87,7 @@ CAMELLIA_cbc_encrypt(const unsigned char *in, unsigned char *out,
 	    out += CAMELLIA_BLOCK_SIZE;
 	}
 	if (size) {
-	    for (i = 0; i < size; i++)
+	    for (i = 0; (unsigned long)i < size; i++)   /* VAS Modification - explicit cast */
 		tmp[i] = in[i] ^ iv[i];
 	    for (i = size; i < CAMELLIA_BLOCK_SIZE; i++)
 		tmp[i] = iv[i];
@@ -108,7 +108,7 @@ CAMELLIA_cbc_encrypt(const unsigned char *in, unsigned char *out,
 	if (size) {
 	    memcpy(tmp, in, CAMELLIA_BLOCK_SIZE);
 	    CAMELLIA_decrypt(tmp, out, key);
-	    for (i = 0; i < size; i++)
+	    for (i = 0; (unsigned long)i < size; i++) /* VAS Modification - explicit cast */
 		out[i] ^= iv[i];
 	    memcpy(iv, tmp, CAMELLIA_BLOCK_SIZE);
 	}

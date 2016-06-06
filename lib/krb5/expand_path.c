@@ -380,7 +380,7 @@ _expand_token(krb5_context context,
 
     *ret = NULL;
 
-    if (token[0] != '%' || token[1] != '{' || token_end[0] != '}' ||
+    if (token[0] != '$' || token[1] != '{' || token_end[0] != '}' ||
 	token_end - token <= 2) {
 	if (context)
 	    krb5_set_error_message(context, EINVAL,"Invalid token.");
@@ -416,7 +416,8 @@ _krb5_expand_path_tokens(krb5_context context,
 
     for (path_left = path_in; path_left && *path_left; ) {
 
-	tok_begin = strstr(path_left, "%{");
+    /* VAS Modification - the expand character is $ not % */
+	tok_begin = strstr(path_left, "${");
 
 	if (tok_begin && tok_begin != path_left) {
 

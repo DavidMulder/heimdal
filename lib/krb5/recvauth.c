@@ -111,7 +111,7 @@ krb5_recvauth_match_version(krb5_context context,
 	}
 	len = ntohl(len);
 	if (len != sizeof(her_version)
-	    || krb5_net_read (context, p_fd, her_version, len) != len
+	    || (size_t)krb5_net_read (context, p_fd, her_version, len) != len /* VAS Modification - explicit cast */
 	    || strncmp (version, her_version, len)) {
 	    repl = 1;
 	    krb5_net_write (context, p_fd, &repl, 1);
@@ -139,7 +139,7 @@ krb5_recvauth_match_version(krb5_context context,
 			       N_("malloc: out of memory", ""));
 	return ENOMEM;
     }
-    if (krb5_net_read (context, p_fd, her_appl_version, len) != len
+    if ((size_t)krb5_net_read (context, p_fd, her_appl_version, len) != len /* VAS Modification - explicit cast */
 	|| !(*match_appl_version)(match_data, her_appl_version)) {
 	repl = 2;
 	krb5_net_write (context, p_fd, &repl, 1);

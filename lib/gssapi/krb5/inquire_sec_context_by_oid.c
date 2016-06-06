@@ -149,7 +149,6 @@ static OM_uint32 inquire_sec_context_get_subkey
     }
 
     ret = krb5_store_keyblock(sp, *key);
-    krb5_free_keyblock (context, key);
     if (ret)
 	goto out;
 
@@ -176,6 +175,7 @@ out:
 	*minor_status = ret;
 	maj_stat = GSS_S_FAILURE;
     }
+    krb5_free_keyblock (context, key);
     return maj_stat;
 }
 
@@ -486,6 +486,7 @@ get_service_keyblock
 	krb5_storage_free(sp);
 	_gsskrb5_set_status(EINVAL, "No service keyblock on gssapi context");
 	*minor_status = EINVAL;
+	krb5_storage_free(sp);
 	return GSS_S_FAILURE;
     }
 

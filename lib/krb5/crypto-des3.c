@@ -59,11 +59,16 @@ static struct _krb5_key_type keytype_des3 = {
     "des3",
     168,
     24,
+    3 * sizeof(DES_cblock), /* VAS Modification */
     sizeof(struct _krb5_evp_schedule),
     DES3_random_key,
     _krb5_evp_schedule,
     _krb5_des3_salt,
     _krb5_DES3_random_to_key,
+/* VAS Modification -- for parameters */
+    NULL,
+    NULL,
+/* End VAS Modification */
     _krb5_evp_cleanup,
     EVP_des_ede3_cbc
 };
@@ -74,11 +79,16 @@ static struct _krb5_key_type keytype_des3_derived = {
     "des3",
     168,
     24,
+    24, /* VAS Modification */
     sizeof(struct _krb5_evp_schedule),
     DES3_random_key,
     _krb5_evp_schedule,
     _krb5_des3_salt_derived,
     _krb5_DES3_random_to_key,
+/* VAS Modification -- for parameters */
+    NULL,
+    NULL,
+/* End VAS Modification */
     _krb5_evp_cleanup,
     EVP_des_ede3_cbc
 };
@@ -131,6 +141,7 @@ struct _krb5_checksum_type _krb5_checksum_hmac_sha1_des3 = {
 struct _krb5_encryption_type _krb5_enctype_des3_cbc_md5 = {
     ETYPE_DES3_CBC_MD5,
     "des3-cbc-md5",
+    NULL,
     8,
     8,
     8,
@@ -147,6 +158,7 @@ struct _krb5_encryption_type _krb5_enctype_des3_cbc_md5 = {
 struct _krb5_encryption_type _krb5_enctype_des3_cbc_sha1 = {
     ETYPE_DES3_CBC_SHA1,
     "des3-cbc-sha1",
+    NULL,
     8,
     8,
     8,
@@ -163,6 +175,7 @@ struct _krb5_encryption_type _krb5_enctype_des3_cbc_sha1 = {
 struct _krb5_encryption_type _krb5_enctype_old_des3_cbc_sha1 = {
     ETYPE_OLD_DES3_CBC_SHA1,
     "old-des3-cbc-sha1",
+    NULL,
     8,
     8,
     8,
@@ -179,6 +192,7 @@ struct _krb5_encryption_type _krb5_enctype_old_des3_cbc_sha1 = {
 struct _krb5_encryption_type _krb5_enctype_des3_cbc_none = {
     ETYPE_DES3_CBC_NONE,
     "des3-cbc-none",
+    NULL,
     8,
     8,
     0,

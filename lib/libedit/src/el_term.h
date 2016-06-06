@@ -81,7 +81,7 @@ typedef struct {
 #define	A_K_EN		5
 #define	A_K_NKEYS	6
 
-#ifdef __sun
+#if 0
 extern int tgetent(char *, const char *);
 extern int tgetflag(char *);
 extern int tgetnum(char *);

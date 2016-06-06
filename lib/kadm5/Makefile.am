@@ -20,9 +20,11 @@ sample_passwd_check_la_SOURCES = sample_passwd_check.c
 sample_passwd_check_la_LDFLAGS = -module
 
 libkadm5srv_la_LIBADD = \
+    $(top_builddir)/lib/wind/libwind.la \
 	$(LIB_com_err) ../krb5/libkrb5.la \
 	../hdb/libhdb.la $(LIBADD_roken)
 libkadm5clnt_la_LIBADD = \
+    $(top_builddir)/lib/wind/libwind.la \
 	$(LIB_com_err) ../krb5/libkrb5.la $(LIBADD_roken)
 
 libexec_PROGRAMS = ipropd-master ipropd-slave
@@ -128,6 +130,7 @@ man_MANS = kadm5_pwcheck.3 iprop.8 iprop-log.8
 LDADD = \
 	libkadm5srv.la \
 	$(top_builddir)/lib/hdb/libhdb.la \
+    $(top_builddir)/lib/wind/libwind.la \
 	$(top_builddir)/lib/krb5/libkrb5.la \
 	$(top_builddir)/lib/asn1/libasn1.la \
 	$(LIB_hcrypto) \
@@ -139,6 +142,7 @@ LDADD = \
 iprop_log_LDADD = \
 	libkadm5srv.la \
 	$(top_builddir)/lib/hdb/libhdb.la \
+    $(top_builddir)/lib/wind/libwind.la \
 	$(top_builddir)/lib/krb5/libkrb5.la \
 	$(top_builddir)/lib/asn1/libasn1.la \
 	$(LIB_hcrypto) \

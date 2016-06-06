@@ -234,7 +234,7 @@ match_local_principals(krb5_context context,
  */
 
 KRB5_LIB_FUNCTION krb5_boolean KRB5_LIB_CALL
-krb5_kuserok (krb5_context context,
+_krb5_kuserok_internal (krb5_context context,
 	      krb5_principal principal,
 	      const char *luser)
 {
@@ -252,8 +252,23 @@ krb5_kuserok (krb5_context context,
     char pwbuf[2048];
     struct passwd pw;
 
+#ifdef SOLARIS_2_4
+    pwd = &pw;
+/* VAS Modification -- Only Solairs 2.4 needs this, later
+ * versions use the POSIX standard. And this implimentation
+ * is wrong, this function returns a structure pointer, so
+ * whenever it works it would return as non-zero, making it
+ * fail. But to use the other one we would have to modify
+ * some flags that might give other behavior
+ * ( __POSIX_C_ stuff ) so fix this return. */
+    if(getpwnam_r(luser, pwd, pwbuf, sizeof(pwbuf)) == 0)
+/* END VAS Modifcation -- seth.ellsworth@quest.com */
+        return FALSE;
+#else
     if(getpwnam_r(luser, &pw, pwbuf, sizeof(pwbuf), &pwd) != 0)
 	return FALSE;
+#endif /* ifdef SOLARIS */
+
 #else
     pwd = getpwnam (luser);
 #endif
@@ -301,3 +316,19 @@ krb5_kuserok (krb5_context context,
     return match_local_principals(context, principal, luser);
 #endif
 }
+
+/* --- Begin Vintela addition ---*/
+krb5_boolean KRB5_LIB_FUNCTION
+krb5_kuserok( krb5_context context,
+              krb5_principal principal,
+              const char *luser )
+{
+    if( context->kuserok_func )
+    {
+        return context->kuserok_func( context, principal, luser );
+    }
+
+    return _krb5_kuserok_internal( context, principal, luser );
+}
+/* --- End Vintela addition --- */
+

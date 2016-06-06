@@ -49,7 +49,7 @@ gss_indicate_mechs(OM_uint32 *minor_status,
 			    minor_status, &set);
 			if (major_status)
 				continue;
-			for (i = 0; i < set->count; i++)
+			for (i = 0; (size_t)i < set->count; i++) /* VAS Modification - explicit cast */
 				major_status = gss_add_oid_set_member(
 				    minor_status, &set->elements[i], mech_set);
 			gss_release_oid_set(minor_status, &set);

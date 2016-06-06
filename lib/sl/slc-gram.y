@@ -343,6 +343,7 @@ gen_command(struct assignment *as)
 	if(strcmp(a->name, "name") == 0)
 	    cprint(1, "    { \"%s\" },\n", a->u.value);
     cprint(0, "\n");
+    free(f);
 }
 
 static void
@@ -446,7 +447,8 @@ struct type_handler {
 	  defval_neg_flag,
 	  NULL
 	},
-	{ NULL }
+    /* VAS Modification -- initialize all members */
+	{ NULL, NULL, NULL, NULL, NULL }
 };
 
 static struct type_handler *find_handler(struct assignment *type)
@@ -685,6 +687,7 @@ gen_wrapper(struct assignment *as)
     cprint(1, "return 0;\n");
     cprint(0, "}\n");
     cprint(0, "\n");
+    free(n);
 }
 
 char cname[PATH_MAX];
@@ -710,7 +713,7 @@ gen(struct assignment *as)
     cprint(0, "SL_cmd commands[] = {\n");
     for(a = as; a != NULL; a = a->next)
 	gen_command(a->u.assignment);
-    cprint(1, "{ NULL }\n");
+    cprint(1, "{ NULL, NULL, NULL, NULL }\n"); /* VAS Modification - initialize all members */
     cprint(0, "};\n");
 
     hprint(0, "extern SL_cmd commands[];\n");
@@ -718,10 +721,12 @@ gen(struct assignment *as)
 
 int version_flag;
 int help_flag;
+/* VAS Modification, initialize all members */
 struct getargs args[] = {
-    { "version", 0, arg_flag, &version_flag },
-    { "help", 0, arg_flag, &help_flag }
+    { "version", 0, arg_flag, &version_flag, NULL, NULL },
+    { "help", 0, arg_flag, &help_flag, NULL, NULL }
 };
+/* End VAS Modification */
 int num_args = sizeof(args) / sizeof(args[0]);
 
 static void

@@ -577,12 +577,12 @@ _krb5_kt_principal_not_found(krb5_context context,
 	kvno_str[0] = '\0';
 
     krb5_set_error_message (context, ret,
-			    N_("Failed to find %s%s in keytab %s (%s)",
+			    N_("Failed to find %s%s in keytab %s (enctype: %s)",
 			       "principal, kvno, keytab file, enctype"),
 			    princ,
 			    kvno_str,
-			    kt_name ? kt_name : "unknown keytab",
-			    enctype_str ? enctype_str : "unknown enctype");
+			    kt_name ? kt_name : "(unknown keytab)",
+			    enctype_str ? enctype_str : "unknown");
     free(kt_name);
     free(enctype_str);
     return ret;
@@ -617,6 +617,12 @@ krb5_kt_get_entry(krb5_context context,
     krb5_error_code ret;
     krb5_kt_cursor cursor;
 
+    /* We shoud make sure that the id is not NULL before trying to use it
+     * part of bug# 27613 - jhurst 5-29-14
+     */
+    if(!id)
+        return KRB5_KT_NOTFOUND;
+ 
     if(id->get)
 	return (*id->get)(context, id, principal, kvno, enctype, entry);
 
@@ -635,6 +641,18 @@ krb5_kt_get_entry(krb5_context context,
 	       the kvno, so only compare those bits */
 	    if (kvno == tmp.vno
 		|| (tmp.vno < 256 && kvno % 256 == tmp.vno)) {
+        /* VAS Modification
+         * If we are searching for a specific kvno and there is an
+         * entry in the keytab with a kvno as 1 (W2k scenario, see
+         * Wynn's comment below), we should free this
+         *
+         * There will only be an entry with a 1 if we've matched
+         * on an entry with the same principal name AND has a kvno
+         * of 1 (W2k wildcard scenario, so let's free it.
+         */
+        if( entry->vno == 1 )
+            krb5_kt_free_entry( context, entry );
+        /* End VAS Modification */
 		krb5_kt_copy_entry_contents (context, &tmp, entry);
 		krb5_kt_free_entry (context, &tmp);
 		krb5_kt_end_seq_get(context, id, &cursor);
@@ -644,6 +662,23 @@ krb5_kt_get_entry(krb5_context context,
 		    krb5_kt_free_entry (context, entry);
 		krb5_kt_copy_entry_contents (context, &tmp, entry);
 	    }
+            /* VAS Modification - wynn.wilkes@quest.com
+             * If we are in a scenario where we joined or changed our
+             * password against a Windows 2000 server so all of our
+             * kvno's in the keytab are 1, and we are in a mixed
+             * environment with windows 2003 servers, then we could
+             * possibly get ticket requests with valid kvno's, but
+             * all we have are keys with a kvno of 1. In this scenario
+             * we need to try to use the keys with kvno=1, since they
+             * are the only possibility and will most likely work
+             * (unless someone got the keys out of sync from the AD side).
+             */
+            else if (tmp.vno == 1 ) {
+                if (entry->vno)
+                    krb5_kt_free_entry (context, entry);
+                krb5_kt_copy_entry_contents (context, &tmp, entry); 
+            }
+            /* End VAS Modification */
 	}
 	krb5_kt_free_entry(context, &tmp);
     }
@@ -818,7 +853,22 @@ krb5_kt_add_entry(krb5_context context,
 			       id->prefix);
 	return KRB5_KT_NOWRITE;
     }
+    /* Quest Software modification <jeff.webb@quest.com>
+     * Only set the timestamp, if there wasn't a timestamp there, or the
+     * timestamp was in the future.
+     * When copying keytabs (mainly from a file-based to a memory-based)
+     * this would overwrite the timestamp that was stored into the file.
+     *
+     * The below line was changed:
+     * entry->timestamp = time(NULL);
+     */
+    if( entry->timestamp == 0 ||
+        entry->timestamp > (u_int32_t)time( NULL ) )
+    {
     entry->timestamp = time(NULL);
+    }
+    /* end of Quest Software modification */
+
     return (*id->add)(context, id,entry);
 }
 

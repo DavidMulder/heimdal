@@ -576,7 +576,13 @@ get_cred_kdc(krb5_context context,
 				   0,
 				   &krbtgt->addresses,
 				   nonce,
-				   eflags,
+                   /* VAS Modification:  3.5.2 always allowed a server mismatch to
+                    * make sure that cross-realm tgt requests did not fail with
+                    * KRB5KRB_AP_ERR_MODIFIED (Message stream modified)
+                    * <jeff.webb@quest.com>
+                    */
+				   eflags | EXTRACT_TICKET_ALLOW_SERVER_MISMATCH,
+                   /* End Modification */
 				   decrypt_tkt_with_subkey,
 				   subkey);
     out2:
@@ -603,6 +609,26 @@ out:
     return ret;
 
 }
+
+/* VAS Modification - create a non static entry point for
+ * libvas_get_cred_from_kdc_flags.
+ */
+krb5_error_code KRB5_LIB_FUNCTION
+_krb5_get_cred_kdc( krb5_context context,
+                    krb5_ccache id,
+                    krb5_kdc_flags flags,
+                    krb5_addresses *addresses,
+                    krb5_creds *in_creds,
+                    krb5_creds *krbtgt,
+                    krb5_principal impersonate_principal,
+                    Ticket *second_ticket,
+                    krb5_creds *out_creds)
+{
+    return get_cred_kdc( context, id, flags, addresses, in_creds,
+                          krbtgt, impersonate_principal, second_ticket,
+                          out_creds );
+}
+/* End VAS Modification */
 
 /*
  * same as above, just get local addresses first if the krbtgt have
@@ -648,6 +674,25 @@ get_cred_kdc_address(krb5_context context,
     krb5_free_addresses(context, &addresses);
     return ret;
 }
+
+/* Begin VAS Modification - Create a non-static entry point for
+ * libvas_get_cred_kdc_flags()
+ */
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+_krb5_get_cred_kdc_address( krb5_context context,
+                           krb5_ccache id,
+                            krb5_kdc_flags flags,
+                            krb5_addresses *addrs,
+                            krb5_creds *in_creds,
+                            krb5_creds *krbtgt,
+                            krb5_principal impersonate_principal,
+                            Ticket *second_ticket,
+                            krb5_creds *out_creds)
+{
+    return get_cred_kdc_address( context, id, flags, addrs, in_creds, krbtgt,
+                                 impersonate_principal, second_ticket, out_creds );
+}
+/* End VAS Modification */
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_get_kdc_cred(krb5_context context,
@@ -823,6 +868,10 @@ get_cred_kdc_capath_worker(krb5_context context,
 	return not_found(context, in_creds->server, KRB5_CC_NOTFOUND);
 
     /* XXX this can loop forever */
+/* VAS Modification */
+    if( in_creds->session.keytype )
+        tmp_creds.session.keytype = in_creds->session.keytype;
+/* End VAS modification */
     while(1){
 	heim_general_string tgt_inst;
 
@@ -885,6 +934,18 @@ get_cred_kdc_capath_worker(krb5_context context,
     krb5_free_creds(context, tgt);
     return ret;
 }
+
+/* Begin VAS Modification - Create a non-static entry point for
+ * libvas_get_cred_from_kdc_flags()
+ */
+krb5_error_code KRB5_LIB_FUNCTION
+_krb5_add_cred( krb5_context context,
+                krb5_creds const *tkt,
+                krb5_creds ***tgts )
+{
+    return add_cred( context, tkt, tgts );
+}
+/* End VAS Modification */
 
 /*
 get_cred(server)
@@ -1109,6 +1170,7 @@ _krb5_get_cred_kdc_any(krb5_context context,
 		       krb5_creds ***ret_tgts)
 {
     krb5_error_code ret;
+#if 0
     krb5_deltat offset;
 
     ret = krb5_cc_get_kdc_offset(context, ccache, &offset);
@@ -1116,7 +1178,26 @@ _krb5_get_cred_kdc_any(krb5_context context,
 	context->kdc_sec_offset = offset;
 	context->kdc_usec_offset = 0;
     }
+#endif
 
+    /* VAS Modifcation -- jbowers */
+    if( context->getcreds_func )
+    {
+        /* Heimdal has their own implementation for
+         * server referrals now, so just use that, but 
+         * don't do it unless server referrals are turned
+         * on (It would be awesome if they were just turned 
+         * on all the time, but when they are we have this 
+         * problem with duplicate service tickets where we
+         * fail with decrypt_integrity check errors.  If we 
+         * could get back a decent error and that indicated 
+         * it wasn't the right ticket we could just fail 
+         * appropriately here and continue on with the 
+         * get_cred_kdc_capath() function).
+         * 
+         * We can know if they are turned on if we
+         * have a getcred_func(), even if we aren't using
+         * it anymore */
     ret = get_cred_kdc_referral(context,
 				flags,
 				ccache,
@@ -1127,6 +1208,20 @@ _krb5_get_cred_kdc_any(krb5_context context,
 				ret_tgts);
     if (ret == 0 || flags.b.canonicalize)
 	return ret;
+#if 0
+        ret = context->getcreds_func( context,
+                                      flags,
+                                      ccache,
+                                      in_creds,
+                                      out_creds,
+                                      ret_tgts);
+
+        if( ret == 0 || flags.b.canonicalize )
+            return ret;
+#endif
+    }
+    /* End VAS Modifcation */
+
     return get_cred_kdc_capath(context,
 				flags,
 				ccache,
@@ -1511,6 +1606,7 @@ krb5_get_renewed_creds(krb5_context context,
     if (ret == 0) {
 	flags.b.forwardable = template->flags.b.forwardable;
 	flags.b.proxiable = template->flags.b.proxiable;
+	in.session.keytype = template->session.keytype;
 	krb5_free_creds (context, template);
     }
 

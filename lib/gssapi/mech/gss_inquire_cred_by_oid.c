@@ -69,7 +69,7 @@ gss_inquire_cred_by_oid (OM_uint32 *minor_status,
 		if (status != GSS_S_COMPLETE)
 			continue;
 
-		for (i = 0; i < rset->count; i++) {
+		for (i = 0; (size_t)i < rset->count; i++) {  /* VAS Modification - explicit cast */
 			status = gss_add_buffer_set_member(minor_status,
 			     &rset->elements[i], &set);
 			if (status != GSS_S_COMPLETE)

@@ -211,7 +211,7 @@ find_type_in_ad(krb5_context context,
      * to run over the whole authorization data fields to check if
      * there are any container clases we need to care about.
      */
-    for (i = 0; i < ad->len; i++) {
+    for (i = 0; (size_t)i < ad->len; i++) { /* VAS Modification - explicit cast */
 	if (!*found && ad->val[i].ad_type == type) {
 	    ret = der_copy_octet_string(&ad->val[i].ad_data, data);
 	    if (ret) {
@@ -486,15 +486,25 @@ noreferral:
     /*
      * Expect excact match or that we got a krbtgt
      */
+    /* VAS Modification -- Get a little bit more debug about the mismatch */
     if (krb5_principal_compare(context, requested, returned) != TRUE &&
 	(krb5_realm_compare(context, requested, returned) != TRUE &&
 	 krb5_principal_is_krbtgt(context, returned) != TRUE))
     {
-	krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
-			       N_("Not same server principal returned "
-				  "as requested", ""));
+        char* requested_str = NULL;
+        char* returned_str = NULL;
+        krb5_unparse_name( context, requested, &requested_str );
+        krb5_unparse_name( context, returned, &returned_str );
+        krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED, "Not same server principal returned as requested. "
+                              " Requested %s, returned %s", requested_str ? requested_str : "Not Set", 
+                              returned_str ? returned_str : "Not Set" );
+        if( returned_str )
+            free( returned_str );
+        if( requested_str )
+            free( requested_str );
 	return KRB5KRB_AP_ERR_MODIFIED;
     }
+    /* End VAS Modification */
     return 0;
 }
 
@@ -592,12 +602,22 @@ check_client_referral(krb5_context context,
     return 0;
 
 noreferral:
+    /* VAS Modification -- Get a little bit more debug about the mismatch */
     if (krb5_principal_compare(context, requested, mapped) == FALSE) {
-	krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
-			       N_("Not same client principal returned "
-				  "as requested", ""));
+        char* requested_str = NULL;
+        char* returned_str = NULL;
+        krb5_unparse_name( context, requested, &requested_str );
+        krb5_unparse_name( context, mapped, &returned_str );
+        krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED, "Not same client principal returned as requested. "
+                              " Requested %s, returned %s", requested_str ? requested_str : "Not Set", 
+                              returned_str ? returned_str : "Not Set" );
+        if( returned_str )
+            free( returned_str );
+        if( requested_str )
+            free( requested_str );
 	return KRB5KRB_AP_ERR_MODIFIED;
     }
+    /*END VAS Modification */
     return 0;
 }
 

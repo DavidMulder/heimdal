@@ -75,28 +75,89 @@ __gsskrb5_ccache_lifetime(OM_uint32 *minor_status,
     return GSS_S_COMPLETE;
 }
 
+/* VAS Modification  -- Derive the keytab name from the service principal name */
+static char* _service_from_princ( const krb5_principal princ )
+{
+    char* serviceName = NULL;
+    if( princ == NULL ) 
+   return serviceName;
+    if( princ->name.name_type == KRB5_NT_PRINCIPAL )
+    {
+       if( princ->name.name_string.len == 2 )
+       {   
+           serviceName = princ->name.name_string.val[0];
+       }
+    }
+    return serviceName;
+}
 
+static char* _basename( char* name )
+{
+    int i = 0;
+    int len = strlen( name );
+    for( i = len -1; i >= 0; i-- )
+    {
+   if( name[i] == '/' )
+   {    
+       name[i] = '\0';
+       return name;
+   }
+    }
+    return NULL;
+}
+/* END VAS Modification */
 
 
 static krb5_error_code
-get_keytab(krb5_context context, krb5_keytab *keytab)
+get_keytab(krb5_context context, krb5_keytab *keytab, const krb5_principal princ)
 {
     krb5_error_code kret;
+    char *name = NULL;
 
+    /* VAS Modification  -- Derive the keytab name from the service principal name */
+    char* service = _service_from_princ( princ );
+    /* End VAS Modification */
     HEIMDAL_MUTEX_lock(&gssapi_keytab_mutex);
 
     if (_gsskrb5_keytab != NULL) {
-	char *name = NULL;
 
 	kret = krb5_kt_get_full_name(context, _gsskrb5_keytab, &name);
 	if (kret == 0) {
 	    kret = krb5_kt_resolve(context, name, keytab);
-	    krb5_xfree(name);
 	}
     } else
 	kret = krb5_kt_default(context, keytab);
 
+	/* VAS Modification  -- Derive the keytab name from the service principal name */
+	{
+		char* service_kt_name = NULL;
+		struct stat stb;
+		memset( &stb, 0, sizeof(stb) );
+		
+	    if( service != NULL )
+        {
+			kret = krb5_kt_get_name(context,
+				*keytab,
+				name, 
+				sizeof(name));
+
+			char* basename = _basename( name );
+
+			asprintf( &service_kt_name, "%s/%s.keytab", name, service );
+		}
+		if( service_kt_name &&
+		    stat( service_kt_name, &stb ) == 0 )
+		{
+			// free keytab
+			(*keytab)->close(context, *keytab);
+			*keytab = NULL; 
+			kret = krb5_kt_resolve(context, service_kt_name, keytab);
+		}
+		if( service_kt_name )   free( service_kt_name );
+    }
+    /* END VAS Modification */
     HEIMDAL_MUTEX_unlock(&gssapi_keytab_mutex);
+    krb5_xfree(name);
 
     return (kret);
 }
@@ -139,6 +200,11 @@ static OM_uint32 acquire_initiator_cred
 	goto end;
     }
 
+    /* Quest Modification -- force the ccache to always be NULL, so we will
+     * get the default name (as we have it set up), since that is the way 
+     * we have resolved the ccache in the past
+     */
+#if 0
     if (handle->principal) {
 	kret = krb5_cc_cache_match (context,
 				    handle->principal,
@@ -148,6 +214,8 @@ static OM_uint32 acquire_initiator_cred
 	    goto found;
 	}
     }
+#endif
+    /* End Quest Modfication */
 
     if (ccache == NULL) {
 	kret = krb5_cc_default(context, &ccache);
@@ -195,7 +263,7 @@ static OM_uint32 acquire_initiator_cred
 						password->value,
 						NULL, NULL, 0, NULL, opt);
 	} else {
-	    kret = get_keytab(context, &keytab);
+	    kret = get_keytab(context, &keytab, handle->principal);
 	    if (kret) {
 		krb5_get_init_creds_opt_free(context, opt);
 		goto end;
@@ -274,7 +342,7 @@ static OM_uint32 acquire_acceptor_cred
 	goto end;
     }
 
-    kret = get_keytab(context, &handle->keytab);
+    kret = get_keytab(context, &handle->keytab, handle->principal);
     if (kret)
 	goto end;
 
@@ -305,6 +373,16 @@ static OM_uint32 acquire_acceptor_cred
 	}
 	krb5_kt_end_seq_get (context, handle->keytab, &c);
     }
+
+    /** Addition by wwilkes@vintela.com
+     * This fixes the SAP gss test suite by setting the lifetime of the gss_cred.
+     * We don't know how long this will last, but setting it to indefinite seems
+     * to work better than leaving the lifetime at 0
+     **/
+    if( handle->lifetime == 0 )
+        handle->lifetime = GSS_C_INDEFINITE;
+    /** End addition */
+
 end:
     if (ret != GSS_S_COMPLETE) {
 	if (handle->keytab != NULL)

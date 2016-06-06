@@ -42,7 +42,7 @@ try (const char *format, ...)
     char buf1[256], buf2[256];
 
     va_start (ap, format);
-    ret = rk_vsnprintf (buf1, sizeof(buf1), format, ap);
+    ret = vsnprintf (buf1, sizeof(buf1), format, ap);
     if (ret >= sizeof(buf1))
 	errx (1, "increase buf and try again");
     va_end (ap);
@@ -132,9 +132,14 @@ cmp_with_sprintf_long_long (void)
 {
     int tot = 0;
     long long long_long_values[] = {
-	((long long)LONG_MIN) -1, LONG_MIN, -17, -1,
+/* VAS Modification: Don't test integer overflow. */
+	/*((long long)LONG_MIN) -1,*/
+    LONG_MIN, -17, -1,
 	0,
-	1, 17, 4711, 65535, LONG_MAX, ((long long)LONG_MAX) + 1};
+	1, 17, 4711, 65535, LONG_MAX
+    /*, ((long long)LONG_MAX) + 1 */
+    };
+/* End VAS Modification. */
     int i;
 
     for (i = 0; i < sizeof(long_long_values) / sizeof(long_long_values[0]); ++i) {
@@ -219,7 +224,7 @@ cmp_with_sprintf_float (void)
 static int
 test_null (void)
 {
-    return rk_snprintf (NULL, 0, "foo") != 3;
+    return snprintf (NULL, 0, "foo") != 3;
 }
 
 static int
@@ -237,7 +242,7 @@ test_sizet (void)
 	tot += try("%zX", sizet_values[i]);
 #else
 	char buf[256];
-	rk_snprintf(buf, sizeof(buf), "%zu", sizet_values[i]);
+	snprintf(buf, sizeof(buf), "%zu", sizet_values[i]);
 	if (strcmp(buf, result[i]) != 0) {
 	    printf("%s != %s", buf, result[i]);
 	    tot++;

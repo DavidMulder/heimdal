@@ -150,11 +150,11 @@ pipe_execv(FILE **stdin_fd, FILE **stdout_fd, FILE **stderr_fd,
     char **argv;
 
     if(stdin_fd != NULL)
-	pipe(in_fd);
+	if(pipe(in_fd)){}
     if(stdout_fd != NULL)
-	pipe(out_fd);
+	if(pipe(out_fd)){}
     if(stderr_fd != NULL)
-	pipe(err_fd);
+	if(pipe(err_fd)){}
     pid = fork();
     switch(pid) {
     case 0:

@@ -1,5 +1,6 @@
 /*-
  * Copyright (c) 2005 Doug Rabson
+ * Copyright (c) 2010 Quest Software, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -49,7 +50,10 @@ gss_release_name(OM_uint32 *minor_status,
 {
 	struct _gss_name *name;
 
-	*minor_status = 0;
+    /* VAS Modification: Use a local variable for the minor status to avoid
+     * a rare bug in mod_auth_vas where the minor_status pointer passed in
+     * is NULL which was dereferenced causing a crash. Bug #20425. */
+    OM_uint32 local_minor_status = 0;
 
 	if (input_name == NULL || *input_name == NULL)
 	    return GSS_S_COMPLETE;
@@ -62,13 +66,16 @@ gss_release_name(OM_uint32 *minor_status,
 		struct _gss_mechanism_name *mn;
 		mn = HEIM_SLIST_FIRST(&name->gn_mn);
 		HEIM_SLIST_REMOVE_HEAD(&name->gn_mn, gmn_link);
-		mn->gmn_mech->gm_release_name(minor_status,
+		mn->gmn_mech->gm_release_name(&local_minor_status,
 					      &mn->gmn_name);
 		free(mn);
 	}
-	gss_release_buffer(minor_status, &name->gn_value);
+	gss_release_buffer(&local_minor_status, &name->gn_value);
 	free(name);
 	*input_name = GSS_C_NO_NAME;
+
+    if (minor_status)
+        *minor_status = local_minor_status;
 
 	return (GSS_S_COMPLETE);
 }

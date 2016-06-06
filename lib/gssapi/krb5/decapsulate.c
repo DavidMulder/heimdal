@@ -78,7 +78,7 @@ _gssapi_verify_mech_header(u_char **str,
     if (mech_len < 0)
 	return GSS_S_DEFECTIVE_TOKEN;
 
-    if (mech_len != mech->length)
+    if (mech_len != (ssize_t)mech->length) /* VAS modification - explicit cast */
 	return GSS_S_BAD_MECH;
     if (ct_memcmp(p,
 		  mech->elements,

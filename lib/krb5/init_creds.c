@@ -93,7 +93,10 @@ krb5_get_init_creds_opt_free(krb5_context context,
     if (opt->opt_private->refcount < 1) /* abort ? */
 	return;
     if (--opt->opt_private->refcount == 0) {
+/* VAS modification -- pkinit freed elsewhere */
+#if 0
 	_krb5_get_init_creds_opt_free_pkinit(opt);
+#endif
 	free(opt->opt_private);
     }
     memset(opt, 0, sizeof(*opt));

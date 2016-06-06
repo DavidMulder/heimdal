@@ -65,7 +65,7 @@ gss_inquire_context(OM_uint32 *minor_status,
 	    src_name ? &src_mn : NULL,
 	    targ_name ? &targ_mn : NULL,
 	    lifetime_rec,
-	    mech_type,
+	    NULL,
 	    ctx_flags,
 	    locally_initiated,
 	    xopen);
@@ -100,6 +100,10 @@ gss_inquire_context(OM_uint32 *minor_status,
 		}
 		*targ_name = (gss_name_t) name;
 	}
+
+    if(mech_type) {
+        *mech_type = &m->gm_mech_oid;
+    }
 
 	return (GSS_S_COMPLETE);
 }

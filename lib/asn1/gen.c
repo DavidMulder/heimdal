@@ -160,6 +160,12 @@ init_generate (const char *filename, const char *base)
     fprintf (headerfile,
 	     "#include <stddef.h>\n"
 	     "#include <time.h>\n\n");
+
+    /* VAS Modification: forward port from 0.7 */
+#ifndef HAVE_TIMEGM
+    fprintf (headerfile, "time_t timegm (struct tm*);\n\n");
+#endif
+    /* End VAS Modification */
     fprintf (headerfile,
 	     "#ifndef __asn1_common_definitions__\n"
 	     "#define __asn1_common_definitions__\n\n");
@@ -582,7 +588,10 @@ define_asn1 (int level, Type *t)
     case TSet:
     case TSequence: {
 	Member *m;
-	int max_width = 0;
+    /* Vintela modification - wynn.wilkes@quest.com
+     * fix the type */
+	size_t max_width = 0;
+    /* End Vintela modification */
 
 	if(t->type == TChoice)
 	    fprintf(headerfile, "CHOICE {\n");

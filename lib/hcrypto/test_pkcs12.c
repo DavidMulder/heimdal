@@ -134,7 +134,9 @@ int
 main(int argc, char **argv)
 {
     int ret = 0;
-    int i;
+/* Vintela modification */
+    unsigned i;
+/* End Vintela modification */
 
     for (i = 0; i < sizeof(p12_pbe_tests)/sizeof(p12_pbe_tests[0]); i++)
 	ret += test_pkcs12_pbe(&p12_pbe_tests[i]);

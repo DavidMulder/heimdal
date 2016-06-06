@@ -36,10 +36,30 @@
 #ifndef _HEIM_UI_H
 #define _HEIM_UI_H 1
 
+/* Vintela modification */
+#ifdef __cplusplus
+extern "C" {
+#endif
+/* End Vintela modification */
+
 /* symbol renaming */
 #define UI_UTIL_read_pw_string hc_UI_UTIL_read_pw_string
 
 int	UI_UTIL_read_pw_string(char *, int, const char *, int); /* XXX */
+
+/* VAS Modification - mpeterson@vintela.com
+ *
+ * Added a read_pw_string that allows you to pass in a verify prompt
+ * I18n
+ */
+int UI_UTIL_read_pw_string_with_verify_prompt(char*, int, char*, char*);
+/* End VAS Modification */
+
+/* Vintela modification */
+#ifdef __cplusplus
+}
+#endif
+/* End Vintela modification */
 
 #endif /* _HEIM_UI_H */
 

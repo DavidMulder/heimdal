@@ -55,6 +55,13 @@
 #include <der-private.h>
 #include "asn1-template.h"
 
+/* VAS Modification: only use the _heim_timegm() if the system doesn't provide
+ * it!
+ */
+#ifndef HAVE_TIMEGM
+time_t _heim_timegm( struct tm *);
+struct tm * _heim_gmtime( const time_t * );
+#endif
 time_t _der_timegm (struct tm *);
 struct tm * _der_gmtime(time_t t, struct tm *);
 size_t _heim_len_unsigned (unsigned);

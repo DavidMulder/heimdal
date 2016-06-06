@@ -141,7 +141,9 @@ main(int argc, char **argv)
     krb5_error_code ret;
     krb5_context context;
     krb5_crypto crypto;
-    int i;
+/* Vintela modification */
+    unsigned i;
+/* End Vintela modification */
 
     ret = krb5_init_context(&context);
     if (ret)

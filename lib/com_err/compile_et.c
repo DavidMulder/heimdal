@@ -42,10 +42,12 @@
 #include <err.h>
 #include "parse.h"
 
+#include "qas_krb5_util.h"
+
 int numerror;
 extern FILE *yyin;
 
-extern void yyparse(void);
+extern int yyparse(void);
 
 long base_id;
 int number;
@@ -75,7 +77,9 @@ generate_c(void)
     if(c_file == NULL)
 	return 1;
 
+#if 0  /* disabled by Vintela */
     fprintf(c_file, "/* Generated from %s */\n", filename);
+#endif
     if(id_str)
 	fprintf(c_file, "/* %s */\n", id_str);
     fprintf(c_file, "\n");
@@ -120,6 +124,22 @@ generate_c(void)
 	    "num_errors);\n", name, name);
     fprintf(c_file, "}\n");
 
+    /* VAS Modification (dean.povey@quest.com)
+     * Add function to lookup the name of an error given the error code. 
+     */
+    fprintf( c_file, "\n" );
+    fprintf( c_file, "const char *%s_get_error_name( int errcode )\n", name );
+    fprintf( c_file, "{\n");
+    fprintf( c_file, "\tswitch ( errcode )\n" );
+    fprintf( c_file, "\t{\n");
+    for(ec = codes, n = 0; ec; ec = ec->next, n++) {
+        fprintf(c_file, "\t\tcase %s: return \"%s\";\n", ec->name, ec->name);
+    }
+    fprintf( c_file, "\t\tdefault: return \"UNKNOWN\";\n");
+    fprintf( c_file, "\t}\n");
+    fprintf( c_file, "}\n");
+    /* End VAS Modifications */
+
     fclose(c_file);
     return 0;
 }
@@ -140,13 +160,52 @@ generate_h(void)
 	if(!isalnum((unsigned char)*p))
 	    *p = '_';
 
+#if 0 /* disabled by Vintela */
     fprintf(h_file, "/* Generated from %s */\n", filename);
+#endif
+
     if(id_str)
 	fprintf(h_file, "/* %s */\n", id_str);
     fprintf(h_file, "\n");
     fprintf(h_file, "#ifndef %s\n", fn);
     fprintf(h_file, "#define %s\n", fn);
+   
+    /* VAS modification (wwilkes@vintela.com) 
+     * Handle special comments of "#include <" and put that include into the
+     * header file. This allows our symbol renaming to work correctly for the
+     * error table code */
+    {
+        FILE*   input = NULL;
+        char*   line = NULL;
+        size_t  line_sz = 0;
+
+        if( (input = fopen( filename, "r" )) != NULL &&
+            qas_krb5_find_entry( input,
+                                 "#include",
+                                 ' ',
+                                 0,
+                                 &line,
+                                 &line_sz,
+                                 1 ) == 0 )
+        {
+            fprintf( h_file, "#ifndef NO_VAS_SYM_FIXING\n%s\n#endif\n\n", line );
+        }
+
+        /* Additional VAS modification (dan.peterson@quest.com) 
+         * Fix these generated headers for C++ */
+        fprintf( h_file, "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n" );
+    
+
+        if( input ) fclose( input );
+        if( line )  free( line );
+    }
+    /* End VAS Modifications */
+
+    /* VAS Modification (dean.povey@quest.com). Add Error name lookup proto */
+    fprintf(h_file, "const char *%s_get_error_name( int errcode );\n", name );
     fprintf(h_file, "\n");
+    /* End VAS Modifications */
+
     fprintf(h_file, "struct et_list;\n");
     fprintf(h_file, "\n");
     fprintf(h_file,
@@ -170,8 +229,13 @@ generate_h(void)
     fprintf(h_file, "\n");
     fprintf(h_file, "#define COM_ERR_BINDDOMAIN_%s \"heim_com_err%ld\"\n", name, base_id);
     fprintf(h_file, "\n");
-    fprintf(h_file, "#endif /* %s */\n", fn);
 
+    /* Additional VAS Modification (dan.peterson@quest.com)
+     * Need to close my C++ extern statement */
+    fprintf( h_file, "#ifdef __cplusplus\n}\n#endif /* extern C */\n\n" );
+    /* End Additional Modification */
+
+    fprintf(h_file, "#endif /* %s */\n", fn);
 
     fclose(h_file);
     return 0;

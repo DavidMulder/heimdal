@@ -78,6 +78,11 @@ static char *okshells[] = { _PATH_BSHELL, _PATH_CSHELL, NULL };
 static char **curshell, **shells, *strings;
 static char **initshells (void);
 
+/* VAS Modification -- define this for IRIX */
+#ifdef IRIX
+#define ROKEN_LIB_FUNCTION
+#endif
+
 /*
  * Get a list of shells from _PATH_SHELLS, if it exists.
  */

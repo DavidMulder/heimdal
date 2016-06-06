@@ -448,6 +448,13 @@ gsskrb5_acceptor_start(OM_uint32 * minor_status,
 	krb5_rd_req_out_ctx_free(context, out);
 	if (kret) {
 	    ret = GSS_S_FAILURE;
+        /* QAS Modification, handle replay detection -- jeff.webb@quest.com */
+        if( kret == KRB5KRB_AP_ERR_REPEAT ||
+            kret == KRB5_RC_REPLAY )
+        {
+            ret = GSS_S_DUPLICATE_TOKEN;
+        }
+        /* End QAS Modification */
 	    *minor_status = kret;
 	    return ret;
 	}
@@ -853,6 +860,18 @@ _gsskrb5_accept_sec_context(OM_uint32 * minor_status,
     gsskrb5_ctx ctx;
 
     GSSAPI_KRB5_INIT(&context);
+    /* QAS Modification - initialize replay detection for context establishment
+     * -- jeff.webb@quest.com
+     */
+    {
+        krb5_rcache     rcache;
+        /* The rcache instance that is returned is actually part of the
+         * krb5_context, which will be cleaned up with the context is
+         * destroyed
+         */
+        krb5_rc_default( context, &rcache );
+    }
+    /* End QAS Modification */
 
     output_token->length = 0;
     output_token->value = NULL;

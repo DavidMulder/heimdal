@@ -35,6 +35,8 @@
 
 #include "krb5_locl.h"
 
+#include "qas_krb5_util.h"
+
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
 #endif
@@ -45,6 +47,7 @@ struct fileptr {
     FILE *f;
 };
 
+#if 0
 static char *
 config_fgets(char *str, size_t len, struct fileptr *ptr)
 {
@@ -70,6 +73,7 @@ config_fgets(char *str, size_t len, struct fileptr *ptr)
 	return str;
     }
 }
+#endif
 
 static krb5_error_code parse_section(char *p, krb5_config_section **s,
 				     krb5_config_section **res,
@@ -152,29 +156,69 @@ static krb5_error_code
 parse_list(struct fileptr *f, unsigned *lineno, krb5_config_binding **parent,
 	   const char **err_message)
 {
+#if 0
+    /* VAS Modification - allocate buf dynamically */
     char buf[KRB5_BUFSIZ];
+#else
+    char    *buf = NULL;
+    size_t  buf_size = 0;
+#endif
     krb5_error_code ret;
     krb5_config_binding *b = NULL;
     unsigned beg_lineno = *lineno;
 
+    /* VAS Modification
+     * Change this behavior to dynamically allocate the necessary amount of memory
+     * needed to return the entire line...
+     *
+     * Revert the changes Wynn did in the 2.6 branch to the 3.0 branch
+     *
+     * <jeff.webb@quest.com>
+     */
+
+#if 0
     while(config_fgets(buf, sizeof(buf), f) != NULL) {
+#endif
+    while( qas_krb5_readline( f->f, &buf, &buf_size ) >= 0 ) {
 	char *p;
 
 	++*lineno;
-	buf[strcspn(buf, "\r\n")] = '\0';
+    if( *buf != '\0' )
+    {
+        if( buf[strlen(buf) - 1] == '\n' )
+            buf[strlen(buf) - 1] = '\0';
+        if( buf[strlen(buf) - 1] == '\r' )
+            buf[strlen(buf) - 1] = '\0';
+    }
+    /* buf[strcspn(buf, "\r\n")] = '\0'; */
+    /* End VAS Modification */
 	p = buf;
 	while(isspace((unsigned char)*p))
 	    ++p;
 	if (*p == '#' || *p == ';' || *p == '\0')
+    {
+        if( buf ) free( buf );
+        buf = NULL;
 	    continue;
+    }
 	while(isspace((unsigned char)*p))
 	    ++p;
 	if (*p == '}')
+    {
+        if( buf ) free( buf );
+        buf = NULL;
 	    return 0;
+    }
 	if (*p == '\0')
+    {
+        if( buf ) free( buf );
+        buf = NULL;
 	    continue;
+    }
 	ret = parse_binding (f, lineno, p, &b, parent, err_message);
 	if (ret)
+        if( buf ) free(  buf );
+        buf = NULL;
 	    return ret;
     }
     *lineno = beg_lineno;
@@ -350,38 +394,73 @@ krb5_config_parse_debug (struct fileptr *f,
 {
     krb5_config_section *s = NULL;
     krb5_config_binding *b = NULL;
+#if 0
     char buf[KRB5_BUFSIZ];
-    krb5_error_code ret;
+#else
+    char    *buf = NULL;
+    size_t  buf_size = 0;
+#endif
+    krb5_error_code ret = 0;
 
+    /* VAS Modification
+     * Change this behavior to dynamically allocate the necessary amount of memory
+     * needed to return the entire line...
+     *
+     * Revert the changes Wynn did in the 2.6 branch to the 3.0 branch
+     *
+     * <jeff.webb@quest.com>
+     */
+#if 0
     while (config_fgets(buf, sizeof(buf), f) != NULL) {
+#endif
+    while( qas_krb5_readline( f->f, &buf, &buf_size ) >= 0 ) {
+
 	char *p;
 
 	++*lineno;
-	buf[strcspn(buf, "\r\n")] = '\0';
+    if( *buf != '\0' )
+    {
+        if( buf[strlen(buf) - 1] == '\n' )
+            buf[strlen(buf) - 1] = '\0';
+        if( buf[strlen(buf) - 1] == '\r' )
+            buf[strlen(buf) - 1] = '\0';
+    }
+    /* buf[strcspn(buf, "\r\n")] = '\0'; */
+    /* End VAS Modification */
 	p = buf;
 	while(isspace((unsigned char)*p))
 	    ++p;
 	if (*p == '#' || *p == ';')
+    {
+        if( buf ) free( buf );
+        buf = NULL;
 	    continue;
+    }
 	if (*p == '[') {
 	    ret = parse_section(p, &s, res, err_message);
 	    if (ret)
-		return ret;
+		goto out;
 	    b = NULL;
 	} else if (*p == '}') {
 	    *err_message = "unmatched }";
-	    return EINVAL;	/* XXX */
+	    ret = EINVAL;	/* XXX */
+        goto out;
 	} else if(*p != '\0') {
 	    if (s == NULL) {
 		*err_message = "binding before section";
-		return EINVAL;
+		ret = EINVAL;
+        goto out;
 	    }
 	    ret = parse_binding(f, lineno, p, &b, &s->u.list, err_message);
 	    if (ret)
-		return ret;
+		goto out;
 	}
     }
-    return 0;
+
+out:
+    if( buf ) free( buf );
+    buf = NULL;
+    return ret;
 }
 
 static int
@@ -1249,7 +1328,10 @@ krb5_config_vget_int_default (krb5_context context,
 	char *endptr;
 	long l;
 	l = strtol(str, &endptr, 0);
-	if (endptr == str)
+    /* Begin VAS Modification, see VAS bug 9978 -- *
+     * If we are out of range use the default      */
+    if( l == LONG_MIN || l == LONG_MAX || endptr == str )
+    /* End VAS Modification */
 	    return def_value;
 	else
 	    return l;

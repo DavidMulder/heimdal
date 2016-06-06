@@ -183,7 +183,10 @@ main(int argc, char **argv)
 {
     krb5_context context;
     krb5_error_code ret;
-    int i, optidx = 0;
+/* Vintela modification */
+    unsigned i;
+    int optidx = 0;
+/* End Vintela modification */
 
     setprogname(argv[0]);
 

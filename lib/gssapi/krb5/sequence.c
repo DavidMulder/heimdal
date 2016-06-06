@@ -185,7 +185,7 @@ _gssapi_msg_order_check(struct gss_msg_order *o, OM_uint32 seq_num)
 	return GSS_S_DUPLICATE_TOKEN;
     }
 
-    for (i = 0; i < o->length - 1; i++) {
+    for (i = 0; (size_t)i < o->length - 1; i++) { /* VAS Modification - explicit cast */
 	if (o->elem[i] == seq_num)
 	    return GSS_S_DUPLICATE_TOKEN;
 	if (o->elem[i + 1] < seq_num && o->elem[i] < seq_num) {

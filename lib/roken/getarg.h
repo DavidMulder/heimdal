@@ -48,6 +48,12 @@
 #endif
 #endif
 
+/* Vintela modification */
+#ifdef __cplusplus
+extern "C" {
+#endif
+/* End Vintela modification */
+
 struct getargs{
     const char *long_name;
     char short_name;
@@ -108,5 +114,11 @@ arg_printusage_i18n (struct getargs *args,
 
 ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL
 free_getarg_strings (getarg_strings *);
+
+/* Vintela modification */
+#ifdef __cplusplus
+}
+#endif
+/* End Vintela modification */
 
 #endif /* __GETARG_H__ */

@@ -33,6 +33,11 @@
 
 #include <config.h>
 
+/* VAS Modification: Changes for aix */
+#ifdef AIX
+#include <strings.h>
+#endif
+
 #include <err.h>
 #include "roken.h"
 

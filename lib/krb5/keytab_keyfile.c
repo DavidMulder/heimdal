@@ -247,7 +247,7 @@ akf_next_entry(krb5_context context,
 
     pos = krb5_storage_seek(cursor->sp, 0, SEEK_CUR);
 
-    if ((pos - 4) / (4 + 8) >= d->num_entries)
+    if ((pos - 4) / (4 + 8) >= ( off_t )d->num_entries)
 	return KRB5_KT_END;
 
     ret = krb5_make_principal (context, &entry->principal,
@@ -435,7 +435,7 @@ akf_add_entry(krb5_context context,
     }
     ret = krb5_storage_write(sp, entry->keyblock.keyvalue.data,
 			     entry->keyblock.keyvalue.length);
-    if(ret != entry->keyblock.keyvalue.length) {
+    if((size_t)ret != entry->keyblock.keyvalue.length) { /* VAS Modification - explicit cast */
 	if (ret < 0)
 	    ret = errno;
 	else
@@ -462,7 +462,9 @@ const krb5_kt_ops krb5_akf_ops = {
     akf_next_entry,
     akf_end_seq_get,
     akf_add_entry,
-    NULL /* remove */
+    NULL, /* remove */
+    NULL, /* data */ /* VAS Modificaiton - initialize all members */
+    0 /* version */ /* VAS Modificaiton - initialize all members */
 };
 
 #endif /* HEIMDAL_SMALLER */

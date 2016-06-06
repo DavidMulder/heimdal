@@ -93,12 +93,26 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_inquire_cred
 	HEIMDAL_MUTEX_lock(&icred->cred_id_mutex);
 
     if (output_name != NULL) {
-	if (icred && icred->principal != NULL) {
-	    gss_name_t name;
+
+	if ((icred && icred->principal != NULL) ||
+    /* Quest Modification: jeff.webb@quest.com
+     * The SAP SSO does not appear to handle the translation between
+     * COMPUTER$@REALM and host/dnsname@REALM.  0.7 worked off entirely
+     * from the incoming cred_handle (i.e. acred below). If there is a
+     * principal here in the acred, then use the gsskrb5_duplciate_name call
+     * instead of krb5_sname_to_principal() to avoid the translation.
+     */
+        (acred && acred->principal != NULL)) {
+    /* End Modification */
+	    gss_name_t name = NULL;
 
 	    if (acred && acred->principal)
 		name = (gss_name_t)acred->principal;
-	    else
+        /* Quest modification: jeff.webb@quest.com
+         * Need to check for icred as well..
+         */
+	    else if (icred && icred->principal)
+        /* End Modification */
 		name = (gss_name_t)icred->principal;
 
             ret = _gsskrb5_duplicate_name(minor_status, name, output_name);

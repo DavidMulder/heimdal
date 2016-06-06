@@ -224,6 +224,7 @@ endif
 
 libgssapi_la_LIBADD = \
 	$(top_builddir)/lib/ntlm/libheimntlm.la \
+    $(top_builddir)/lib/wind/libwind.la \
 	$(top_builddir)/lib/krb5/libkrb5.la \
 	$(top_builddir)/lib/asn1/libasn1.la \
 	$(LIB_com_err) \
@@ -315,6 +316,7 @@ test_ntlm_LDADD = \
 	$(LDADD)
 
 LDADD = libgssapi.la \
+    $(top_builddir)/lib/wind/libwind.la \
 	$(top_builddir)/lib/krb5/libkrb5.la \
 	$(LIB_roken)
 
@@ -325,6 +327,7 @@ nodist_gsstool_SOURCES = gss-commands.c gss-commands.h
 
 gsstool_LDADD = libgssapi.la \
 	$(top_builddir)/lib/sl/libsl.la \
+    $(top_builddir)/lib/wind/libwind.la \
 	$(top_builddir)/lib/krb5/libkrb5.la \
 	$(LIB_readline) \
 	$(LIB_roken)

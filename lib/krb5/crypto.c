@@ -32,6 +32,12 @@
  */
 
 #include "krb5_locl.h"
+#include "../asn1/cms_asn1.h"
+
+/* VAS Modification -- Solaris seems to require explicit inclution of crypt.h */
+#ifdef SOLARIS
+#include <crypt.h>
+#endif
 
 struct _krb5_key_usage {
     unsigned usage;
@@ -129,7 +135,8 @@ krb5_generate_random_keyblock(krb5_context context,
 
 static krb5_error_code
 _key_schedule(krb5_context context,
-	      struct _krb5_key_data *key)
+	      struct _krb5_key_data *key
+          /* VAS Modification */, const void *params)
 {
     krb5_error_code ret;
     struct _krb5_encryption_type *et = _krb5_find_enctype(key->key->keytype);
@@ -157,7 +164,7 @@ _key_schedule(krb5_context context,
 	key->schedule = NULL;
 	return ret;
     }
-    (*kt->schedule)(context, kt, key);
+    (*kt->schedule)(context, kt, key /* VAS Modification */ , params);
     return 0;
 }
 
@@ -338,7 +345,7 @@ get_checksum_key(krb5_context context,
 	*key = &crypto->key;
     }
     if(ret == 0)
-	ret = _key_schedule(context, *key);
+	ret = _key_schedule(context, *key /* VAS Modification */ , crypto->params);
     return ret;
 }
 
@@ -644,7 +651,7 @@ struct _krb5_encryption_type *
 _krb5_find_enctype(krb5_enctype type)
 {
     int i;
-    for(i = 0; i < _krb5_num_etypes; i++)
+    for(i = 0; (unsigned) i < _krb5_num_etypes; i++) /* VAS Modification - explicit cast */
 	if(_krb5_etypes[i]->type == type)
 	    return _krb5_etypes[i];
     return NULL;
@@ -679,7 +686,7 @@ krb5_string_to_enctype(krb5_context context,
 		       krb5_enctype *etype)
 {
     int i;
-    for(i = 0; i < _krb5_num_etypes; i++)
+    for(i = 0; (unsigned) i < _krb5_num_etypes; i++) /* VAS Modification - explicit cast */
 	if(strcasecmp(_krb5_etypes[i]->name, string) == 0){
 	    *etype = _krb5_etypes[i]->type;
 	    return 0;
@@ -859,7 +866,7 @@ encrypt_internal_derived(krb5_context context,
     ret = _get_derived_key(context, crypto, ENCRYPTION_USAGE(usage), &dkey);
     if(ret)
 	goto fail;
-    ret = _key_schedule(context, dkey);
+    ret = _key_schedule(context, dkey /* VAS Modification */ , crypto->params);
     if(ret)
 	goto fail;
     ret = (*et->encrypt)(context, dkey, p, block_sz, 1, usage, ivec);
@@ -884,6 +891,7 @@ encrypt_internal(krb5_context context,
 		 void *ivec)
 {
     size_t sz, block_sz, checksum_sz;
+    size_t padsize = 0; /* VAS Modification */
     Checksum cksum;
     unsigned char *p, *q;
     krb5_error_code ret;
@@ -893,6 +901,13 @@ encrypt_internal(krb5_context context,
 
     sz = et->confoundersize + checksum_sz + len;
     block_sz = (sz + et->padsize - 1) &~ (et->padsize - 1); /* pad */
+/* VAS Modification -- for RC2 for smart card */
+    if ((et->flags & F_PADCMS) && et->padsize != 1) {
+	padsize = et->padsize - (sz % et->padsize);
+	if (padsize == et->padsize)
+	    block_sz += et->padsize;
+    }
+/* End VAS Modification */
     p = calloc(1, block_sz);
     if(p == NULL) {
 	krb5_set_error_message(context, ENOMEM, N_("malloc: out of memory", ""));
@@ -922,9 +937,17 @@ encrypt_internal(krb5_context context,
 	goto fail;
     memcpy(p + et->confoundersize, cksum.checksum.data, cksum.checksum.length);
     free_Checksum(&cksum);
-    ret = _key_schedule(context, &crypto->key);
+    ret = _key_schedule(context, &crypto->key /* VAS Modification */ , crypto->params);
     if(ret)
 	goto fail;
+/* VAS Modification -- for RC2 for smart card */
+    if (et->flags & F_PADCMS) {
+   size_t i;
+   q = p + len + checksum_sz + et->confoundersize;
+   for (i = 0; i < padsize; i++)
+       q[i] = padsize;
+    }
+/* End VAS Modification*/
     ret = (*et->encrypt)(context, &crypto->key, p, block_sz, 1, 0, ivec);
     if (ret) {
 	memset(p, 0, block_sz);
@@ -997,8 +1020,8 @@ decrypt_internal_derived(krb5_context context,
     checksum_sz = CHECKSUMSIZE(et->keyed_checksum);
     if (len < checksum_sz + et->confoundersize) {
 	krb5_set_error_message(context, KRB5_BAD_MSIZE,
-			       N_("Encrypted data shorter then "
-				  "checksum + confunder", ""));
+			       N_("Encrypted data shorter than "
+				  "checksum + confounder", ""));
 	return KRB5_BAD_MSIZE;
     }
 
@@ -1021,7 +1044,7 @@ decrypt_internal_derived(krb5_context context,
 	free(p);
 	return ret;
     }
-    ret = _key_schedule(context, dkey);
+    ret = _key_schedule(context, dkey /* VAS Modification */ , crypto->params);
     if(ret) {
 	free(p);
 	return ret;
@@ -1079,8 +1102,8 @@ decrypt_internal(krb5_context context,
     checksum_sz = CHECKSUMSIZE(et->checksum);
     if (len < checksum_sz + et->confoundersize) {
 	krb5_set_error_message(context, KRB5_BAD_MSIZE,
-			       N_("Encrypted data shorter then "
-				  "checksum + confunder", ""));
+			       N_("Encrypted data shorter than "
+				  "checksum + confounder", ""));
 	return KRB5_BAD_MSIZE;
     }
 
@@ -1091,7 +1114,7 @@ decrypt_internal(krb5_context context,
     }
     memcpy(p, data, len);
 
-    ret = _key_schedule(context, &crypto->key);
+    ret = _key_schedule(context, &crypto->key /* VAS Modification */ , crypto->params);
     if(ret) {
 	free(p);
 	return ret;
@@ -1147,8 +1170,14 @@ decrypt_internal_special(krb5_context context,
     }
     if (len < cksum_sz + et->confoundersize) {
 	krb5_set_error_message(context, KRB5_BAD_MSIZE,
-			       N_("Encrypted data shorter then "
-				  "checksum + confunder", ""));
+			       N_("Encrypted data shorter than "
+				  "checksum + confounder", ""));
+	return KRB5_BAD_MSIZE;
+    }
+    if (len < cksum_sz + et->confoundersize) {
+	krb5_set_error_message(context, KRB5_BAD_MSIZE,
+			      "Encrypted data shorter than "
+			      "checksum + confounder");
 	return KRB5_BAD_MSIZE;
     }
 
@@ -1350,7 +1379,7 @@ krb5_encrypt_iov_ivec(krb5_context context,
 	free(p);
 	return ret;
     }
-    ret = _key_schedule(context, dkey);
+    ret = _key_schedule(context, dkey /* VAS Modification */ , crypto->params);
     if(ret) {
 	free(p);
 	return ret;
@@ -1473,7 +1502,7 @@ krb5_decrypt_iov_ivec(krb5_context context,
 	free(p);
 	return ret;
     }
-    ret = _key_schedule(context, dkey);
+    ret = _key_schedule(context, dkey /* VAS Modification */ , crypto->params);
     if(ret) {
 	free(p);
 	return ret;
@@ -1851,7 +1880,8 @@ _krb5_derive_key(krb5_context context,
     krb5_error_code ret = 0;
     struct _krb5_key_type *kt = et->keytype;
 
-    ret = _key_schedule(context, key);
+    ret = _key_schedule(context, key 
+			/* VAS Modification -- we can use NULL here because params are just for RC2 and it never gets called */ , NULL);
     if(ret)
 	return ret;
     if(et->blocksize * 8 < kt->bits || len != et->blocksize) {
@@ -2041,7 +2071,10 @@ krb5_crypto_init(krb5_context context,
 	*crypto = NULL;
 	return unsupported_enctype(context, etype);
     }
-    if((*crypto)->et->keytype->size != key->keyvalue.length) {
+/* VAS Modification -- RC2 key size support for smart card */
+    /* if((*crypto)->et->keytype->size != key->keyvalue.length) { */
+    if((*crypto)->et->keytype->minsize > key->keyvalue.length) {
+/* End VAS Modification */
 	free(*crypto);
 	*crypto = NULL;
 	krb5_set_error_message (context, KRB5_BAD_KEYSIZE,
@@ -2113,6 +2146,75 @@ krb5_crypto_destroy(krb5_context context,
     free (crypto);
     return 0;
 }
+
+/* VAS Modification -- for RC2 parameter in smart card */
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_crypto_get_params(krb5_context context,
+              const krb5_crypto crypto,
+              const krb5_data *params,
+              krb5_data *ivec)
+{
+    krb5_error_code (*gp)(krb5_context, const krb5_data *,void **,krb5_data *);
+    krb5_error_code ret;
+
+    gp = crypto->et->keytype->get_params;
+    if (gp) {
+   if (crypto->params) {
+       krb5_set_error_message(context, KRB5_PROG_ETYPE_NOSUPP,
+                 "krb5_crypto_get_params called "
+                 "more than once");
+       return KRB5_PROG_ETYPE_NOSUPP;
+   }
+   ret = (*gp)(context, params, &crypto->params, ivec);
+    } else {
+   size_t size;
+   if (ivec == NULL)
+       return 0;
+   ret = decode_CMSCBCParameter(params->data, params->length, ivec, &size);
+    }
+    if (ret)
+   return ret;
+    if (ivec->length < crypto->et->blocksize) {
+   krb5_data_free(ivec);
+   krb5_set_error_message(context, ASN1_PARSE_ERROR, "%s IV of wrong size", 
+                 crypto->et->name);
+   return ASN1_PARSE_ERROR;
+    }
+    return 0;
+}
+
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_crypto_set_params(krb5_context context,
+              const krb5_crypto crypto,
+              const krb5_data *ivec,
+              krb5_data *params)
+{
+    krb5_error_code (*sp)(krb5_context, const void *,
+             const krb5_data *, krb5_data *);
+    krb5_error_code ret;
+
+    sp = crypto->et->keytype->set_params;
+    if (sp == NULL) {
+   size_t size;
+   if (ivec == NULL)
+       return 0;
+   ASN1_MALLOC_ENCODE(CMSCBCParameter, params->data, params->length,
+              ivec, &size, ret);
+   if (ret)
+       return ret;
+   if (size != params->length)
+       krb5_abortx(context, "Internal asn1 encoder failure");
+   return 0;
+    }
+    if (crypto->params) {
+   krb5_set_error_message(context, KRB5_PROG_ETYPE_NOSUPP,
+                 "krb5_crypto_set_params called "
+                 "more than once");
+   return KRB5_PROG_ETYPE_NOSUPP;
+    }
+    return (*sp)(context, crypto->params, ivec, params);
+}
+/* End VAS Modification */
 
 /**
  * Return the blocksize used algorithm referenced by the crypto context

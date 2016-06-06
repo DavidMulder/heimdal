@@ -53,6 +53,12 @@
 
 #include <krb5-types.h>
 
+/* VAS Modification - copied over from 0.7 source */
+#ifdef HAVE_STRINGS_H
+#include <strings.h>
+#endif
+/* End VAS Modification */
+
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
@@ -162,6 +168,9 @@ struct sockaddr_dl;
 
 struct send_to_kdc;
 
+/* VAS modification start */
+
+#if 0
 /* XXX glue for pkinit */
 struct hx509_certs_data;
 struct krb5_pk_identity;
@@ -169,6 +178,9 @@ struct krb5_pk_cert;
 struct ContentInfo;
 struct AlgorithmIdentifier;
 typedef struct krb5_pk_init_ctx_data *krb5_pk_init_ctx;
+#endif
+
+/* VAS modification end */
 struct krb5_dh_moduli;
 
 /* v4 glue */
@@ -238,7 +250,7 @@ struct _krb5_get_init_creds_opt_private {
     /* PA_PAC_REQUEST */
     krb5_get_init_creds_tristate req_pac;
     /* PKINIT */
-    krb5_pk_init_ctx pk_init_ctx;
+    krb5_pkinit_ctx *pk_init_ctx; /* VAS Modification - type and pointer */
     krb5_get_init_creds_tristate addressless;
     int flags;
 #define KRB5_INIT_CREDS_CANONICALIZE		1
@@ -303,8 +315,39 @@ typedef struct krb5_context_data {
 #ifdef PKINIT
     hx509_context hx509ctx;
 #endif
+    /* VAS Modifications: these allow custom implementations for various
+     * operations to be used */
+    krb5_error_code (*sendto_func)( krb5_context context,
+                                    const krb5_data *send_data,
+                                    krb5_krbhst_handle handle,
+                                    krb5_data *receive );
+
+    krb5_error_code (*getcreds_func)( krb5_context context,
+                                      krb5_kdc_flags flags,
+                                      krb5_ccache ccache,
+                                      krb5_creds *in_creds,
+                                      krb5_creds **out_creds,
+                                      krb5_creds ***ret_tgts );
+
+    krb5_error_code (*cc_generate_default_name_func)( krb5_context context,
+                                                      void *userinfo,
+                                                      char **name );
+
+    krb5_boolean (*kuserok_func)( krb5_context context,
+                                  krb5_principal princ,
+                                  const char *luser );
+
+    krb5_error_code (*get_host_realm_funct)( krb5_context context,
+                                             const char *host,
+                                             krb5_realm **realms );
+
+    void *vas_ctx;
+    krb5_rcache rcache_ctx;
+    /* End VAS Modifications */
 } krb5_context_data;
 
+/* VAS Modification - change these values */
+#if 0
 #ifndef KRB5_USE_PATH_TOKENS
 #define KRB5_DEFAULT_CCNAME_FILE "FILE:/tmp/krb5cc_%{uid}"
 #else
@@ -313,12 +356,21 @@ typedef struct krb5_context_data {
 #define KRB5_DEFAULT_CCNAME_API "API:"
 #define KRB5_DEFAULT_CCNAME_KCM_KCM "KCM:%{uid}"
 #define KRB5_DEFAULT_CCNAME_KCM_API "API:%{uid}"
+#else
+#define KRB5_DEFAULT_CCNAME_FILE "FILE:/tmp/krb5cc_${uid}"
+#define KRB5_DEFAULT_CCNAME_API "FILE:"
+#define KRB5_DEFAULT_CCNAME_DIR "DIR:/tmp/krb5cc_${uid}_dir/"
+#define KRB5_DEFAULT_CCNAME_KCM_KCM "KCM:${uid}"
+#define KRB5_DEFAULT_CCNAME_KCM_API "API:${uid}"
+#endif
 
 #define EXTRACT_TICKET_ALLOW_CNAME_MISMATCH		1
 #define EXTRACT_TICKET_ALLOW_SERVER_MISMATCH		2
 #define EXTRACT_TICKET_MATCH_REALM			4
 #define EXTRACT_TICKET_AS_REQ				8
 #define EXTRACT_TICKET_TIMESYNC				16
+
+/* VAS modification end */
 
 /*
  * Configurable options
@@ -333,7 +385,11 @@ typedef struct krb5_context_data {
 #endif
 
 #ifndef KRB5_ADDRESSLESS_DEFAULT
-#define KRB5_ADDRESSLESS_DEFAULT TRUE
+/* Quest Modification <jeff.webb@quest.com>
+ * make this false instead of true to mimic VAS 3.x behavior */
+/*#define KRB5_ADDRESSLESS_DEFAULT TRUE */
+#define KRB5_ADDRESSLESS_DEFAULT FALSE
+/* End Quest Modification */
 #endif
 
 #ifndef KRB5_FORWARDABLE_DEFAULT
@@ -359,5 +415,7 @@ enum krb5_pk_type {
 };
 
 #endif /* PKINIT */
+
+# define ISPATHSEP(x) (x == '/')
 
 #endif /* __KRB5_LOCL_H__ */

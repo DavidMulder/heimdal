@@ -15,19 +15,20 @@ man_MANS = \
 	kgetcred.1 \
 	kimpersonate.8
 
-bin_PROGRAMS = kinit kdestroy kgetcred kcc
+bin_PROGRAMS = kinit kdestroy kgetcred
 libexec_PROGRAMS = kdigest kimpersonate
 
-noinst_PROGRAMS = kverify kdecode_ticket generate-requests
+noinst_PROGRAMS = kverify kdecode_ticket generate-requests kcc
 
 kinit_LDADD = \
-	$(LIB_kafs) \
-	$(top_builddir)/lib/krb5/libkrb5.la \
-	$(top_builddir)/lib/ntlm/libheimntlm.la \
-	$(LIB_hcrypto) \
-	$(top_builddir)/lib/asn1/libasn1.la \
-	$(LIB_libintl) \
-	$(LIB_roken)
+    $(LIB_kafs) \
+    $(top_builddir)/lib/wind/libwind.la \
+    $(top_builddir)/lib/krb5/libkrb5.la \
+    $(top_builddir)/lib/ntlm/libheimntlm.la \
+    $(LIB_hcrypto) \
+    $(top_builddir)/lib/asn1/libasn1.la \
+    $(LIB_libintl) \
+    $(LIB_roken)
 
 kdestroy_LDADD	= $(kinit_LDADD)
 
@@ -47,12 +48,13 @@ dist_kdigest_SOURCES = kdigest.c
 nodist_kdigest_SOURCES = kdigest-commands.c
 
 kdigest_LDADD = \
-	$(top_builddir)/lib/ntlm/libheimntlm.la \
-	$(top_builddir)/lib/krb5/libkrb5.la \
-	$(LIB_hcrypto) \
-	$(top_builddir)/lib/asn1/libasn1.la \
-	$(top_builddir)/lib/sl/libsl.la \
-	$(LIB_roken)
+    $(top_builddir)/lib/ntlm/libheimntlm.la \
+    $(top_builddir)/lib/wind/libwind.la \
+    $(top_builddir)/lib/krb5/libkrb5.la \
+    $(LIB_hcrypto) \
+    $(top_builddir)/lib/asn1/libasn1.la \
+    $(top_builddir)/lib/sl/libsl.la \
+    $(LIB_roken)
 
 $(kdigest_OBJECTS): kdigest-commands.h
 
@@ -67,10 +69,11 @@ kcc-commands.c kcc-commands.h: kcc-commands.in
 	$(SLC) $(srcdir)/kcc-commands.in
 
 LDADD = \
-	$(top_builddir)/lib/krb5/libkrb5.la \
-	$(LIB_hcrypto) \
-	$(top_builddir)/lib/asn1/libasn1.la \
-	$(LIB_roken)
+    $(top_builddir)/lib/wind/libwind.la \
+    $(top_builddir)/lib/krb5/libkrb5.la \
+    $(LIB_hcrypto) \
+    $(top_builddir)/lib/asn1/libasn1.la \
+    $(LIB_roken)
 
 EXTRA_DIST = NTMakefile $(man_MANS) \
 	kcc-version.rc \
@@ -83,6 +86,6 @@ EXTRA_DIST = NTMakefile $(man_MANS) \
 
 # make sure install-exec-hook doesn't have any commands in Makefile.am.common
 install-exec-hook:
-	(cd $(DESTDIR)$(bindir) && rm -f klist && $(LN_S) kcc klist)
-	(cd $(DESTDIR)$(bindir) && rm -f kswitch && $(LN_S) kcc kswitch)
+	$(mkinstalldirs) $(DESTDIR)$(bindir)
+	$(INSTALL_PROGRAM) kcc $(DESTDIR)$(bindir)/.klist
 

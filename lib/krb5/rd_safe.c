@@ -154,6 +154,9 @@ krb5_rd_safe(krb5_context context,
     /* check timestamp */
     if (auth_context->flags & KRB5_AUTH_CONTEXT_DO_TIME) {
 	krb5_timestamp sec;
+    /* QAS Modification (replay detection) jeff.webb@quest.com */
+    krb5_error_code replay_ret = 0;
+    /* End QAS Modification */
 
 	krb5_timeofday (context, &sec);
 
@@ -164,6 +167,20 @@ krb5_rd_safe(krb5_context context,
 	    krb5_clear_error_message (context);
 	    goto failure;
 	}
+    /* QAS Modification - jeff.webb@quest.com
+     * If the memory-based replay cache is initialized in the context,
+     * then check to see if we've seen this authenticator before.
+     */
+    if( (replay_ret = krb5_rc_store( context,
+                                     context->rcache_ctx,
+                                     (krb5_donot_replay *)auth_context->authenticator ) )
+            == KRB5_RC_REPLAY )
+    {
+        krb5_clear_error_string( context );
+        ret = KRB5KRB_AP_ERR_REPEAT;
+        goto failure;
+    }
+    /* End QAS Modification */
     }
     /* XXX - check replay cache */
 

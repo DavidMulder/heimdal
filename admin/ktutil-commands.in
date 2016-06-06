@@ -63,6 +63,12 @@ command = {
 		help = "password for key"
 	}
 	option = {
+		long = "read-encrypted"
+		short = "E"
+		type = "flag"
+		help = "read already encrypted key from stdin"
+	}
+	option = {
 		long = "salt"
 		short = "s"
 		type = "-flag"
@@ -85,7 +91,8 @@ command = {
 	help = "Adds a key to a keytab."
 	max_args = "0"
 }
-command = {
+/* VAS Modification - do not include this command */
+/*command = {
 	name = "change"
 	option = {
 		long = "realm"
@@ -111,7 +118,8 @@ command = {
 	function = "kt_change"
 	argument = "[principal...]"
 	help = "Change keys for specified principals (default all)."
-}
+} */
+/* End of VAS Modification */
 command = {
 	name = "copy"
 	function = "kt_copy"
@@ -120,7 +128,8 @@ command = {
 	max_args = "2"
 	help = "Copies one keytab to another."
 }
-command = {
+/* VAS Modification - do not include this command */
+/*command = {
 	name = "get"
 	option = {
 		long = "principal"
@@ -161,7 +170,8 @@ command = {
 	min_args = "1"
 	argument = "principal..."
 	help = "Change keys for specified principals, and add them to the keytab."
-}
+} */
+/* End VAS Modification */
 command = {
 	name = "list"
 	option = {
@@ -193,7 +203,7 @@ command = {
 }
 command = {
 	name = "remove"
-	name = "delete"
+/*	name = "delete" */
 	option = {
 		long = "principal"
 		short = "p"

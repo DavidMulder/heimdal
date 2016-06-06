@@ -116,6 +116,11 @@ add_padata(krb5_context context,
 	for (ep = enctypes; *ep != ETYPE_NULL; ep++)
 	    netypes++;
     }
+    if( netypes == 0 ) /* VAS Modification -  Bug#17836 on some platforms (ubuntu)*/
+        return ENOENT;   /* realloc behaves as a free() if size is 0 and ptr is not null*/
+                        /* Returning ENOENT because we need to return a non zero value.
+                         * Future versions may require a different return value. */
+
     pa2 = realloc (md->val, (md->len + netypes) * sizeof(*md->val));
     if (pa2 == NULL) {
 	krb5_set_error_message(context, ENOMEM, N_("malloc: out of memory", ""));
@@ -123,7 +128,7 @@ add_padata(krb5_context context,
     }
     md->val = pa2;
 
-    for (i = 0; i < netypes; ++i) {
+    for (i = 0; (unsigned)i < netypes; ++i) { /* VAS Modification - explicit cast */
 	krb5_keyblock *key;
 
 	ret = (*key_proc)(context, enctypes[i], *salt, keyseed, &key);

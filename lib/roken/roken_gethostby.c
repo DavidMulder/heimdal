@@ -35,8 +35,11 @@
 
 #include "roken.h"
 
+/* VAS Modification: Don't need these undefined */
+#if 0
 #undef roken_gethostbyname
 #undef roken_gethostbyaddr
+#endif
 
 static struct sockaddr_in dns_addr;
 static char *dns_req;

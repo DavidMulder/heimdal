@@ -38,7 +38,10 @@ AC_REQUIRE([AC_TYPE_SIZE_T])
 AC_HAVE_TYPE([ssize_t],[#include <unistd.h>])
 AC_REQUIRE([AC_TYPE_PID_T])
 AC_REQUIRE([AC_TYPE_UID_T])
-AC_HAVE_TYPE([long long])
+dnl We can't use long long on hpux so don't do the test - Dan
+if test "x$ostype" != "xhpux"; then
+    AC_HAVE_TYPE([long long])
+fi
 
 AC_REQUIRE([rk_RETSIGTYPE])
 
@@ -48,6 +51,8 @@ AC_REQUIRE([AC_HEADER_TIME])
 
 AC_CHECK_HEADERS([\
 	arpa/inet.h				\
+	arpa/nameser.h			\
+	arpa/nameser_compat.h	\
 	config.h				\
 	crypt.h					\
 	dirent.h				\
@@ -89,7 +94,18 @@ AC_CHECK_HEADERS([\
 	userconf.h				\
 	usersec.h				\
 	util.h					\
+	vis.h					\
 ])
+
+# Resolver functions from resolv.h require several headers to be included first.
+AC_CHECK_HEADERS([resolv.h],,,[AC_INCLUDES_DEFAULT
+/* <sys/types.h> is required, but covered by the default includes above */
+#ifdef HAVE_NETINET_IN_H
+# include <netinet/in.h>
+#endif
+#ifdef HAVE_ARPA_NAMESER_H
+# include <arpa/nameser.h>
+#endif])
 
 AC_HAVE_TYPE([uintptr_t],[#ifdef HAVE_STDINT_H
 #include <stdint.h>
@@ -165,6 +181,68 @@ AC_FIND_FUNC(gethostbyname2, inet6 ip6)
 
 rk_RESOLV
 
+#--- Change by mpeterson@vintela.com --- #
+AC_NEED_PROTO([
+#ifdef HAVE_SYS_TYPES_H
+# include <sys/types.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+# include <netinet/in.h>
+#endif
+#ifdef HAVE_ARPA_NAMESER_H
+# include <arpa/nameser.h>
+#endif
+#ifdef HAVE_RESOLV_H
+# include <resolv.h>
+#endif], dn_expand)
+AC_NEED_PROTO([
+#ifdef HAVE_SYS_TYPES_H
+# include <sys/types.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+# include <netinet/in.h>
+#endif
+#ifdef HAVE_ARPA_NAMESER_H
+# include <arpa/nameser.h>
+#endif
+#ifdef HAVE_RESOLV_H
+# include <resolv.h>
+#endif], res_search)
+AC_NEED_PROTO([#include <netdb.h>], innetgr)
+AC_NEED_PROTO([#include <sys/time.h>], utimes)
+AC_NEED_PROTO([#include <syslog.h>], vsyslog)
+AC_NEED_PROTO([#include <unistd.h>], seteuid)
+AC_NEED_PROTO([#include <unistd.h>], setegid)
+AC_NEED_PROTO([#include <unistd.h>], rresvport)
+AC_NEED_PROTO([#include <unistd.h>], vhangup)
+AC_NEED_PROTO([#include <sys/time.h>], settimeofday)
+AC_NEED_PROTO([#include <grp.h>],initgroups)
+#--- Change by mpeterson@vintela.com --- #
+
+#--- start Change by jeff.webb@quest.com --- #
+AC_NEED_PROTO([
+#include <unistd.h>
+#ifdef HAVE_NETDB_H
+#include <netdb.h>
+#endif],
+setnetgrent)
+
+AC_NEED_PROTO([
+#include <unistd.h>
+#ifdef HAVE_NETDB_H
+#include <netdb.h>
+#endif],
+getnetgrent)
+
+AC_NEED_PROTO([
+#include <unistd.h>
+#ifdef HAVE_NETDB_H
+#include <netdb.h>
+#endif],
+endnetgrent)
+#--- end Change by jeff.webb@quest.com --- #
+
+
 AC_BROKEN_SNPRINTF
 AC_BROKEN_VSNPRINTF
 
@@ -176,8 +254,6 @@ AM_CONDITIONAL(have_glob_h, test "$ac_cv_func_glob_working" = yes)
 
 
 AC_CHECK_FUNCS([				\
-	asnprintf				\
-	asprintf				\
 	atexit					\
 	cgetent					\
 	getconfattr				\
@@ -185,6 +261,7 @@ AC_CHECK_FUNCS([				\
 	getrlimit				\
 	getspnam				\
 	issetugid				\
+	mkstemps				\
 	on_exit					\
 	poll					\
 	random					\
@@ -202,10 +279,12 @@ AC_CHECK_FUNCS([				\
 	twalk					\
 	uname					\
 	unvis					\
-	vasnprintf				\
-	vasprintf				\
 	vis					\
 ])
+ac_cv_func_asprintf=no
+ac_cv_func_asnprintf=no
+ac_cv_func_vasprintf=no
+ac_cv_func_vasnprintf=no
 
 if test "$ac_cv_func_cgetent" = no; then
 	AC_LIBOBJ(getcap)
@@ -244,11 +323,11 @@ AC_NEED_PROTO([
 #endif],
 hstrerror)
 
-AC_FOREACH([rk_func], [asprintf vasprintf asnprintf vasnprintf],
-	[AC_NEED_PROTO([
-	#include <stdio.h>
-	#include <string.h>],
-	rk_func)])
+#AC_FOREACH([rk_func], [asprintf vasprintf asnprintf vasnprintf],
+#	[AC_NEED_PROTO([
+#	#include <stdio.h>
+#	#include <string.h>],
+#	rk_func)])
 
 AC_FIND_FUNC_NO_LIBS(bswap16,,
 [#ifdef HAVE_SYS_TYPES_H
@@ -370,6 +449,8 @@ AC_BROKEN([					\
 	strsep					\
 	strsep_copy				\
 	strtok_r				\
+	strtoll					\
+	strtoull				\
 	strupr					\
 	swab					\
 	tsearch					\
@@ -467,12 +548,22 @@ dnl
 AC_HAVE_STRUCT_FIELD(struct sockaddr, sa_len, [#include <sys/types.h>
 #include <sys/socket.h>])
 
+if test "$ac_cv_func_getnameinfo" = "yes"; then
+  rk_BROKEN_GETNAMEINFO
+  if test "$ac_cv_func_getnameinfo_broken" = yes; then
+    AC_LIBOBJ(getnameinfo)
+  fi
+fi
+
 if test "$ac_cv_func_getaddrinfo" = "yes"; then
   rk_BROKEN_GETADDRINFO
-  if test "$ac_cv_func_getaddrinfo_numserv" = no; then
+  if test "$ac_cv_func_getaddrinfo_works" = no; then
 	AC_LIBOBJ(getaddrinfo)
 	AC_LIBOBJ(freeaddrinfo)
   fi
+else
+  # If it doesn't exist then it doesn't work.
+  ac_cv_func_getaddrinfo_works=no
 fi
 
 AC_NEED_PROTO([#include <stdlib.h>], setenv)

@@ -50,7 +50,10 @@ classname(Der_class class)
 {
     const char *cn[] = { "ASN1_C_UNIV", "ASN1_C_APPL",
 			 "ASN1_C_CONTEXT", "ASN1_C_PRIV" };
-    if(class < ASN1_C_UNIV || class > ASN1_C_PRIVATE)
+    /* Vintela modification - fix for weird unsigned warning */
+    if(class > ASN1_C_PRIVATE)
+/*    if(class < ASN1_C_UNIV || class > ASN1_C_PRIVATE) */
+    /* End Vintela modification */
 	return "???";
     return cn[class];
 }

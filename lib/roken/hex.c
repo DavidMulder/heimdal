@@ -33,6 +33,9 @@
 
 
 #include <config.h>
+/* VAS Modification -- added stdlib.h and string.h */
+#include <stdlib.h>
+#include <string.h>
 #include "roken.h"
 #include <ctype.h>
 #include "hex.h"

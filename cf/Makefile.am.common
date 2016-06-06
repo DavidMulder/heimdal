@@ -41,7 +41,6 @@ LIB_setpcred		= @LIB_setpcred@
 LIB_setsockopt		= @LIB_setsockopt@
 LIB_socket		= @LIB_socket@
 LIB_syslog		= @LIB_syslog@
-LIB_tgetent		= @LIB_tgetent@
 LIB_com_err		= @LIB_com_err@
 LIB_door_create		= @LIB_door_create@
 

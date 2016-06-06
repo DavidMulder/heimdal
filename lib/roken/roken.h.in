@@ -477,10 +477,18 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
      __attribute__((format (printf, 3, 0)));
 #endif
 
+/* VAS Modification: Seth says calling apps sometimes provide their own broken
+ * strdup, so we always use the roken version. Ensure this is not a duplicate
+ * definition. */
+#undef strdup
+#undef HAVE_STRDUP
+
 #ifndef HAVE_STRDUP
+#undef strdup
 #define strdup rk_strdup
 ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL strdup(const char *);
 #endif
+/* End VAS Modification */
 
 #if !defined(HAVE_STRNDUP) || defined(NEED_STRNDUP_PROTO)
 #ifndef HAVE_STRNDUP
@@ -517,6 +525,22 @@ ROKEN_LIB_FUNCTION ssize_t ROKEN_LIB_CALL strsep_copy(const char**, const char*,
 #define strcasecmp rk_strcasecmp
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL strcasecmp(const char *, const char *);
 #endif
+
+/* Vintela modification: add strtoll and stroull functions */
+#if !defined(HAVE_STRTOLL) || defined(NEED_STRTOLL_PROTO)
+#if !defined(HAVE_STRTOLL)
+#define strtoll rk_strtoll
+#endif
+long long int strtoll(const char *, char **, int);
+#endif
+
+#if !defined(HAVE_STRTOULL) || defined(NEED_STRTOULL_PROTO)
+#if !defined(HAVE_STRTOULL)
+#define strtoull rk_strtoull
+#endif
+unsigned long long int strtoull(const char*, char**, int);
+#endif
+/* End Vintela modification */
 
 #ifdef NEED_FCLOSE_PROTO
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL fclose(FILE *);
@@ -563,6 +587,9 @@ int ROKEN_LIB_FUNCTION rk_strerror_r(int, char *, size_t);
 #endif
 /* This causes a fatal error under Psoriasis */
 #ifndef SunOS
+#if !defined(HAVE_HSTRERROR)
+#define hstrerror rk_hstrerror
+#endif
 ROKEN_LIB_FUNCTION const char * ROKEN_LIB_CALL hstrerror(int);
 #endif
 #endif
@@ -571,6 +598,12 @@ ROKEN_LIB_FUNCTION const char * ROKEN_LIB_CALL hstrerror(int);
 extern int h_errno;
 #endif
 
+/* Vintela modification: add errx (for AIX) */
+#if !HAVE_ERRX
+void ROKEN_LIB_FUNCTION errx(int eval, const char *fmt, ...);
+#endif
+/* End Vintela modification */
+
 #if !defined(HAVE_INET_ATON) || defined(NEED_INET_ATON_PROTO)
 #ifndef HAVE_INET_ATON
 #define inet_aton rk_inet_aton
@@ -578,8 +611,11 @@ extern int h_errno;
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL inet_aton(const char *, struct in_addr *);
 #endif
 
-#ifndef HAVE_INET_NTOP
+
+#if !defined(HAVE_INET_NTOP) || defined(NEED_INET_NTOP_PROTO)
+#if !defined(HAVE_INET_NTOP)
 #define inet_ntop rk_inet_ntop
+#endif
 ROKEN_LIB_FUNCTION const char * ROKEN_LIB_CALL
 inet_ntop(int af, const void *src, char *dst, size_t size);
 #endif
@@ -675,6 +711,18 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL innetgr(const char*, const char*,
     const char*, const char*);
 #endif
 
+#if defined(NEED_SETNETGRENT_PROTO)
+void ROKEN_LIB_FUNCTION setnetgrent( const char * );
+#endif
+
+#if defined(NEED_GETNETGRENT_PROTO)
+int ROKEN_LIB_FUNCTION getnetgrent( char **, char **, char ** );
+#endif
+
+#if defined(NEED_ENDNETGRENT_PROTO)
+void ROKEN_LIB_FUNCTION endnetgrent( void );
+#endif
+
 #ifndef HAVE_IRUSEROK
 #define iruserok rk_iruserok
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL iruserok(unsigned, int, 
@@ -737,12 +785,14 @@ ROKEN_LIB_FUNCTION unsigned short ROKEN_LIB_CALL bswap16(unsigned short);
 int rk_flock(int fd, int operation);
 #endif /* HAVE_FLOCK */
 
+#if 0
 #ifndef HAVE_DIRFD
 #ifdef HAVE_DIR_DD_FD
 #define dirfd(x) ((x)->dd_fd)
 #else
 #ifndef _WIN32 /* Windows code never calls dirfd */
 #error Missing dirfd() and ->dd_fd
+#endif
 #endif
 #endif
 #endif
@@ -800,6 +850,19 @@ ROKEN_LIB_VARIABLE extern int optind;
 #endif
 #if !HAVE_DECL_OPTERR
 ROKEN_LIB_VARIABLE extern int opterr;
+#endif
+
+#ifndef HAVE_ENVIRON_DECLARATION
+# ifdef USE_NSGETENVIRON_FOR_ENVIRON
+#  include <crt_externs.h>
+#  define environ (*_NSGetEnviron())
+# else
+   extern char **environ;
+# endif
+#endif
+
+#if !HAVE_DECL_ENVIRON
+extern char **environ;
 #endif
 
 #ifndef HAVE_GETIPNODEBYNAME

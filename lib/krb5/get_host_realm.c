@@ -167,8 +167,12 @@ _krb5_get_host_realm_int (krb5_context context,
     const char *p, *q;
     krb5_boolean dns_locate_enable;
 
-    dns_locate_enable = krb5_config_get_bool_default(context, NULL, TRUE,
+    /* VAS modification - mpeterson@vintela.com
+     * change default to FALSE so that TXT record lookup is not done unless
+     * explicitly enabled */
+    dns_locate_enable = krb5_config_get_bool_default(context, NULL, FALSE,
 	"libdefaults", "dns_lookup_realm", NULL);
+    /* End VAS modification */
     for (p = host; p != NULL; p = strchr (p + 1, '.')) {
 	if(config_find_realm(context, p, realms) == 0) {
 	    if(strcasecmp(*realms[0], "dns_locate") == 0) {
@@ -232,6 +236,13 @@ krb5_get_host_realm(krb5_context context,
 	}
 	host = hostname;
     }
+
+/* --- Begin modification by matt.peterson@quest.com --- */    
+    if( context->get_host_realm_funct )
+    {
+        return context->get_host_realm_funct( context, host, realms );
+    }
+/* --- End modification by matt.peterson@quest.com --- */
 
     /*
      * If our local hostname is without components, don't even try to dns.

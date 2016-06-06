@@ -58,7 +58,7 @@ typedef struct krb5_get_init_creds_ctx {
 
     krb5_get_init_creds_tristate req_pac;
 
-    krb5_pk_init_ctx pk_init_ctx;
+    krb5_pkinit_ctx *pk_init_ctx; /* VAS modification -- now a pointer */
     int ic_flags;
 
     int used_pa_types;
@@ -605,6 +605,61 @@ krb5_keyblock_key_proc (krb5_context context,
     return krb5_copy_keyblock (context, keyseed, key);
 }
 
+/* --- begin addition by mpeterson@vintela.com --- */
+/* Parse the KRB5_ERROR to see if ETYPE_INFO containing the pwsalt was returned */
+static krb5_error_code extract_padata_etype_info_pwsalt( const krb5_kdc_rep *rep,
+                                                         char **pwsalt )
+{
+    size_t              size;
+    METHOD_DATA         methoddata;
+    ETYPE_INFO          etypeinfo;
+    unsigned int        i;
+
+    krb5_error_code     ret = KRB5_PARSE_MALFORMED;      
+
+    *pwsalt = NULL;
+
+    if (decode_METHOD_DATA(rep->error.e_data->data,
+                           rep->error.e_data->length,
+                           &methoddata,
+                           &size) == 0)
+    {
+        for (i=0; i<methoddata.len; i++)
+        {
+            if (methoddata.val[i].padata_type == KRB5_PADATA_ETYPE_INFO)
+            {
+                if (decode_ETYPE_INFO(methoddata.val[i].padata_value.data,
+                                      methoddata.val[i].padata_value.length,
+                                      &etypeinfo,
+                                      &size) == 0)
+                {
+                    if( etypeinfo.len >= 1)
+                    {
+                        *pwsalt = malloc(etypeinfo.val[0].salt->length + 1);
+                        if (*pwsalt)
+                        {
+                            memcpy(*pwsalt,
+                                   etypeinfo.val[0].salt->data,
+                                   etypeinfo.val[0].salt->length);
+                            /* NULL Terminate */
+                            (*pwsalt)[etypeinfo.val[0].salt->length] = 0;
+
+                            ret = 0;
+                        }
+                    }
+
+                    free_ETYPE_INFO(&etypeinfo);
+                }
+            }
+        }
+
+        free_METHOD_DATA(&methoddata);
+    }
+
+    return ret;
+}
+/* --- end of addition by mpeterson@vintela.com --- */
+
 /*
  *
  */
@@ -859,7 +914,7 @@ pa_pw_or_afs3_salt(krb5_context context,
 		   heim_octet_string *data)
 {
     krb5_error_code ret;
-    if (paid->etype == ENCTYPE_NULL)
+    if (paid->etype == (krb5_enctype)ENCTYPE_NULL)
 	return NULL;
     ret = set_paid(paid, context,
 		   paid->etype,
@@ -1006,7 +1061,7 @@ add_enc_ts_padata(krb5_context context,
 	    netypes++;
     }
 
-    for (i = 0; i < netypes; ++i) {
+    for (i = 0; (unsigned)i < netypes; ++i) { /* VAS Modification - explicit cast */
 	krb5_keyblock *key;
 
 	_krb5_debug(context, 5, "krb5_get_init_creds: using ENC-TS with enctype %d", enctypes[i]);
@@ -1090,6 +1145,21 @@ pa_data_to_md_pkinit(krb5_context context,
 {
     if (ctx->pk_init_ctx == NULL)
 	return 0;
+
+    /* VAS modification start */
+
+    /* Check that function to make PA Data is defined */
+    if (ctx->pk_init_ctx->make_pa_data == NULL ) {
+        krb5_abortx(context, "no 'make_pa_data' method for PKINIT");
+    }
+
+    /* Ask PKINIT to make the PA data */
+    return ctx->pk_init_ctx->make_pa_data(ctx->pk_init_ctx,
+                                          context,
+                                          &a->req_body,
+                                          ctx->pk_nonce,
+                                          md );
+#if 0 /* original heimdal code */
 #ifdef PKINIT
     return _krb5_pk_mk_padata(context,
 			      ctx->pk_init_ctx,
@@ -1103,6 +1173,8 @@ pa_data_to_md_pkinit(krb5_context context,
 			   N_("no support for PKINIT compiled in", ""));
     return EINVAL;
 #endif
+#endif
+    /* VAS modification end */
 }
 
 static krb5_error_code
@@ -1245,6 +1317,85 @@ process_pa_data_to_md(krb5_context context,
     return 0;
 }
 
+/* VAS Modification - wwilkes@vintela.com
+ * This function generates preauth data according the configured
+ * client preauth types. This helps reduce the number of roundtrips
+ * that have to be performed for AS requests. */
+static krb5_error_code
+preload_preauth_to_md(krb5_context context,
+                      const krb5_creds *creds,
+                      const AS_REQ *a,
+                      krb5_get_init_creds_ctx *ctx,
+                      METHOD_DATA **out_md,
+                      krb5_prompter_fct prompter,
+                      void *prompter_data)
+{
+    krb5_error_code ret = 0;
+    int i;
+    int no_preload = 0;
+
+    if( ctx->pre_auth_types == NULL )
+        return 0;
+
+    ALLOC(*out_md, 1);
+        if (*out_md == NULL) {
+        krb5_set_error_message(context, ENOMEM, "malloc: out of memory");
+        return ENOMEM;
+    }
+    (*out_md)->len = 0;
+    (*out_md)->val = NULL;
+
+    /* check the client support PREAUTH types, and create PA data for
+     * each of them */
+    for (i = 0; ctx->pre_auth_types[i] != KRB5_PADATA_NONE; i++) {
+        switch( ctx->pre_auth_types[i] )
+        {
+        case KRB5_PADATA_NO_PRELOAD:
+            no_preload = 1;
+            goto FINISHED;
+        case KRB5_PADATA_PA_PAC_REQUEST:
+            ret = pa_data_add_pac_request(context, ctx, *out_md);
+            if( ret )
+                goto FINISHED;
+            break;
+            
+        case KRB5_PADATA_ENC_TIMESTAMP:
+            /* make a v5 salted pa-data */
+            ret = add_enc_ts_padata(context, *out_md, creds->client, 
+                                    ctx->keyproc, ctx->password,
+                                    a->req_body.etype.val, 
+                                    a->req_body.etype.len, NULL, NULL);
+            if( ret )
+                goto FINISHED;
+            break;
+
+        /* Check for PK-AS-REQ, for PKINIT authentication */
+        case KRB5_PADATA_PK_AS_REQ_WIN:
+        case KRB5_PADATA_PK_AS_REQ:
+            /* TODO verify that context->pk_init_ctx is not NULL */
+            ret = pa_data_to_md_pkinit(context, a, creds->client, 0, ctx, *out_md);
+            if( ret )
+                goto FINISHED;
+            break;
+        default:
+            break;
+        }
+    }
+
+FINISHED:
+    if( no_preload == 1) {
+        free_METHOD_DATA(*out_md);
+    }
+
+    if ((*out_md)->len == 0 ) {
+    	free(*out_md);
+    	*out_md = NULL;
+    }
+
+    return ret;
+}
+/* End VAS Modification */
+
 static krb5_error_code
 process_pa_data_to_key(krb5_context context,
 		       krb5_get_init_creds_ctx *ctx,
@@ -1295,6 +1446,22 @@ process_pa_data_to_key(krb5_context context,
 	}
     }
     if (pa && ctx->pk_init_ctx) {
+        /* VAS modification start */
+
+        /* Check that function to read a PA reply is defined */
+        if (ctx->pk_init_ctx->read_pa_reply == NULL ) {
+            krb5_abortx(context, "no 'read_pa_reply' method for PKINIT");
+        }
+
+        /* Ask PKINIT to read the PA reply */
+        ret = ctx->pk_init_ctx->read_pa_reply(ctx->pk_init_ctx,
+                                              context,
+                                              etype,
+                                              ctx->pk_nonce,
+                                              &ctx->req_buffer,
+                                              pa,
+                                              key );
+#if 0        
 #ifdef PKINIT
 	_krb5_debug(context, 5, "krb5_get_init_creds: using PKINIT");
 
@@ -1310,6 +1477,7 @@ process_pa_data_to_key(krb5_context context,
 #else
 	ret = EINVAL;
 	krb5_set_error_message(context, ret, N_("no support for PKINIT compiled in", ""));
+#endif
 #endif
     } else if (ctx->keyseed) {
  	_krb5_debug(context, 5, "krb5_get_init_creds: using keyproc");
@@ -2148,3 +2316,79 @@ krb5_get_init_creds_keytab(krb5_context context,
 
     return ret;
 }
+
+static krb5_error_code
+init_creds_keyblock_key_proc (krb5_context context,
+                  krb5_enctype type,
+                  krb5_salt salt,
+                  krb5_const_pointer keyseed,
+                  krb5_keyblock **key)
+{
+    return krb5_copy_keyblock (context, keyseed, key);
+}
+
+/* --- begin addition by mpeterson@vintela.com --- */
+/* Parse the KRB5_ERROR to see if ETYPE_INFO containing the pwsalt was returned */
+/*
+ *
+ */
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_get_init_creds_keyblock_suggest_pw_salt( krb5_context context,
+                                              krb5_creds *creds,
+                                              krb5_principal client,
+                                              krb5_keyblock *keyblock,
+                                              krb5_deltat start_time,
+                                              const char *in_tkt_service,
+                                              krb5_get_init_creds_opt *options,
+                                              char **pwsalt )
+{
+    struct krb5_get_init_creds_ctx  ctx;
+    krb5_kdc_rep                    rep;
+    krb5_error_code                 ret;
+    
+    memset(&rep,0,sizeof(rep));
+
+    ret = get_init_creds_common( context, 
+                                 client, 
+                                 start_time,
+                                 options, 
+                                 &ctx );
+    if (ret)
+    {
+        return ret;
+    }
+
+    ret = krb5_get_in_cred (context,
+			                KDCOptions2int(ctx.flags),
+                            ctx.addrs,
+                            ctx.etypes,
+                            ctx.pre_auth_types,
+                            NULL,
+                            init_creds_keyblock_key_proc,
+                            keyblock,
+                            NULL,
+                            NULL,
+                            &ctx.cred,
+                            &rep);
+    if (ret == KRB5KDC_ERR_PREAUTH_FAILED)
+    {
+        /* Parse the KRB5_ERROR to see if ETYPE_INFO was returned */
+        extract_padata_etype_info_pwsalt( &rep, pwsalt );
+        krb5_free_cred_contents(context, &ctx.cred);
+    } 
+    else if ( ret == 0 && creds ) 
+    {
+        *creds = ctx.cred;
+    } 
+    else 
+    {
+        krb5_free_cred_contents(context, &ctx.cred);
+    }
+
+    krb5_free_kdc_rep( context, &rep );
+    free_init_creds_ctx( context, &ctx );
+
+    return ret;
+}
+/* --- end addition by mpeterson@vintela.com --- */
+

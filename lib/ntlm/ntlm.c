@@ -268,7 +268,9 @@ ret_string(krb5_storage *sp, int ucs2, size_t len, char **s)
     (*s)[len] = '\0';
 
     if (ucs2) {
-	size_t i;
+/* Vintela modification */
+   uint16_t i;
+/* End Vintela modification */
 	for (i = 0; i < len / 2; i++) {
 	    (*s)[i] = (*s)[i * 2];
 	    if ((*s)[i * 2 + 1]) {
@@ -311,7 +313,7 @@ put_string(krb5_storage *sp, int ucs2, const char *s)
 	buf.length = strlen(s);
     }
 
-    CHECK(krb5_storage_write(sp, buf.data, buf.length), buf.length);
+    CHECK(krb5_storage_write(sp, buf.data, buf.length), (int32_t)buf.length); /* VAS Modification - explicit cast */
     if (ucs2)
 	heim_ntlm_free_buf(&buf);
     ret = 0;
@@ -330,8 +332,8 @@ ret_buf(krb5_storage *sp, struct sec_buffer *desc, struct ntlm_buf *buf)
 
     buf->data = malloc(desc->length);
     buf->length = desc->length;
-    CHECK(krb5_storage_seek(sp, desc->offset, SEEK_SET), desc->offset);
-    CHECK(krb5_storage_read(sp, buf->data, buf->length), buf->length);
+    CHECK(krb5_storage_seek(sp, desc->offset, SEEK_SET), (int32_t)desc->offset); /* VAS Modification - explicit cast */
+    CHECK(krb5_storage_read(sp, buf->data, buf->length), (int32_t)buf->length); /* VAS Modification - explicit cast */
     ret = 0;
 out:
     return ret;
@@ -341,7 +343,7 @@ static krb5_error_code
 put_buf(krb5_storage *sp, const struct ntlm_buf *buf)
 {
     krb5_error_code ret;
-    CHECK(krb5_storage_write(sp, buf->data, buf->length), buf->length);
+    CHECK(krb5_storage_write(sp, buf->data, buf->length), (int32_t)buf->length); /* VAS Modification - explicit cast */
     ret = 0;
 out:
     return ret;
@@ -789,7 +791,7 @@ heim_ntlm_encode_type2(const struct ntlm_type2 *type2, struct ntlm_buf *data)
     CHECK(put_string(out, ucs2, type2->targetname), 0);
     CHECK(krb5_storage_write(out, type2->targetinfo.data,
 			     type2->targetinfo.length),
-	  type2->targetinfo.length);
+	  (int32_t)type2->targetinfo.length); /* VAS Modification - explicit cast */
 
     {
 	krb5_data d;
@@ -1516,7 +1518,7 @@ heim_ntlm_calculate_ntlm2(const void *key, size_t len,
 
     CHECK(krb5_store_uint32(sp, 0), 0);  /* unknown but zero will work */
     CHECK(krb5_storage_write(sp, infotarget->data, infotarget->length),
-	  infotarget->length);
+	  (int32_t)infotarget->length); /* VAS Modification - explicit cast */
     CHECK(krb5_store_uint32(sp, 0), 0); /* unknown but zero will work */
 
     CHECK(krb5_storage_to_data(sp, &data), 0);
@@ -1532,7 +1534,7 @@ heim_ntlm_calculate_ntlm2(const void *key, size_t len,
     }
 
     CHECK(krb5_storage_write(sp, ntlmv2answer, 16), 16);
-    CHECK(krb5_storage_write(sp, data.data, data.length), data.length);
+    CHECK(krb5_storage_write(sp, data.data, data.length), (int32_t)data.length); /* VAS Modification - explicit cast */
     krb5_data_free(&data);
 
     CHECK(krb5_storage_to_data(sp, &data), 0);
@@ -1641,7 +1643,7 @@ heim_ntlm_verify_ntlm2(const void *key, size_t len,
 	goto out;
     }
     CHECK(krb5_storage_read(sp, infotarget->data, infotarget->length),
-	  infotarget->length);
+	  (int32_t)infotarget->length); /* VAS Modification - explicit cast */
     /* XXX remove the unknown ?? */
     krb5_storage_free(sp);
     sp = NULL;

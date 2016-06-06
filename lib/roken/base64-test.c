@@ -53,11 +53,11 @@ main(int argc, char **argv)
 	{ "4444", 4, "NDQ0NA==" },
 	{ "55555", 5, "NTU1NTU=" },
 	{ "abc:def", 7, "YWJjOmRlZg==" },
-	{ NULL }
+	{ NULL, 0, NULL }
     };
     for(t = tests; t->data; t++) {
 	char *str;
-	int len;
+	size_t len;
 	len = base64_encode(t->data, t->len, &str);
 	if(strcmp(str, t->result) != 0) {
 	    fprintf(stderr, "failed test %d: %s != %s\n", numtest,

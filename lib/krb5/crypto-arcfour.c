@@ -42,10 +42,15 @@ static struct _krb5_key_type keytype_arcfour = {
     "arcfour",
     128,
     16,
+    16, /* VAS Modification */
     sizeof(struct _krb5_evp_schedule),
     NULL,
     _krb5_evp_schedule,
     _krb5_arcfour_salt,
+/* VAS Modification -- for parameters */
+    NULL,
+    NULL,
+/* End VAS Modification */
     NULL,
     _krb5_evp_cleanup,
     EVP_rc4
@@ -312,6 +317,7 @@ ARCFOUR_encrypt(krb5_context context,
 struct _krb5_encryption_type _krb5_enctype_arcfour_hmac_md5 = {
     ETYPE_ARCFOUR_HMAC_MD5,
     "arcfour-hmac-md5",
+    NULL,
     1,
     1,
     8,

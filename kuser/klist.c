@@ -64,6 +64,8 @@ printable_time_long(time_t t)
     return printable_time_internal(t, 20);
 }
 
+static char klist_command[] = "klist";
+
 #define COL_ISSUED		NP_("  Issued","")
 #define COL_EXPIRES		NP_("  Expires", "")
 #define COL_FLAGS		NP_("Flags", "")
@@ -76,12 +78,13 @@ printable_time_long(time_t t)
 static void
 print_cred(krb5_context context, krb5_creds *cred, rtbl_t ct, int do_flags)
 {
-    char *str;
+    char *str = NULL;
     krb5_error_code ret;
     krb5_timestamp sec;
 
     krb5_timeofday (context, &sec);
 
+    if( ! krb5_is_config_principal(context, cred->server) ) { /* VAS Modification - Check to see if it's a config principal */
 
     if(cred->times.starttime)
 	rtbl_add_column_entry(ct, COL_ISSUED,
@@ -126,7 +129,57 @@ print_cred(krb5_context context, krb5_creds *cred, rtbl_t ct, int do_flags)
 	*sp = '\0';
 	rtbl_add_column_entry(ct, COL_FLAGS, s);
     }
-    free(str);
+    /* VAS Modification - Add support to view a ccache config entries */
+    } else {
+
+        krb5_data ticket = cred->ticket;
+        unsigned int i;
+        char* tdata = NULL;
+
+        PrincipalName name = cred->server->name;
+
+        for (i = 0; i < name.name_string.len; i++) {
+            switch( i ) {
+                case 0:
+                    rtbl_add_column_entry(ct, COL_ISSUED, name.name_string.val[i]);
+                    break;
+                case 1:
+                    tdata = strndup((char*)(ticket.data), ticket.length);
+                    rtbl_add_column_entryv(ct, COL_EXPIRES, "%s = %s", name.name_string.val[i], tdata);
+                    free(tdata);
+                    tdata=NULL;
+                    break;
+                case 2:
+                    if(name.name_string.val[i])
+                        tdata = strndup(name.name_string.val[i], strlen(name.name_string.val[i]));
+                    break;
+                default:
+                    /* Reallocate tdata and append new data onto the end of it, seperated by a space.
+                       As of right now we shouldn't hit this code, but let's at least handle it if
+                       for some reason config cache has more than 3 components.
+                       (krb5_ccache_conf_data, configuration key, principal associated to key [optional])
+                       See: http://web.mit.edu/Kerberos/krb5-1.12/doc/formats/ccache_file_format.html
+                    */
+                    if(tdata) {
+                        const char* delm = " ";
+
+                        char * tmp = NULL;
+                        asprintf(&tmp, "%s%s%s", tdata, delm, name.name_string.val[i]);
+                        free(tdata);
+                        tdata = tmp;
+                    }
+                    break;
+            }
+        }
+
+        rtbl_add_column_entry(ct, COL_PRINCIPAL, tdata ? tdata : "");
+
+        if(tdata) free(tdata);
+    }
+    /* END VAS Modification */
+
+    if(str) free(str);
+
 }
 
 static void
@@ -156,7 +209,7 @@ print_cred_verbose(krb5_context context, krb5_creds *cred)
 	size_t len;
 	char *s;
 
-	decode_Ticket(cred->ticket.data, cred->ticket.length, &t, &len);
+	decode_Ticket((unsigned char *) cred->ticket.data, cred->ticket.length, &t, &len);
 	ret = krb5_enctype_to_string(context, t.enc_part.etype, &s);
 	printf(N_("Ticket etype: ", ""));
 	if (ret == 0) {
@@ -169,7 +222,7 @@ print_cred_verbose(krb5_context context, krb5_creds *cred)
 	    printf(N_(", kvno %d", ""), *t.enc_part.kvno);
 	printf("\n");
 	if(cred->session.keytype != t.enc_part.etype) {
-	    ret = krb5_enctype_to_string(context, cred->session.keytype, &str);
+	    ret = krb5_enctype_to_string(context, (krb5_enctype) cred->session.keytype, &str);
 	    if(ret)
 		krb5_warn(context, ret, "session keytype");
 	    else {
@@ -203,7 +256,7 @@ print_cred_verbose(krb5_context context, krb5_creds *cred)
     }
     printf(N_("Addresses: ", ""));
     if (cred->addresses.len != 0) {
-	for(j = 0; j < cred->addresses.len; j++){
+	for(j = 0; (size_t)j < cred->addresses.len; j++){ /* VAS Modification - explicit cast */
 	    char buf[128];
 	    size_t len;
 	    if(j) printf(", ");
@@ -264,6 +317,7 @@ print_tickets (krb5_context context,
         krb5_cc_set_flags(context, ccache, KRB5_TC_NOTICKET);
     }
 
+#if 0
     ret = krb5_cc_get_kdc_offset(context, ccache, &sec);
 
     if (ret == 0 && do_verbose && sec != 0) {
@@ -283,6 +337,7 @@ print_tickets (krb5_context context,
 	printf ("%17s: %s%s\n", N_("KDC time offset", ""),
 		sig == -1 ? "-" : "", buf);
     }
+#endif
 
     printf("\n");
 
@@ -341,6 +396,8 @@ check_for_tgt (krb5_context context,
     int expired;
 
     krb5_cc_clear_mcred(&pattern);
+    /* VAS Modification - clear this out too */
+    krb5_cc_clear_mcred(&creds);
 
     client_realm = krb5_principal_get_realm(context, principal);
 
@@ -381,9 +438,9 @@ display_tokens(int do_verbose)
     unsigned char t[4096];
     struct ViceIoctl parms;
 
-    parms.in = (void *)&i;
+    parms.in = (char *)&i;
     parms.in_size = sizeof(i);
-    parms.out = (void *)t;
+    parms.out = (char *)t;
     parms.out_size = sizeof(t);
 
     for (i = 0;; i++) {
@@ -399,19 +456,19 @@ display_tokens(int do_verbose)
 		break;
 	    continue;
 	}
-	if(parms.out_size > sizeof(t))
+	if((size_t)parms.out_size > sizeof(t)) /* VAS Modification - explicit cast */
 	    continue;
-	if(parms.out_size < sizeof(size_secret_tok))
+	if((size_t)parms.out_size < sizeof(size_secret_tok)) /* VAS Modification - explicit cast */
 	    continue;
-	t[min(parms.out_size,sizeof(t)-1)] = 0;
+	t[min((size_t)parms.out_size,sizeof(t)-1)] = 0; /* VAS Modification - explicit cast */
 	memcpy(&size_secret_tok, r, sizeof(size_secret_tok));
 	/* dont bother about the secret token */
 	r += size_secret_tok + sizeof(size_secret_tok);
-	if (parms.out_size < (r - t) + sizeof(size_public_tok))
+	if ((size_t)parms.out_size < (r - t) + sizeof(size_public_tok)) /* VAS Modification - explicit cast */
 	    continue;
 	memcpy(&size_public_tok, r, sizeof(size_public_tok));
 	r += sizeof(size_public_tok);
-	if (parms.out_size < (r - t) + size_public_tok + sizeof(int32_t))
+	if ((size_t)parms.out_size < (r - t) + size_public_tok + sizeof(int32_t)) /* VAS Modification - explicit cast */
 	    continue;
 	memcpy(&ct, r, size_public_tok);
 	r += size_public_tok;
@@ -457,13 +514,16 @@ display_v5_ccache (krb5_context context, krb5_ccache ccache,
 
     ret = krb5_cc_get_principal (context, ccache, &principal);
     if (ret) {
-	if(ret == ENOENT) {
+    /* VAS Modification, the acache at least now returns CC_NOTFOUND (not ENOENT)*/
+	if(ret == ENOENT || ret == KRB5_CC_NOTFOUND) {
 	    if (!do_test)
-		krb5_warnx(context, N_("No ticket file: %s", ""),
+        krb5_warnx(context, "No ccache exists with name: %s:%s",
+               krb5_cc_get_type(context, ccache),
 			   krb5_cc_get_name(context, ccache));
 	    return 1;
 	} else
 	    krb5_err (context, 1, ret, "krb5_cc_get_principal");
+        /* END VAS Modification */
     }
     if (do_test)
 	exit_status = check_for_tgt (context, ccache, principal, NULL);

@@ -88,8 +88,9 @@ DSA_up_ref(DSA *dsa)
  *
  */
 
+/* VAS Modification - specify initialization for all members */
 static const DSA_METHOD dsa_null_method = {
-    "hcrypto null DSA"
+    "hcrypto null DSA", NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL
 };
 
 const DSA_METHOD *

@@ -27,6 +27,13 @@
  */
 
 #include "mech_locl.h"
+/* --- Begin Vintela addition <mpeterson@vintela.com> ---
+ *
+ * Global variables used by the authorization additions below
+ */
+gssapi_vas_authorize_funct_t gssapi_vas_authorize_funct = NULL;
+void *gssapi_vas_ctx = NULL;
+/* --- End Vintela addition <mpeterson@vintela.com> --- */
 
 static OM_uint32
 parse_header(const gss_buffer_t input_token, gss_OID mech_oid)
@@ -306,3 +313,17 @@ gss_accept_sec_context(OM_uint32 *minor_status,
 	    *ret_flags = mech_ret_flags;
 	return (major_status);
 }
+
+/* --- Begin Vintela addition <mpeterson@vintela.com> --- */
+OM_uint32 _gssapi_set_vas_ctx( void* vas_ctx )
+{
+    gssapi_vas_ctx = vas_ctx;
+    return 0;
+}
+
+OM_uint32 _gssapi_set_auth_vas_authorize_funct( gssapi_vas_authorize_funct_t funct )
+{
+    gssapi_vas_authorize_funct = funct;
+    return 0;
+}
+/* --- End Vintela addition <mpeterson@vintela.com> --- */

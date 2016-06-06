@@ -95,7 +95,7 @@ get_entropy(int fd, void *data, size_t len)
     if (net_write(fd, msg, sizeof(msg)) != sizeof(msg))
 	return 0;
 
-    if (net_read(fd, data, len) != len)
+    if ((size_t)net_read(fd, data, len) != len) /* VAS Modification - explicit cast */
 	return 0;
 
     return 1;
@@ -115,7 +115,7 @@ put_entropy(int fd, const void *data, size_t len)
 
     if (net_write(fd, msg, sizeof(msg)) != sizeof(msg))
 	return 0;
-    if (net_write(fd, data, len) != len)
+    if ((size_t)net_write(fd, data, len) != len) /* VAS Modification - explicit cast */
 	return 0;
 
     return 1;

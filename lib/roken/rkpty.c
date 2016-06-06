@@ -33,14 +33,20 @@
 
 #include "config.h"
 
-#ifndef HAVE_SYS_TYPES_H
+#ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
 #ifdef HAVE_SYS_WAIT_H
 #include <sys/wait.h>
 #endif
+#ifdef HAVE_SYS_IOCTL_H
+#include <sys/ioctl.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef HAVE_TERMIOS_H
+#include <termios.h>
+#endif
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -59,6 +65,9 @@
 #endif /* STREAMPTY */
 
 #include "roken.h"
+/* VAS modification */
+#include "err.h"
+/* VAS modification */
 #include <getarg.h>
 
 struct command {
@@ -83,7 +92,9 @@ static int version_flag;
 
 static int master;
 static int slave;
+#if defined(HAVE_OPENPTY) || defined(__linux) || defined(__osf__) || defined(STREAMSPTY)
 static char line[256] = { 0 };
+#endif
 
 static void
 caught_signal(int signo)
@@ -233,7 +244,7 @@ eval_parent(pid_t pid)
 		     c->str, c->lineno);
 	    else if (alarmset)
 		errx(1, "got a signal %d waiting for %s (line %u)",
-		     alarmset, c->str, c->lineno);
+		     (int) alarmset, c->str, c->lineno);
 	    if (sret <= 0)
 		errx(1, "end command while waiting for %s (line %u)",
 		     c->str, c->lineno);
@@ -303,11 +314,12 @@ eval_parent(pid_t pid)
  *
  */
 
+/* VAS modification - fill out all structures to avoid compiler errors */
 static struct getargs args[] = {
     { "timeout", 	't', arg_integer, &timeout, "timout", "seconds" },
-    { "verbose", 	'v', arg_counter, &verbose, "verbose debugging" },
-    { "version",	0, arg_flag,	&version_flag, "print version" },
-    { "help",		0, arg_flag,	&help_flag, NULL }
+    { "verbose", 	'v', arg_counter, &verbose, "verbose debugging", NULL },
+    { "version",	0, arg_flag,	&version_flag, "print version", NULL },
+    { "help",		0, arg_flag,	&help_flag, NULL, NULL }
 };
 
 static void

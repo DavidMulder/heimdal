@@ -120,13 +120,16 @@ main(int argc, char **argv)
 {
     krb5_context context;
     krb5_error_code ret;
-    int i, optidx = 0;
+/* Vintela modification */
+    unsigned i;
+    int optidx = 0;
+/* End Vintela modification */
 
     krb5_enctype enctypes[] = {
 #ifdef HEIM_WEAK_CRYPTO
-	ETYPE_DES_CBC_CRC,
-	ETYPE_DES_CBC_MD4,
-	ETYPE_DES_CBC_MD5,
+//	ETYPE_DES_CBC_CRC,
+//	ETYPE_DES_CBC_MD4,
+//	ETYPE_DES_CBC_MD5,
 #endif
 	ETYPE_DES3_CBC_SHA1,
 	ETYPE_ARCFOUR_HMAC_MD5,

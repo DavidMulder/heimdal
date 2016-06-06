@@ -37,7 +37,7 @@ gss_test_oid_set_member(OM_uint32 *minor_status,
 	size_t i;
 
 	*present = 0;
-	for (i = 0; i < set->count; i++)
+	for (i = 0; (size_t)i < set->count; i++) /* VAS Modification - explicit cast */
 		if (gss_oid_equal(member, &set->elements[i]))
 			*present = 1;
 

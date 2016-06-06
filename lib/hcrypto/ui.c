@@ -128,7 +128,7 @@ read_string(const char *preprompt, const char *prompt,
     sa.sa_handler = intr;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    for(i = 1; i < sizeof(sigs) / sizeof(sigs[0]); i++)
+    for(i = 1; (size_t)i < sizeof(sigs) / sizeof(sigs[0]); i++) /* VAS Modification - explicit cast */
 	if (i != SIGALRM)
 	    if (sigaction(i, &sa, &sigs[i]) == 0)
 		oksigs[i] = 1;
@@ -174,7 +174,7 @@ read_string(const char *preprompt, const char *prompt,
     if(tty != stdin)
 	fclose(tty);
 
-    for(i = 1; i < sizeof(sigs) / sizeof(sigs[0]); i++)
+	for(i = 1; (size_t)i < sizeof(sigs) / sizeof(sigs[0]); i++) /* VAS Modification - explicit cast */
 	if (oksigs[i])
 	    sigaction(i, &sigs[i], NULL);
 
@@ -215,3 +215,39 @@ UI_UTIL_read_pw_string(char *buf, int length, const char *prompt, int verify)
     }
     return ret;
 }
+
+/* VAS Modification - mpeterson@vintela.com 
+ * 
+ * Added a read_pw_string that allows you to pass in a verify prompt
+ * i18n reasons.
+ */
+int
+UI_UTIL_read_pw_string_with_verify_prompt(char *buf, int length, char *prompt, char* verify)
+{
+    size_t plen;
+    int ret;
+
+    ret = read_string("", prompt, buf, length, 0);
+    if (ret)
+        return ret;
+
+    if (verify)
+    {
+        char *buf2;
+        buf2 = malloc(length);
+        if (buf2 == NULL)
+            return 1;
+
+        ret = read_string("", verify, buf2, length, 0);
+        if (ret)
+        {
+            free(buf2);
+            return ret;
+        }
+        if (strcmp(buf2, buf) != 0)
+            ret = 1;
+        free(buf2);
+    }
+    return ret;
+}
+

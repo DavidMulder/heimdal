@@ -164,7 +164,10 @@ main(int argc, char **argv)
 
 	for (bit = 0; bit < 8; bit++) {
 
-	    res = ((double)abs(len - bits[bit] * 2)) / (double)len;
+        /* QAS Change for gcc 4.6.1 compiler */
+        double abs_val = abs(len - bits[bit] *2);
+	    res = abs_val / (double)len;
+        /* end QAS Change */
 	    if (res > 0.005)
 		errx(1, "head%d vs tail%d > 0.5%%%% %lf == %d vs %d",
 		     bit, bit, res, len, bits[bit]);

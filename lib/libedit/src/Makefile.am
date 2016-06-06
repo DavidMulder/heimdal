@@ -4,6 +4,8 @@ if WIDECHAR
 BUILT_SOURCES += tokenizern.c historyn.c
 endif
 
+CFLAGS+=-Wno-unused-but-set-variable -Wno-unused-function
+
 AHDR= vi.h emacs.h common.h 
 ASRC= $(srcdir)/vi.c $(srcdir)/emacs.c $(srcdir)/common.c
 

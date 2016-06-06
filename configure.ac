@@ -82,6 +82,8 @@ if test "${cross_compiling}" != yes ; then
 
    ASN1_COMPILE_DEP="\$(ASN1_COMPILE)"
    SLC_DEP="\$(SLC)"
+
+   COMPILE_ET="\$(top_builddir)/lib/com_err/compile_et"
 else
    ASN1_COMPILE="${with_cross_tools}asn1_compile"
    SLC="${with_cross_tools}slc"
@@ -89,15 +91,27 @@ else
    ASN1_COMPILE_DEP=
    SLC_DEP=
 
-   ac_cv_prog_COMPILE_ET=${with_cross_tools}compile_et
+   COMPILE_ET="${with_cross_tools}compile_et"
 
 fi
+
+DIR_com_err="com_err"
+LIB_com_err="\$(top_builddir)/lib/com_err/libcom_err.la"
+LIB_com_err_a="\$(top_builddir)/lib/com_err/.libs/libcom_err.a"
+LIB_com_err_so="\$(top_builddir)/lib/com_err/.libs/libcom_err.so"
+localcomerr=yes
 
 AC_SUBST([ASN1_COMPILE])
 AC_SUBST([ASN1_COMPILE_DEP])
 AC_SUBST([SLC])
 AC_SUBST([SLC_DEP])
 
+AM_CONDITIONAL(COM_ERR, test "$localcomerr" = yes)
+AC_SUBST([COMPILE_ET])
+AC_SUBST(DIR_com_err)
+AC_SUBST(LIB_com_err)
+AC_SUBST(LIB_com_err_a)
+AC_SUBST(LIB_com_err_so)
 
 dnl ---
 
@@ -332,7 +346,6 @@ AC_CHECK_HEADERS([\
 	arpa/telnet.h				\
 	bind/bitypes.h				\
 	bsdsetjmp.h				\
-	curses.h				\
 	dlfcn.h					\
 	execinfo.h				\
 	fnmatch.h				\
@@ -446,15 +459,6 @@ AC_FIND_FUNC_NO_LIBS(openpty, util,[
 #include <util.h>
 #endif
 ],[0,0,0,0,0])
-
-AC_FIND_FUNC_NO_LIBS(tgetent, termcap ncurses curses,[
-#ifdef HAVE_TERMCAP_H
-#include <termcap.h>
-#endif
-#ifdef HAVE_CURSES_H
-#include <curses.h>
-#endif
-],[0,0])
 
 dnl Checks for library functions.
 
@@ -583,9 +587,6 @@ KRB_READLINE
 
 rk_TELNET
 
-dnl Some operating systems already have com_err and compile_et
-CHECK_COMPILE_ET
-
 rk_AUTH_MODULES([sia afskauthlib])
 
 rk_DESTDIRS
@@ -607,7 +608,6 @@ AC_ARG_ENABLE(heimdal-documentation,
 AM_CONDITIONAL(HEIMDAL_DOCUMENTATION, test "$enable_heimdal_documentation" != no)
 
 AC_CONFIG_FILES(Makefile 		\
-	etc/Makefile			\
 	include/Makefile		\
 	include/gssapi/Makefile		\
 	include/hcrypto/Makefile	\
@@ -624,57 +624,14 @@ AC_CONFIG_FILES(Makefile 		\
 	lib/ipc/Makefile		\
 	lib/kadm5/Makefile		\
 	lib/kafs/Makefile		\
-	lib/kdfs/Makefile		\
 	lib/krb5/Makefile		\
-	lib/otp/Makefile		\
 	lib/roken/Makefile		\
 	lib/sl/Makefile			\
 	lib/sqlite/Makefile		\
 	lib/vers/Makefile		\
 	lib/wind/Makefile		\
-	po/Makefile			\
 	kuser/Makefile			\
-	kpasswd/Makefile		\
-	kadmin/Makefile			\
 	admin/Makefile			\
-	kcm/Makefile			\
-	kdc/Makefile			\
-	appl/Makefile			\
-	appl/afsutil/Makefile		\
-	appl/ftp/Makefile		\
-	appl/ftp/common/Makefile	\
-	appl/ftp/ftp/Makefile		\
-	appl/ftp/ftpd/Makefile		\
-	appl/gssmask/Makefile		\
-	appl/kx/Makefile		\
-	appl/login/Makefile		\
-	appl/otp/Makefile		\
-	appl/popper/Makefile		\
-	appl/push/Makefile		\
-	appl/rsh/Makefile		\
-	appl/rcp/Makefile		\
-	appl/su/Makefile		\
-	appl/xnlock/Makefile		\
-	appl/telnet/Makefile		\
-	appl/telnet/libtelnet/Makefile	\
-	appl/telnet/telnet/Makefile	\
-	appl/telnet/telnetd/Makefile	\
-	appl/test/Makefile		\
-	appl/kf/Makefile		\
-	appl/dceutils/Makefile		\
-	tests/Makefile			\
-	tests/bin/Makefile		\
-	tests/can/Makefile		\
-	tests/db/Makefile		\
-	tests/kdc/Makefile		\
-	tests/ldap/Makefile		\
-	tests/gss/Makefile		\
-	tests/java/Makefile		\
-	tests/plugin/Makefile		\
-	packages/Makefile		\
-	packages/mac/Makefile		\
-	doc/Makefile			\
-	tools/Makefile			\
 )
 
 AC_OUTPUT
@@ -687,7 +644,7 @@ cat > include/newversion.h.in <<EOF
 #ifndef VERSION_HIDDEN
 #define VERSION_HIDDEN
 #endif
-VERSION_HIDDEN const char *heimdal_long_version = "@([#])\$Version: $PACKAGE_STRING by @USER@ on @HOST@ ($host) @DATE@ \$";
+dnl VERSION_HIDDEN const char *heimdal_long_version = "@([#])\$Version: $PACKAGE_STRING by @USER@ on @HOST@ ($host) @DATE@ \$";
 VERSION_HIDDEN const char *heimdal_version = "AC_PACKAGE_STRING";
 EOF
 
