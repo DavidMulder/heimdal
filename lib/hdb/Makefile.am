@@ -5,7 +5,6 @@ include $(top_srcdir)/Makefile.am.common
 AM_CPPFLAGS += -I../asn1 -I$(srcdir)/../asn1 $(INCLUDE_hcrypto)
 AM_CPPFLAGS += $(INCLUDE_openldap) -DHDB_DB_DIR=\"$(DIR_hdbdir)\"
 AM_CPPFLAGS += -I$(srcdir)/../krb5
-AM_CPPFLAGS += $(INCLUDE_sqlite3)
 AM_CPPFLAGS += $(INCLUDE_libintl)
 if HAVE_DBHEADER
 AM_CPPFLAGS += -I$(DBHEADER)
@@ -80,7 +79,6 @@ dist_libhdb_la_SOURCES =			\
 	ext.c					\
 	$(ldap)					\
 	hdb.c					\
-	hdb-sqlite.c				\
 	hdb-keytab.c				\
 	hdb-mitdb.c				\
 	hdb_locl.h				\
@@ -103,7 +101,6 @@ libhdb_la_LIBADD = \
 	$(LIB_com_err) \
 	../krb5/libkrb5.la \
 	../asn1/libasn1.la \
-	$(LIB_sqlite3) \
 	$(LIBADD_roken) \
 	$(ldap_lib) \
 	$(LIB_dlopen) \

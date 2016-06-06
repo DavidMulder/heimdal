@@ -10,7 +10,6 @@ SUBDIRS = \
 	sl \
 	wind \
 	asn1 \
-	sqlite \
 	hcrypto \
 	ipc \
 	hx509 \
