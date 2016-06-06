@@ -225,8 +225,6 @@ asn1_*.[cx]
 /lib/kafs/strlcpy.c
 /lib/kafs/strsep.c
 /lib/kafs/strtok_r.c
-/lib/krb5/krb5-protos.h
-/lib/krb5/krb5-private.h
 /lib/krb5/krbhst-test
 /lib/krb5/test_alname
 /lib/krb5/test_crypto
