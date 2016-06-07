@@ -627,7 +627,6 @@ AC_CONFIG_FILES(Makefile 		\
 	lib/krb5/Makefile		\
 	lib/roken/Makefile		\
 	lib/sl/Makefile			\
-	lib/sqlite/Makefile		\
 	lib/vers/Makefile		\
 	lib/wind/Makefile		\
 	kuser/Makefile			\
