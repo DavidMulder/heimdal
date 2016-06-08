@@ -15,10 +15,10 @@ man_MANS = \
 	kgetcred.1 \
 	kimpersonate.8
 
-bin_PROGRAMS = kinit kdestroy kgetcred
+bin_PROGRAMS = kinit kdestroy kgetcred kcc
 libexec_PROGRAMS = kdigest kimpersonate
 
-noinst_PROGRAMS = kverify kdecode_ticket generate-requests kcc
+noinst_PROGRAMS = kverify kdecode_ticket generate-requests
 
 kinit_LDADD = \
     $(LIB_kafs) \
@@ -83,9 +83,4 @@ EXTRA_DIST = NTMakefile $(man_MANS) \
 	kimpersonate-version.rc \
 	kinit-version.rc \
 	kuser_locl.h kcc-commands.in kdigest-commands.in copy_cred_cache.1
-
-# make sure install-exec-hook doesn't have any commands in Makefile.am.common
-install-exec-hook:
-	$(mkinstalldirs) $(DESTDIR)$(bindir)
-	$(INSTALL_PROGRAM) kcc $(DESTDIR)$(bindir)/.klist
 
