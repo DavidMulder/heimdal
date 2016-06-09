@@ -144,7 +144,7 @@ dlopen(const char *fn, int flags)
 
     old_error_mode = SetErrorMode(SEM_FAILCRITICALERRORS);
 
-    hm = LoadLibrary(fn);
+    hm = LoadLibraryEx(fn, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
 
     if (hm == NULL) {
 	set_error_from_last();
@@ -163,3 +163,23 @@ dlsym(void * vhm, const char * func_name)
     return (DLSYM_RET_TYPE)(ULONG_PTR)GetProcAddress(hm, func_name);
 }
 
+ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
+dladdr(void *addr, Dl_info *dli)
+{
+    HMODULE hm;
+    DWORD nsize;
+
+    memset(dli, 0, sizeof(*dli));
+    dli->dli_fname = dli->_dli_buf;
+
+    if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			   (LPCTSTR)(ULONG_PTR)addr, &hm))
+        return 0;
+
+    nsize = GetModuleFileName(hm, dli->_dli_buf, sizeof(dli->_dli_buf));
+    dli->_dli_buf[sizeof(dli->_dli_buf) - 1] = '\0';
+    if (nsize >= sizeof(dli->_dli_buf))
+        return 0; /* truncated? can't be... */
+    return 1;
+}

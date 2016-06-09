@@ -192,7 +192,7 @@ setpeer(int argc, char **argv)
 			if (overbose &&
 			    !strncmp(reply_string, "215 TOPS20", 10))
 				printf(
-"Remember to set tenex mode when transfering binary files from this machine.\n");
+"Remember to set tenex mode when transferring binary files from this machine.\n");
 		}
 		verbose = overbose;
 #endif /* unix */
@@ -210,7 +210,7 @@ struct	types {
 	{ "image",	"I",	TYPE_I,	0 },
 	{ "ebcdic",	"E",	TYPE_E,	0 },
 	{ "tenex",	"L",	TYPE_L,	bytename },
-	{ NULL }
+	{ NULL, NULL, 0, NULL }
 };
 
 /*
@@ -1316,7 +1316,8 @@ user(int argc, char **argv)
 	if (n == CONTINUE) {
 		if (argc < 4) {
 			printf("Account: "); fflush(stdout);
-			fgets(acctstr, sizeof(acctstr) - 1, stdin);
+			if (fgets(acctstr, sizeof(acctstr) - 1, stdin) == NULL)
+				acctstr[0] = '\0';
 			acctstr[strcspn(acctstr, "\r\n")] = '\0';
 			argv[3] = acctstr; argc++;
 		}
@@ -1465,7 +1466,10 @@ do_umask(int argc, char **argv)
 	int oldverbose = verbose;
 
 	verbose = 1;
-	command(argc == 1 ? "SITE UMASK" : "SITE UMASK %s", argv[1]);
+	if (argc == 1)
+		command("SITE UMASK");
+	else
+		command("SITE UMASK %s", argv[1]);
 	verbose = oldverbose;
 }
 
@@ -1475,7 +1479,10 @@ ftp_idle(int argc, char **argv)
 	int oldverbose = verbose;
 
 	verbose = 1;
-	command(argc == 1 ? "SITE IDLE" : "SITE IDLE %s", argv[1]);
+	if (argc == 1)
+		command("SITE IDLE");
+	else
+		command("SITE IDLE %s", argv[1]);
 	verbose = oldverbose;
 }
 
@@ -1488,7 +1495,10 @@ rmthelp(int argc, char **argv)
 	int oldverbose = verbose;
 
 	verbose = 1;
-	command(argc == 1 ? "HELP" : "HELP %s", argv[1]);
+	if (argc == 1)
+		command("HELP");
+	else
+		command("HELP %s", argv[1]);
 	verbose = oldverbose;
 }
 
@@ -2118,7 +2128,10 @@ void
 rmtstatus(int argc, char **argv)
 {
 
-	command(argc > 1 ? "STAT %s" : "STAT" , argv[1]);
+	if (argc == 1)
+		command("STAT");
+	else
+		command("STAT %s", argv[1]);
 }
 
 /*

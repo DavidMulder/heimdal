@@ -40,9 +40,9 @@ static int version_flag;
 static int kvno_integer = 1;
 
 struct getargs args[] = {
-    { "kvno",		'd',	arg_integer, &kvno_integer },
-    { "help",		'h',	arg_flag,   &help_flag },
-    { "version",	0,	arg_flag,   &version_flag }
+    { "kvno",		'd',	arg_integer, &kvno_integer, NULL, NULL },
+    { "help",		'h',	arg_flag,    &help_flag,    NULL, NULL },
+    { "version",	0,	arg_flag,    &version_flag, NULL, NULL }
 };
 
 static int num_args = sizeof(args) / sizeof(args[0]);
@@ -88,9 +88,13 @@ main(int argc, char **argv)
     memset(&keyset, 0, sizeof(keyset));
 
     keyset.kvno = kvno_integer;
+    keyset.set_time = malloc(sizeof (*keyset.set_time));
+    if (keyset.set_time == NULL)
+	errx(1, "couldn't allocate set_time field of keyset");
+    *keyset.set_time = time(NULL);
 
     ret = hdb_generate_key_set_password(context, principal, password_str,
-					&keyset.keys.val, &len);
+					NULL, 0, &keyset.keys.val, &len);
     if (ret)
 	krb5_err(context, 1, ret, "hdb_generate_key_set_password");
     keyset.keys.len = len;
@@ -108,7 +112,7 @@ main(int argc, char **argv)
 
     krb5_free_context(context);
 
-    ret = base64_encode(data, length, &str);
+    ret = rk_base64_encode(data, length, &str);
     if (ret < 0)
 	errx(1, "base64_encode");
 

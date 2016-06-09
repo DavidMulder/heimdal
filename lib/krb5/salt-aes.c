@@ -63,10 +63,8 @@ AES_string_to_key(krb5_context context,
 
     kd.schedule = NULL;
     ALLOC(kd.key, 1);
-    if(kd.key == NULL) {
-	krb5_set_error_message (context, ENOMEM, N_("malloc: out of memory", ""));
-	return ENOMEM;
-    }
+    if (kd.key == NULL)
+	return krb5_enomem(context);
     kd.key->keytype = enctype;
     ret = krb5_data_alloc(&kd.key->keyvalue, et->keytype->size);
     if (ret) {
@@ -99,5 +97,5 @@ struct salt_type _krb5_AES_salt[] = {
 	"pw-salt",
 	AES_string_to_key
     },
-    { 0, NULL, NULL } /* VAS Modification - initialize all members */
+    { 0, NULL, NULL }
 };

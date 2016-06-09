@@ -209,7 +209,7 @@ unparse_CMSIdentifier(hx509_context context,
 		      CMSIdentifier *id,
 		      char **str)
 {
-    int ret;
+    int ret = -1;
 
     *str = NULL;
     switch (id->element) {
@@ -227,8 +227,8 @@ unparse_CMSIdentifier(hx509_context context,
 	    free(name);
 	    return ret;
 	}
-	asprintf(str, "certificate issued by %s with serial number %s",
-		 name, serial);
+	ret = asprintf(str, "certificate issued by %s with serial number %s",
+		       name, serial);
 	free(name);
 	free(serial);
 	break;
@@ -242,15 +242,19 @@ unparse_CMSIdentifier(hx509_context context,
 	if (len < 0)
 	    return ENOMEM;
 
-	asprintf(str, "certificate with id %s", keyid);
+	ret = asprintf(str, "certificate with id %s", keyid);
 	free(keyid);
 	break;
     }
     default:
-	asprintf(str, "certificate have unknown CMSidentifier type");
+	ret = asprintf(str, "certificate have unknown CMSidentifier type");
 	break;
     }
-    if (*str == NULL)
+    /*
+     * In the following if, we check ret and *str which should be returned/set
+     * by asprintf(3) in every branch of the switch statement.
+     */
+    if (ret == -1 || *str == NULL)
 	return ENOMEM;
     return 0;
 }
@@ -726,14 +730,18 @@ any_to_certs(hx509_context context, const SignedData *sd, hx509_certs certs)
 	return 0;
 
     for (i = 0; i < sd->certificates->len; i++) {
+	heim_error_t error;
 	hx509_cert c;
 
-	ret = hx509_cert_init_data(context,
-				   sd->certificates->val[i].data,
-				   sd->certificates->val[i].length,
-				   &c);
-	if (ret)
+	c = hx509_cert_init_data(context,
+				 sd->certificates->val[i].data,
+				 sd->certificates->val[i].length,
+				 &error);
+	if (c == NULL) {
+	    ret = heim_error_get_code(error);
+	    heim_release(error);
 	    return ret;
+	}
 	ret = hx509_certs_add(context, certs, c);
 	hx509_cert_free(c);
 	if (ret)

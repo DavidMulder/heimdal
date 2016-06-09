@@ -36,38 +36,38 @@
 OM_uint32
 _gsskrb5_lifetime_left(OM_uint32 *minor_status,
 		       krb5_context context,
-		       OM_uint32 lifetime,
+		       OM_uint32 endtime,
 		       OM_uint32 *lifetime_rec)
 {
-    krb5_timestamp timeret;
+    krb5_timestamp now;
     krb5_error_code kret;
 
 /* --- Begin modification by mpeterson@vintela.com --- */
     /* If the lifetime of the credential is indefiniate, the time remaining
      * is indenfinate.  Added to pass SAP gsstest 
      */
-    if( lifetime == GSS_C_INDEFINITE )
+    if( endtime == GSS_C_INDEFINITE )
     {
         *lifetime_rec = GSS_C_INDEFINITE;
         return GSS_S_COMPLETE;
     }
 /* --- End modification by mpeterson@vintela.com --- */
 
-    if (lifetime == 0) {
+    if (endtime == 0) {
 	*lifetime_rec = GSS_C_INDEFINITE;
 	return GSS_S_COMPLETE;
     }
 
-    kret = krb5_timeofday(context, &timeret);
+    kret = krb5_timeofday(context, &now);
     if (kret) {
 	*minor_status = kret;
 	return GSS_S_FAILURE;
     }
 
-    if (lifetime < (OM_uint32)timeret) 
+    if (endtime < (OM_uint32)now)
 	*lifetime_rec = 0;
     else
-	*lifetime_rec = lifetime - timeret;
+	*lifetime_rec = endtime - now;
 
     return GSS_S_COMPLETE;
 }
@@ -75,23 +75,23 @@ _gsskrb5_lifetime_left(OM_uint32 *minor_status,
 
 OM_uint32 GSSAPI_CALLCONV _gsskrb5_context_time
            (OM_uint32 * minor_status,
-            const gss_ctx_id_t context_handle,
+            gss_const_ctx_id_t context_handle,
             OM_uint32 * time_rec
            )
 {
     krb5_context context;
-    OM_uint32 lifetime;
+    OM_uint32 endtime;
     OM_uint32 major_status;
     const gsskrb5_ctx ctx = (const gsskrb5_ctx) context_handle;
 
     GSSAPI_KRB5_INIT (&context);
 
     HEIMDAL_MUTEX_lock(&ctx->ctx_id_mutex);
-    lifetime = ctx->lifetime;
+    endtime = ctx->endtime;
     HEIMDAL_MUTEX_unlock(&ctx->ctx_id_mutex);
 
     major_status = _gsskrb5_lifetime_left(minor_status, context,
-					  lifetime, time_rec);
+					  endtime, time_rec);
     if (major_status != GSS_S_COMPLETE)
 	return major_status;
 

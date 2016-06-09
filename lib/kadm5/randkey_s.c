@@ -43,6 +43,9 @@ RCSID("$Id$");
 kadm5_ret_t
 kadm5_s_randkey_principal(void *server_handle,
 			  krb5_principal princ,
+			  krb5_boolean keepold,
+			  int n_ks_tuple,
+			  krb5_key_salt_tuple *ks_tuple,
 			  krb5_keyblock **new_keys,
 			  int *n_keys)
 {
@@ -51,21 +54,34 @@ kadm5_s_randkey_principal(void *server_handle,
     kadm5_ret_t ret;
 
     memset(&ent, 0, sizeof(ent));
-    ret = context->db->hdb_open(context->context, context->db, O_RDWR, 0);
-    if(ret)
-	return ret;
+    if (!context->keep_open) {
+	ret = context->db->hdb_open(context->context, context->db, O_RDWR, 0);
+	if(ret)
+	    return ret;
+    }
+
+    ret = kadm5_log_init(context);
+    if (ret)
+        goto out;
+
     ret = context->db->hdb_fetch_kvno(context->context, context->db, princ,
 				      HDB_F_GET_ANY|HDB_F_ADMIN_DATA, 0, &ent);
     if(ret)
 	goto out;
 
-    ret = _kadm5_set_keys_randomly (context,
-				    &ent.entry,
-				    new_keys,
-				    n_keys);
+    if (keepold) {
+	ret = hdb_add_current_keys_to_history(context->context, &ent.entry);
+	if (ret)
+	    goto out2;
+    }
+
+    ret = _kadm5_set_keys_randomly(context, &ent.entry, n_ks_tuple, ks_tuple,
+                                   new_keys, n_keys);
     if (ret)
 	goto out2;
     ent.entry.kvno++;
+
+    ent.entry.flags.require_pwchange = 0;
 
     ret = _kadm5_set_modifier(context, &ent.entry);
     if(ret)
@@ -74,27 +90,34 @@ kadm5_s_randkey_principal(void *server_handle,
     if (ret)
 	goto out2;
 
-    ret = hdb_seal_keys(context->context, context->db, &ent.entry);
-    if (ret)
-	goto out2;
+    if (keepold) {
+	ret = hdb_seal_keys(context->context, context->db, &ent.entry);
+	if (ret)
+	    goto out2;
+    } else {
+	HDB_extension ext;
 
-    ret = context->db->hdb_store(context->context, context->db,
-				 HDB_F_REPLACE, &ent);
-    if (ret)
-	goto out2;
+	memset(&ext, 0, sizeof (ext));
+        ext.mandatory = FALSE;
+	ext.data.element = choice_HDB_extension_data_hist_keys;
+	ext.data.u.hist_keys.len = 0;
+	ext.data.u.hist_keys.val = NULL;
+	hdb_replace_extension(context->context, &ent.entry, &ext);
+    }
 
-    kadm5_log_modify (context,
-		      &ent.entry,
-		      KADM5_PRINCIPAL | KADM5_MOD_NAME | KADM5_MOD_TIME |
-		      KADM5_KEY_DATA | KADM5_KVNO | KADM5_PW_EXPIRATION |
-		      KADM5_TL_DATA);
+    /* This logs the change for iprop and writes to the HDB */
+    ret = kadm5_log_modify(context, &ent.entry,
+                           KADM5_ATTRIBUTES | KADM5_PRINCIPAL |
+                           KADM5_MOD_NAME | KADM5_MOD_TIME |
+                           KADM5_KEY_DATA | KADM5_KVNO |
+                           KADM5_PW_EXPIRATION | KADM5_TL_DATA);
 
 out3:
     if (ret) {
 	int i;
 
 	for (i = 0; i < *n_keys; ++i)
-	    krb5_free_keyblock_contents (context->context, &(*new_keys)[i]);
+	    krb5_free_keyblock_contents(context->context, &(*new_keys)[i]);
 	free (*new_keys);
 	*new_keys = NULL;
 	*n_keys = 0;
@@ -102,6 +125,12 @@ out3:
 out2:
     hdb_free_entry(context->context, &ent);
 out:
-    context->db->hdb_close(context->context, context->db);
+    (void) kadm5_log_end(context);
+    if (!context->keep_open) {
+        kadm5_ret_t ret2;
+        ret2 = context->db->hdb_close(context->context, context->db);
+        if (ret == 0 && ret2 != 0)
+            ret = ret2;
+    }
     return _kadm5_error_code(ret);
 }

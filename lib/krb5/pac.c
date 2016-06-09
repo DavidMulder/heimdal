@@ -595,11 +595,12 @@ verify_logonname(krb5_context context,
 		 krb5_const_principal principal)
 {
     krb5_error_code ret;
-    krb5_principal p2;
     uint32_t time1, time2;
     krb5_storage *sp;
     uint16_t len;
-    char *s;
+    char *s = NULL;
+    char *principal_string = NULL;
+    char *logon_string = NULL;
 
     sp = krb5_storage_from_readonly_mem((const char *)data->data + logon_name->offset_lo,
 					logon_name->buffersize);
@@ -615,7 +616,13 @@ verify_logonname(krb5_context context,
 	uint64_t t1, t2;
 	t1 = unix2nttime(authtime);
 	t2 = ((uint64_t)time2 << 32) | time1;
-	if (t1 != t2) {
+	/*
+	 * When neither the ticket nor the PAC set an explicit authtime,
+	 * both times are zero, but relative to different time scales.
+	 * So we must compare "not set" values without converting to a
+	 * common time reference.
+         */
+	if (t1 != t2 && (t2 != 0 && authtime != 0)) {
 	    krb5_storage_free(sp);
 	    krb5_set_error_message(context, EINVAL, "PAC timestamp mismatch");
 	    return EINVAL;
@@ -664,29 +671,36 @@ verify_logonname(krb5_context context,
 	    return ret;
 	}
 	u8len += 1; /* Add space for NUL */
-	s = malloc(u8len);
-	if (s == NULL) {
+	logon_string = malloc(u8len);
+	if (logon_string == NULL) {
 	    free(ucs2);
 	    return krb5_enomem(context);
 	}
-	ret = wind_ucs2utf8(ucs2, ucs2len, s, &u8len);
+	ret = wind_ucs2utf8(ucs2, ucs2len, logon_string, &u8len);
 	free(ucs2);
 	if (ret) {
-	    free(s);
+	    free(logon_string);
 	    krb5_set_error_message(context, ret, "Failed to convert to UTF-8");
 	    return ret;
 	}
     }
-    ret = krb5_parse_name_flags(context, s, KRB5_PRINCIPAL_PARSE_NO_REALM, &p2);
-    free(s);
-    if (ret)
+    ret = krb5_unparse_name_flags(context, principal,
+				  KRB5_PRINCIPAL_UNPARSE_NO_REALM |
+				  KRB5_PRINCIPAL_UNPARSE_DISPLAY,
+				  &principal_string);
+    if (ret) {
+	free(logon_string);
 	return ret;
-
-    if (krb5_principal_compare_any_realm(context, principal, p2) != TRUE) {
-	ret = EINVAL;
-	krb5_set_error_message(context, ret, "PAC logon name mismatch");
     }
-    krb5_free_principal(context, p2);
+
+    ret = strcmp(logon_string, principal_string);
+    if (ret != 0) {
+	ret = EINVAL;
+	krb5_set_error_message(context, ret, "PAC logon name [%s] mismatch principal name [%s]",
+			       logon_string, principal_string);
+    }
+    free(logon_string);
+    free(principal_string);
     return ret;
 out:
     return ret;
@@ -722,7 +736,9 @@ build_logon_name(krb5_context context,
     CHECK(ret, krb5_store_uint32(sp, t >> 32), out);
 
     ret = krb5_unparse_name_flags(context, principal,
-				  KRB5_PRINCIPAL_UNPARSE_NO_REALM, &s);
+				  KRB5_PRINCIPAL_UNPARSE_NO_REALM |
+				  KRB5_PRINCIPAL_UNPARSE_DISPLAY,
+				  &s);
     if (ret)
 	goto out;
 
@@ -733,8 +749,8 @@ build_logon_name(krb5_context context,
 
 	ret = wind_utf8ucs2_length(s, &ucs2_len);
 	if (ret) {
+	    krb5_set_error_message(context, ret, "Principal %s is not valid UTF-8", s);
 	    free(s);
-	    krb5_set_error_message(context, ret, "Failed to count length of UTF-8 string");
 	    return ret;
 	}
 
@@ -745,16 +761,17 @@ build_logon_name(krb5_context context,
 	}
 
 	ret = wind_utf8ucs2(s, ucs2, &ucs2_len);
-	free(s);
 	if (ret) {
 	    free(ucs2);
-	    krb5_set_error_message(context, ret, "Failed to convert string to UCS-2");
+	    krb5_set_error_message(context, ret, "Principal %s is not valid UTF-8", s);
+	    free(s);
 	    return ret;
-	}
+	} else 
+	    free(s);
 
 	s2_len = (ucs2_len + 1) * 2;
 	s2 = malloc(s2_len);
-	if (ucs2 == NULL) {
+	if (s2 == NULL) {
 	    free(ucs2);
 	    return krb5_enomem(context);
 	}
@@ -948,7 +965,7 @@ pac_checksum(krb5_context context,
     return 0;
 }
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_pac_sign(krb5_context context,
 	       krb5_pac p,
 	       time_t authtime,
@@ -968,6 +985,40 @@ _krb5_pac_sign(krb5_context context,
     krb5_data logon, d;
 
     krb5_data_zero(&logon);
+
+    for (i = 0; i < p->pac->numbuffers; i++) {
+	if (p->pac->buffers[i].type == PAC_SERVER_CHECKSUM) {
+	    if (p->server_checksum == NULL) {
+		p->server_checksum = &p->pac->buffers[i];
+	    }
+	    if (p->server_checksum != &p->pac->buffers[i]) {
+		ret = EINVAL;
+		krb5_set_error_message(context, ret,
+				       N_("PAC have two server checksums", ""));
+		goto out;
+	    }
+	} else if (p->pac->buffers[i].type == PAC_PRIVSVR_CHECKSUM) {
+	    if (p->privsvr_checksum == NULL) {
+		p->privsvr_checksum = &p->pac->buffers[i];
+	    }
+	    if (p->privsvr_checksum != &p->pac->buffers[i]) {
+		ret = EINVAL;
+		krb5_set_error_message(context, ret,
+				       N_("PAC have two KDC checksums", ""));
+		goto out;
+	    }
+	} else if (p->pac->buffers[i].type == PAC_LOGON_NAME) {
+	    if (p->logon_name == NULL) {
+		p->logon_name = &p->pac->buffers[i];
+	    }
+	    if (p->logon_name != &p->pac->buffers[i]) {
+		ret = EINVAL;
+		krb5_set_error_message(context, ret,
+				       N_("PAC have two logon names", ""));
+		goto out;
+	    }
+	}
+    }
 
     if (p->logon_name == NULL)
 	num++;

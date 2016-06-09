@@ -98,9 +98,8 @@ static int version_flag	= 0;
 static int help_flag	= 0;
 
 static struct getargs args[] = {
-    /* VAS Modification - initialize all members */
     { "version", 	0,   arg_flag, &version_flag, NULL, NULL },
-    { "help",		0,   arg_flag, &help_flag, NULL, NULL }
+    { "help",		0,   arg_flag, &help_flag,    NULL, NULL }
 };
 
 static void

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997 - 2008 Kungliga Tekniska Högskolan
+ * Copyright (c) 1997 - 2016 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
@@ -121,6 +121,7 @@ struct _krb5_encryption_type {
     krb5_enctype type;
     const char *name;
     heim_oid *oid;
+    const char *alias;
     size_t blocksize;
     size_t padsize;
     size_t confoundersize;
@@ -190,8 +191,14 @@ extern struct _krb5_encryption_type _krb5_enctype_null;
 extern struct _krb5_encryption_type *_krb5_etypes[];
 extern int _krb5_num_etypes;
 
+/* NO_HCRYPTO_POLLUTION is defined in pkinit-ec.c.  See commentary there. */
+#ifndef NO_HCRYPTO_POLLUTION
 /* Interface to the EVP crypto layer provided by hcrypto */
 struct _krb5_evp_schedule {
+    /*
+     * Normally we'd say EVP_CIPHER_CTX here, but!  this header gets
+     * included in lib/krb5/pkinit-ec.ck
+     */
     EVP_CIPHER_CTX ectx;
     EVP_CIPHER_CTX dctx;
 };
@@ -200,3 +207,4 @@ krb5_error_code _krb5_derive_key(krb5_context context, struct _krb5_encryption_t
 
 void _krb5_free_key_data(krb5_context context, struct _krb5_key_data *key, struct _krb5_encryption_type *et);
 
+#endif

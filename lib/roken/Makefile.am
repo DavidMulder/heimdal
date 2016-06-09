@@ -20,12 +20,15 @@ if HAVE_DBHEADER
 AM_CPPFLAGS += -I$(DBHEADER)
 endif
 
-noinst_PROGRAMS = snprintf-test resolve-test rkpty
+noinst_PROGRAMS = snprintf-test resolve-test rkpty test-detach
+
+CHECK_LOCAL = snprintf-test resolve-test rkpty make-roken
 
 check_PROGRAMS = 				\
 		base64-test			\
 		getaddrinfo-test		\
 		getifaddrs-test			\
+		getxxyyy-test			\
 		hex-test			\
 		test-readenv			\
 		parse_bytes-test		\
@@ -49,6 +52,8 @@ parse_reply_test_CFLAGS  = -DTEST_RESOLVE
 
 test_readenv_SOURCES = test-readenv.c test-mem.c
 
+test_detach_SOURCES = test-detach.c
+
 rkpty_LDADD = $(LIB_openpty) $(LDADD)
 
 parse_time_test_SOURCES = parse_time-test.c test-mem.c
@@ -63,6 +68,9 @@ tsearch_test_SOURCES	= tsearch-test.c
 tsearch_test_LDADD = libtest.la $(LDADD)
 tsearch_test_CFLAGS	= -DTEST_TSEARCH
 
+getxxyyy_test_SOURCES	= getxxyyy.c
+getxxyyy_test_CFLAGS	= -DTEST_GETXXYYY
+
 resolve_test_SOURCES = resolve-test.c
 
 libroken_la_SOURCES =		\
@@ -71,6 +79,7 @@ libroken_la_SOURCES =		\
 	concat.c		\
 	cloexec.c		\
 	ct.c			\
+	detach.c		\
 	doxygen.c		\
 	dumpdata.c		\
 	environment.c		\
@@ -83,6 +92,7 @@ libroken_la_SOURCES =		\
 	getarg.c		\
 	getnameinfo_verified.c	\
 	getprogname.c		\
+	getxxyyy.c		\
 	h_errno.c		\
 	hex.c			\
 	hostent_find_fqdn.c	\
@@ -90,6 +100,7 @@ libroken_la_SOURCES =		\
 	k_getpwnam.c		\
 	k_getpwuid.c		\
 	mini_inetd.c		\
+	mkdir.c                 \
 	net_read.c		\
 	net_write.c		\
 	parse_bytes.c		\

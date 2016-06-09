@@ -12,7 +12,6 @@ login_SOURCES =					\
 		login.c				\
 		login_access.c			\
 		login_locl.h			\
-		login-protos.h			\
 		loginpaths.h			\
 		limits_conf.c			\
 		osfc2.c				\
@@ -23,6 +22,8 @@ login_SOURCES =					\
 		utmp_login.c			\
 		utmpx_login.c
 
+noinst_HEADERS = $(srcdir)/login-protos.h
+
 LDADD = $(LIB_otp) \
 	$(LIB_kafs) \
 	$(top_builddir)/lib/krb5/libkrb5.la \
@@ -30,9 +31,9 @@ LDADD = $(LIB_otp) \
 	$(top_builddir)/lib/asn1/libasn1.la \
 	$(LIB_roken) \
 	$(LIB_security) \
-	$(DBLIB)
+	$(DB3LIB) $(DB1LIB) $(LMDBLIB) $(NDBMLIB)
 
-$(srcdir)/login-protos.h:
+$(srcdir)/login-protos.h: $(login_SOURCES)
 	cd $(srcdir); perl ../../cf/make-proto.pl -o login-protos.h -q -P comment $(login_SOURCES) || rm -f login-protos.h
 
 $(login_OBJECTS): $(srcdir)/login-protos.h

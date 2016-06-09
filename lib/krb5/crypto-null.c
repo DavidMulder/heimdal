@@ -38,7 +38,7 @@
 #endif
 
 static struct _krb5_key_type keytype_null = {
-    ENCTYPE_NULL,
+    KRB5_ENCTYPE_NULL,
     "null",
     0,
     0,
@@ -47,9 +47,7 @@ static struct _krb5_key_type keytype_null = {
     NULL,
     NULL,
     NULL,
-    NULL
-/* VAS Modification -- for parameters */
-    ,
+    NULL,
     NULL,
     NULL
 /* End VAS Modification */

@@ -32,12 +32,9 @@
  */
 
 #include <config.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <dsa.h>
-
 #include <roken.h>
+
+#include <dsa.h>
 
 /*
  *
@@ -88,9 +85,17 @@ DSA_up_ref(DSA *dsa)
  *
  */
 
-/* VAS Modification - specify initialization for all members */
 static const DSA_METHOD dsa_null_method = {
-    "hcrypto null DSA", NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL
+    "hcrypto null DSA",
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    0,
+    NULL
 };
 
 const DSA_METHOD *

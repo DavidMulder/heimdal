@@ -32,8 +32,7 @@
  */
 
 #include "kadm5_locl.h"
-
-RCSID("$Id$");
+#include <fcntl.h>
 
 
 static kadm5_ret_t
@@ -47,12 +46,25 @@ kadm5_s_init_with_context(krb5_context context,
 {
     kadm5_ret_t ret;
     kadm5_server_context *ctx;
+    char *dbname;
+    char *stash_file;
+
     ret = _kadm5_s_init_context(&ctx, realm_params, context);
     if(ret)
 	return ret;
 
-    assert(ctx->config.dbname != NULL);
-    assert(ctx->config.stash_file != NULL);
+    if (realm_params->mask & KADM5_CONFIG_DBNAME)
+	dbname = realm_params->dbname;
+    else
+	dbname = ctx->config.dbname;
+
+    if (realm_params->mask & KADM5_CONFIG_STASH_FILE)
+	stash_file = realm_params->stash_file;
+    else
+	stash_file = ctx->config.stash_file;
+
+    assert(dbname != NULL);
+    assert(stash_file != NULL);
     assert(ctx->config.acl_file != NULL);
     assert(ctx->log_context.log_file != NULL);
 #ifndef NO_UNIX_SOCKETS
@@ -61,11 +73,11 @@ kadm5_s_init_with_context(krb5_context context,
     assert(ctx->log_context.socket_info != NULL);
 #endif
 
-    ret = hdb_create(ctx->context, &ctx->db, ctx->config.dbname);
+    ret = hdb_create(ctx->context, &ctx->db, dbname);
     if(ret)
 	return ret;
     ret = hdb_set_master_keyfile (ctx->context,
-				  ctx->db, ctx->config.stash_file);
+				  ctx->db, stash_file);
     if(ret)
 	return ret;
 
@@ -78,6 +90,8 @@ kadm5_s_init_with_context(krb5_context context,
 					 ctx->log_context.socket_info->ai_socktype,
 					 ctx->log_context.socket_info->ai_protocol);
 #endif
+
+    socket_set_nonblocking(ctx->log_context.socket_fd, 1);
 
     ret = krb5_parse_name(ctx->context, client_name, &ctx->caller);
     if(ret)

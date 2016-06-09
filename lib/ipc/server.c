@@ -336,14 +336,14 @@ mach_init(const char *service, mach_port_t sport, heim_sipc ctx)
 	});
 
     dispatch_source_set_cancel_handler(s->source, ^{
-	    heim_sipc ctx = dispatch_get_context(dispatch_get_current_queue());
-	    struct mach_service *st = ctx->mech;
+	    heim_sipc sctx = dispatch_get_context(dispatch_get_current_queue());
+	    struct mach_service *st = sctx->mech;
 	    mach_port_mod_refs(mach_task_self(), st->sport,
 			       MACH_PORT_RIGHT_RECEIVE, -1);
 	    dispatch_release(st->queue);
 	    dispatch_release(st->source);
 	    free(st);
-	    free(ctx);
+	    free(sctx);
 	});
 
     dispatch_resume(s->source);
@@ -525,7 +525,7 @@ update_client_creds(struct client *c)
 	}
     }
 #endif
-#ifdef SO_PEERCRED
+#if defined(SO_PEERCRED) && defined(__linux__)
     /* Linux */
     {
 	struct ucred pc;
@@ -822,7 +822,7 @@ handle_http_tcp(struct client *c)
 	free(data);
 	return NULL;
     }
-    len = base64_decode(t, data);
+    len = rk_base64_decode(t, data);
     if(len <= 0){
 	const char *msg =
 	    " 404 Not found\r\n"

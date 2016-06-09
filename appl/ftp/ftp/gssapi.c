@@ -114,20 +114,21 @@ gss_overhead(void *app_data, int level, int len)
 static int
 gss_encode(void *app_data, void *from, int length, int level, void **to)
 {
-    OM_uint32 maj_stat, min_stat;
+    OM_uint32 min_stat;
     gss_buffer_desc input, output;
     int conf_state;
     struct gssapi_data *d = app_data;
 
     input.length = length;
     input.value = from;
-    maj_stat = gss_wrap (&min_stat,
-			 d->context_hdl,
-			 level == prot_private,
-			 GSS_C_QOP_DEFAULT,
-			 &input,
-			 &conf_state,
-			 &output);
+    /* XXX We should really display the major status... */
+    (void) gss_wrap(&min_stat,
+		    d->context_hdl,
+		    level == prot_private,
+		    GSS_C_QOP_DEFAULT,
+		    &input,
+		    &conf_state,
+		    &output);
     *to = output.value;
     return output.length;
 }
@@ -212,7 +213,7 @@ gss_adat(void *app_data, void *buf, size_t len)
 	free(bindings);
 
     if(output_token.length) {
-	if(base64_encode(output_token.value, output_token.length, &p) < 0) {
+	if(rk_base64_encode(output_token.value, output_token.length, &p) < 0) {
 	    reply(535, "Out of memory base64-encoding.");
 	    return -1;
 	}
@@ -331,7 +332,7 @@ gss_auth(void *app_data, char *host)
     gss_buffer_desc input, output_token;
     int context_established = 0;
     char *p;
-    int n;
+    int n = 0;
     gss_channel_bindings_t bindings;
     struct gssapi_data *d = app_data;
     OM_uint32 mech_flags = GSS_C_MUTUAL_FLAG | GSS_C_SEQUENCE_FLAG;
@@ -420,12 +421,12 @@ gss_auth(void *app_data, char *host)
 	    input.length = 0;
 	}
 	if (output_token.length != 0) {
-	    base64_encode(output_token.value, output_token.length, &p);
+	    rk_base64_encode(output_token.value, output_token.length, &p);
 	    gss_release_buffer(&min_stat, &output_token);
 	    n = command("ADAT %s", p);
 	    free(p);
 	}
-	if (GSS_ERROR(maj_stat)) {
+	if (GSS_ERROR(maj_stat) || n >= 4) {
 	    if (d->context_hdl != GSS_C_NO_CONTEXT)
 		gss_delete_sec_context (&min_stat,
 					&d->context_hdl,
@@ -443,7 +444,7 @@ gss_auth(void *app_data, char *host)
 	    } else {
 		p+=5;
 		input.value = malloc(strlen(p));
-		input.length = base64_decode(p, input.value);
+		input.length = rk_base64_decode(p, input.value);
 	    }
 	} else {
 	    if(code != 235) {

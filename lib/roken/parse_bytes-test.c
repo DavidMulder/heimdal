@@ -73,7 +73,7 @@ main(int argc, char **argv)
 	    ++ret;
 	}
 	if (tests[i].canonicalp) {
-	    len = unparse_bytes (tests[i].val, buf, sizeof(buf));
+	    (void) unparse_bytes (tests[i].val, buf, sizeof(buf));
 	    if (strcmp (tests[i].str, buf) != 0) {
 		printf ("unparse_bytes (%d) = \"%s\" != \"%s\"\n",
 			tests[i].val, buf, tests[i].str);

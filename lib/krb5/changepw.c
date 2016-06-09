@@ -342,6 +342,10 @@ process_reply (krb5_context context,
 	    _krb5_get_int(reply, &size, 4);
 	    if (size + 4 < len)
 		continue;
+	    if (sizeof(reply) - 4 < size) {
+		krb5_set_error_message(context, ERANGE, "size from server too large %s", host);
+		return ERANGE;
+	    }
 	    memmove(reply, reply + 4, size);
 	    len = size;
 	    break;
@@ -366,7 +370,7 @@ process_reply (krb5_context context,
 
     if (len < 6) {
 	str2data (result_string, "server %s sent to too short message "
-		  "(%zu bytes)", host, len);
+		  "(%llu bytes)", host, (unsigned long long)len);
 	*result_code = KRB5_KPASSWD_MALFORMED;
 	return 0;
     }

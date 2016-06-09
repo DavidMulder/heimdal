@@ -110,7 +110,7 @@ open_pty(void)
     printf("implement open_pty\n");
     exit(77);
 #endif
-#if defined(HAVE_OPENPTY) || defined(__linux) || defined(__osf__) /* XXX */
+#if defined(HAVE_OPENPTY) || defined(__osf__) /* XXX */
     if(openpty(&master, &slave, line, 0, 0) == 0)
 	return;
 #endif /* HAVE_OPENPTY .... */
@@ -244,7 +244,7 @@ eval_parent(pid_t pid)
 		     c->str, c->lineno);
 	    else if (alarmset)
 		errx(1, "got a signal %d waiting for %s (line %u)",
-		     (int) alarmset, c->str, c->lineno);
+		     (int)alarmset, c->str, c->lineno);
 	    if (sret <= 0)
 		errx(1, "end command while waiting for %s (line %u)",
 		     c->str, c->lineno);

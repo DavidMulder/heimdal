@@ -37,22 +37,19 @@ static void
 test_int8(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-/* Vintela modification */
-    unsigned i;
+    int i;
     int8_t val[] = {
 	0, 1, -1, 128, -127
     }, v;
-    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < val_len; i++) {
-/* End Vintela modification */
+    for (i = 0; i < sizeof(val)/sizeof(val[0]); i++) {
 
 	ret = krb5_store_int8(sp, val[i]);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_store_int8");
-	krb5_storage_seek(sp, 0, SEEK_SET);
+	krb5_storage_seek(sp, i, SEEK_SET);
 	ret = krb5_ret_int8(sp, &v);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_ret_int8");
@@ -65,22 +62,19 @@ static void
 test_int16(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-/* Vintela modification */
-    unsigned i;
+    int i;
     int16_t val[] = {
 	0, 1, -1, 32768, -32767
     }, v;
-    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < val_len; i++) {
-/* End Vintela modification */
+    for (i = 0; i < sizeof(val)/sizeof(val[0]); i++) {
 
 	ret = krb5_store_int16(sp, val[i]);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_store_int16");
-	krb5_storage_seek(sp, 0, SEEK_SET);
+	krb5_storage_seek(sp, i * sizeof (v), SEEK_SET);
 	ret = krb5_ret_int16(sp, &v);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_ret_int16");
@@ -93,22 +87,19 @@ static void
 test_int32(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-/* Vintela modification */
-    unsigned i;
+    int i;
     int32_t val[] = {
 	0, 1, -1, 2147483647, -2147483646
     }, v;
-    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < val_len; i++) {
-/* End Vintela modification */
+    for (i = 0; i < sizeof(val)/sizeof(val[0]); i++) {
 
 	ret = krb5_store_int32(sp, val[i]);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_store_int32");
-	krb5_storage_seek(sp, 0, SEEK_SET);
+	krb5_storage_seek(sp, i * sizeof (v), SEEK_SET);
 	ret = krb5_ret_int32(sp, &v);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_ret_int32");
@@ -121,22 +112,19 @@ static void
 test_uint8(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-/* Vintela modification */
-    unsigned i;
+    int i;
     uint8_t val[] = {
 	0, 1, 255
     }, v;
-    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < val_len; i++) {
-/* End Vintela modification */
+    for (i = 0; i < sizeof(val)/sizeof(val[0]); i++) {
 
 	ret = krb5_store_uint8(sp, val[i]);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_store_uint8");
-	krb5_storage_seek(sp, 0, SEEK_SET);
+	krb5_storage_seek(sp, i * sizeof (v), SEEK_SET);
 	ret = krb5_ret_uint8(sp, &v);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_ret_uint8");
@@ -149,22 +137,19 @@ static void
 test_uint16(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-/* Vintela modification */
-    unsigned i;
+    int i;
     uint16_t val[] = {
 	0, 1, 65535
     }, v;
-    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < val_len; i++) {
-/* End Vintela modification */
+    for (i = 0; i < sizeof(val)/sizeof(val[0]); i++) {
 
 	ret = krb5_store_uint16(sp, val[i]);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_store_uint16");
-	krb5_storage_seek(sp, 0, SEEK_SET);
+	krb5_storage_seek(sp, i * sizeof (v), SEEK_SET);
 	ret = krb5_ret_uint16(sp, &v);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_ret_uint16");
@@ -177,22 +162,19 @@ static void
 test_uint32(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-/* Vintela modification */
-    unsigned i;
+    int i;
     uint32_t val[] = {
 	0, 1, 4294967295UL
     }, v;
-    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < val_len; i++) {
-/* End Vintela modification */
+    for (i = 0; i < sizeof(val)/sizeof(val[0]); i++) {
 
 	ret = krb5_store_uint32(sp, val[i]);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_store_uint32");
-	krb5_storage_seek(sp, 0, SEEK_SET);
+	krb5_storage_seek(sp, i * sizeof (v), SEEK_SET);
 	ret = krb5_ret_uint32(sp, &v);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_ret_uint32");
@@ -238,12 +220,12 @@ test_truncate(krb5_context context, krb5_storage *sp, int fd)
 static void
 check_too_large(krb5_context context, krb5_storage *sp)
 {
-    uint32_t too_big_sizes[] = { INT_MAX, INT_MAX / 2, INT_MAX / 4, INT_MAX / 8 + 1};
+    uint32_t too_big_sizes[] = { UINT_MAX, UINT_MAX / 2, UINT_MAX / 4, UINT_MAX / 8 + 1};
     krb5_error_code ret;
     krb5_data data;
     size_t n;
 
-    for (n = 0; n < sizeof(too_big_sizes) / sizeof(too_big_sizes); n++) {
+    for (n = 0; n < sizeof(too_big_sizes) / sizeof(too_big_sizes[0]); n++) {
 	krb5_storage_truncate(sp, 0);
 	krb5_store_uint32(sp, too_big_sizes[n]);
 	krb5_storage_seek(sp, 0, SEEK_SET);

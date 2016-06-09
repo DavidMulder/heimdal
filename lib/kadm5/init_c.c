@@ -45,10 +45,23 @@
 
 RCSID("$Id$");
 
+static kadm5_ret_t
+kadm5_c_lock(void *server_handle)
+{
+    return ENOTSUP;
+}
+
+static kadm5_ret_t
+kadm5_c_unlock(void *server_handle)
+{
+    return ENOTSUP;
+}
+
 static void
 set_funcs(kadm5_client_context *c)
 {
 #define SET(C, F) (C)->funcs.F = kadm5 ## _c_ ## F
+#define SETNOTIMP(C, F) (C)->funcs.F = 0
     SET(c, chpass_principal);
     SET(c, chpass_principal_with_key);
     SET(c, create_principal);
@@ -61,6 +74,9 @@ set_funcs(kadm5_client_context *c)
     SET(c, modify_principal);
     SET(c, randkey_principal);
     SET(c, rename_principal);
+    SET(c, lock);
+    SET(c, unlock);
+    SETNOTIMP(c, setkey_principal_3);
 }
 
 kadm5_ret_t
@@ -465,11 +481,12 @@ kadm_connect(kadm5_client_context *ctx)
     }
 
     if (ctx->realm)
-	asprintf(&service_name, "%s@%s", KADM5_ADMIN_SERVICE, ctx->realm);
+	error = asprintf(&service_name, "%s@%s", KADM5_ADMIN_SERVICE,
+			 ctx->realm);
     else
-	asprintf(&service_name, "%s", KADM5_ADMIN_SERVICE);
+	error = asprintf(&service_name, "%s", KADM5_ADMIN_SERVICE);
 
-    if (service_name == NULL) {
+    if (error == -1 || service_name == NULL) {
 	freeaddrinfo (ai);
 	rk_closesocket(s);
 	krb5_clear_error_message(context);

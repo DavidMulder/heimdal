@@ -153,12 +153,14 @@ hdb_get_dbinfo(krb5_context context, struct hdb_dbinfo **dbp)
 	    p = strrchr(di->dbname, '.');
 	    if(p == NULL || strchr(p, '/') != NULL)
 		/* final pathname component does not contain a . */
-		asprintf(&di->mkey_file, "%s.mkey", di->dbname);
+		ret = asprintf(&di->mkey_file, "%s.mkey", di->dbname);
 	    else
 		/* the filename is something.else, replace .else with
                    .mkey */
-		asprintf(&di->mkey_file, "%.*s.mkey",
-			 (int)(p - di->dbname), di->dbname);
+		ret = asprintf(&di->mkey_file, "%.*s.mkey",
+			       (int)(p - di->dbname), di->dbname);
+	    if (ret == -1)
+		return ENOMEM;
 	}
 	if(di->acl_file == NULL)
 	    di->acl_file = strdup(default_acl);
@@ -248,6 +250,12 @@ hdb_free_dbinfo(krb5_context context, struct hdb_dbinfo **dbp)
 const char *
 hdb_db_dir(krb5_context context)
 {
+    const char *p;
+
+    p = krb5_config_get_string(context, NULL, "hdb", "db-dir", NULL);
+    if (p)
+	return p;
+
     return HDB_DB_DIR;
 }
 

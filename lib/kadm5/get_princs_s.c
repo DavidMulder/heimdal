@@ -85,22 +85,31 @@ kadm5_s_get_principals(void *server_handle,
     struct foreach_data d;
     kadm5_server_context *context = server_handle;
     kadm5_ret_t ret;
-    ret = context->db->hdb_open(context->context, context->db, O_RDWR, 0);
-    if(ret) {
-	krb5_warn(context->context, ret, "opening database");
-	return ret;
+
+    if (!context->keep_open) {
+	ret = context->db->hdb_open(context->context, context->db, O_RDONLY, 0);
+	if(ret) {
+	    krb5_warn(context->context, ret, "opening database");
+	    return ret;
+	}
     }
     d.exp = expression;
     {
 	krb5_realm r;
+	int aret;
+
 	krb5_get_default_realm(context->context, &r);
-	asprintf(&d.exp2, "%s@%s", expression, r);
+	aret = asprintf(&d.exp2, "%s@%s", expression, r);
 	free(r);
+	if (aret == -1 || d.exp2 == NULL) {
+	    return ENOMEM;
+	}
     }
     d.princs = NULL;
     d.count = 0;
     ret = hdb_foreach(context->context, context->db, HDB_F_ADMIN_DATA, foreach, &d);
-    context->db->hdb_close(context->context, context->db);
+    if (!context->keep_open)
+	context->db->hdb_close(context->context, context->db);
     if(ret == 0)
 	ret = add_princ(&d, NULL);
     if(ret == 0){

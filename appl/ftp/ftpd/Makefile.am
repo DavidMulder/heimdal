@@ -2,7 +2,9 @@
 
 include $(top_srcdir)/Makefile.am.common
 
-AM_CPPFLAGS += -I$(srcdir)/../common $(INCLUDE_krb4) -DFTP_SERVER
+AM_CPPFLAGS += -I$(srcdir)/../common -DFTP_SERVER
+
+WFLAGS += $(WFLAGS_LITE)
 
 libexec_PROGRAMS = ftpd
 
@@ -24,7 +26,6 @@ ftpd_SOURCES =		\
 	security.c	\
 	kauth.c		\
 	klist.c		\
-	$(krb4_sources) \
 	$(krb5_sources)
 
 EXTRA_ftpd_SOURCES = kauth.c gssapi.c gss_userok.c
@@ -47,7 +48,6 @@ LDADD = ../common/libcommon.a \
 	$(LIB_gssapi) \
 	$(LIB_krb5) \
 	$(LIB_kafs) \
-	$(LIB_krb4) \
 	$(LIB_hcrypto) \
 	$(LIB_roken)
 

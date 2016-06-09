@@ -2,19 +2,24 @@ dnl Process this file with autoconf to produce a configure script.
 AC_REVISION($Revision$)
 AC_PREREQ(2.62)
 test -z "$CFLAGS" && CFLAGS="-g"
-AC_INIT([Heimdal],[1.5.3],[heimdal-bugs@h5l.org])
+AC_INIT([Heimdal],[1.6.99],[heimdal-bugs@h5l.org])
 AC_CONFIG_SRCDIR([kuser/kinit.c])
 AC_CONFIG_HEADERS(include/config.h)
 AC_CONFIG_MACRO_DIR([cf])
 
-AM_INIT_AUTOMAKE([foreign 1.10.3])
+AM_INIT_AUTOMAKE([foreign 1.11])
 AM_MAINTAINER_MODE
+
+LT_PREREQ([2.2])
+LT_INIT([shared static win32-dll])
+
 
 dnl Checks for programs.
 AC_PROG_CC
 AM_PROG_CC_C_O
 AC_PROG_CPP
-AC_PROG_LIBTOOL
+
+m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 AC_PREFIX_DEFAULT(/usr/heimdal)
 
@@ -52,9 +57,6 @@ CC="$CC $abi"
 libdir="$libdir$abilibdirext"
 
 AC_C___ATTRIBUTE__
-
-LT_PREREQ([2.2])
-LT_INIT([shared static win32-dll])
 
 AM_CONDITIONAL(ENABLE_SHARED, test "$enable_shared" = "yes")
 rk_VERSIONSCRIPT
@@ -212,12 +214,6 @@ AC_ARG_WITH([hdbdir],
 DIR_hdbdir="$with_hdbdir"
 AC_SUBST([DIR_hdbdir])
 
-
-dnl no kerberos4 any more
-with_krb4=no
-AC_SUBST(INCLUDE_krb4)
-AC_SUBST(LIB_krb4)
-AM_CONDITIONAL(KRB4, false)
 
 AM_CONDITIONAL(KRB5, true)
 AM_CONDITIONAL(do_roken_rename, true)
@@ -468,9 +464,11 @@ AC_CHECK_FUNCS([				\
 	arc4random				\
 	backtrace				\
 	fcntl					\
+	fork					\
 	getpeereid				\
 	getpeerucred				\
 	grantpt					\
+	kill					\
 	mktime					\
 	ptsname					\
 	rand					\
@@ -493,6 +491,7 @@ AC_CHECK_FUNCS([				\
 	umask					\
 	unlockpt				\
 	vhangup					\
+	waitpid					\
 	yp_get_default_domain			\
 ])
 
@@ -508,6 +507,7 @@ AC_MSG_RESULT($ac_rk_have___sync_add_and_fetch)
 AC_FUNC_MMAP
 
 KRB_CAPABILITIES
+rk_DLADDR
 
 AC_CHECK_GETPWNAM_R_POSIX
 
@@ -613,7 +613,7 @@ AC_CONFIG_FILES(Makefile 		\
 	include/hcrypto/Makefile	\
 	include/kadm5/Makefile		\
 	lib/Makefile			\
-	base/Makefile			\
+	lib/base/Makefile			\
 	lib/asn1/Makefile		\
 	lib/com_err/Makefile		\
 	lib/hcrypto/Makefile		\

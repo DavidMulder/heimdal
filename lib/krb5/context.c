@@ -69,8 +69,7 @@ set_etypes (krb5_context context,
 	etypes = malloc((i+1) * sizeof(*etypes));
 	if (etypes == NULL) {
 	    krb5_config_free_strings (etypes_str);
-	    krb5_set_error_message (context, ENOMEM, N_("malloc: out of memory", ""));
-	    return ENOMEM;
+	    return krb5_enomem(context);
 	}
 	for(j = 0, k = 0; j < i; j++) {
 	    krb5_enctype e;
@@ -100,7 +99,8 @@ init_context_from_config_file(krb5_context context)
     krb5_enctype *tmptypes;
 
     INIT_FIELD(context, time, max_skew, 5 * 60, "clockskew");
-    INIT_FIELD(context, time, kdc_timeout, 3, "kdc_timeout");
+    INIT_FIELD(context, time, kdc_timeout, 30, "kdc_timeout");
+    INIT_FIELD(context, time, host_timeout, 3, "host_timeout");
     INIT_FIELD(context, int, max_retries, 3, "max_retries");
 
     INIT_FIELD(context, string, http_proxy, NULL, "http_proxy");
@@ -147,15 +147,8 @@ init_context_from_config_file(krb5_context context)
     free(context->permitted_enctypes);
     context->permitted_enctypes = tmptypes;
 
-    /* default keytab name */
-    tmp = NULL;
-    if(!issuid())
-	tmp = getenv("KRB5_KTNAME");
-    if(tmp != NULL)
-	context->default_keytab = tmp;
-    else
-	INIT_FIELD(context, string, default_keytab,
-		   KEYTAB_DEFAULT, "default_keytab_name");
+    INIT_FIELD(context, string, default_keytab,
+	       KEYTAB_DEFAULT, "default_keytab_name");
 
     INIT_FIELD(context, string, default_keytab_modify,
 	       NULL, "default_keytab_modify_name");
@@ -220,18 +213,22 @@ init_context_from_config_file(krb5_context context)
     INIT_FIELD(context, bool, srv_lookup, TRUE, "srv_lookup");
     INIT_FIELD(context, bool, srv_lookup, context->srv_lookup, "dns_lookup_kdc");
     INIT_FIELD(context, int, large_msg_size, 1400, "large_message_size");
+    INIT_FIELD(context, int, max_msg_size, 1000 * 1024, "maximum_message_size");
     INIT_FLAG(context, flags, KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME, TRUE, "dns_canonicalize_hostname");
     INIT_FLAG(context, flags, KRB5_CTX_F_CHECK_PAC, TRUE, "check_pac");
-    /* VAS Modification */
-    if( context->default_cc_name )
-        free( context->default_cc_name );
-    /* END VAS Modification */
+
+    if (context->default_cc_name)
+	free(context->default_cc_name);
     context->default_cc_name = NULL;
     context->default_cc_name_set = 0;
 
     s = krb5_config_get_strings(context, NULL, "logging", "krb5", NULL);
     if(s) {
 	char **p;
+
+	if (context->debug_dest)
+	    krb5_closelog(context, context->debug_dest);
+
 	krb5_initlog(context, "libkrb5", &context->debug_dest);
 	for(p = s; *p; p++)
 	    krb5_addlog_dest(context, context->debug_dest, *p);
@@ -246,6 +243,11 @@ init_context_from_config_file(krb5_context context)
 	if (strcasecmp(tmp, "ignore") == 0)
 	    context->flags |= KRB5_CTX_F_RD_REQ_IGNORE;
     }
+    ret = krb5_config_get_bool_default(context, NULL, TRUE,
+				       "libdefaults",
+				       "fcache_strict_checking", NULL);
+    if (ret)
+	context->flags |= KRB5_CTX_F_FCACHE_STRICT_CHECKING;
 
     return 0;
 }
@@ -328,11 +330,8 @@ kt_ops_copy(krb5_context context, const krb5_context src_context)
 	return 0;
 
     context->kt_types = malloc(sizeof(context->kt_types[0]) * src_context->num_kt_types);
-    if (context->kt_types == NULL) {
-	krb5_set_error_message(context, ENOMEM,
-			       N_("malloc: out of memory", ""));
-	return ENOMEM;
-    }
+    if (context->kt_types == NULL)
+	return krb5_enomem(context);
 
     context->num_kt_types = src_context->num_kt_types;
     memcpy(context->kt_types, src_context->kt_types,
@@ -342,8 +341,13 @@ kt_ops_copy(krb5_context context, const krb5_context src_context)
 }
 
 static const char *sysplugin_dirs[] =  {
-    LIBDIR "/plugin/krb5",
+#ifdef _WIN32
+    "$ORIGIN",
+#else
+    "$ORIGIN/../lib/plugin/krb5",
+#endif
 #ifdef __APPLE__
+    LIBDIR "/plugin/krb5",
     "/Library/KerberosPlugins/KerberosFrameworkPlugins",
     "/System/Library/KerberosPlugins/KerberosFrameworkPlugins",
 #endif
@@ -354,8 +358,21 @@ static void
 init_context_once(void *ctx)
 {
     krb5_context context = ctx;
+    char **dirs;
 
-    _krb5_load_plugins(context, "krb5", sysplugin_dirs);
+#ifdef _WIN32
+    dirs = rk_UNCONST(sysplugin_dirs);
+#else
+    dirs = krb5_config_get_strings(context, NULL, "libdefaults",
+				   "plugin_dir", NULL);
+    if (dirs == NULL)
+	dirs = rk_UNCONST(sysplugin_dirs);
+#endif
+
+    _krb5_load_plugins(context, "krb5", (const char **)dirs);
+
+    if (dirs != rk_UNCONST(sysplugin_dirs))
+	krb5_config_free_strings(dirs);
 
     bindtextdomain(HEIMDAL_TEXTDOMAIN, HEIMDAL_LOCALEDIR);
 }
@@ -371,7 +388,8 @@ init_context_once(void *ctx)
  * @return Returns 0 to indicate success.  Otherwise an errno code is
  * returned.  Failure means either that something bad happened during
  * initialization (typically ENOMEM) or that Kerberos should not be
- * used ENXIO.
+ * used ENXIO. If the function returns HEIM_ERR_RANDOM_OFFLINE, the
+ * random source is not available and later Kerberos calls might fail.
  *
  * @ingroup krb5
  */
@@ -396,19 +414,28 @@ krb5_error_code _krb5_init_context_with_vasctx2( krb5_context *context,
     krb5_context p;
     krb5_error_code ret;
     char **files;
+    uint8_t rnd;
 
     *context = NULL;
+
+    /**
+     * krb5_init_context() will get one random byte to make sure our
+     * random is alive.  Assumption is that once the non blocking
+     * source allows us to pull bytes, its all seeded and allows us to
+     * pull more bytes.
+     *
+     * Most Kerberos users calls krb5_init_context(), so this is
+     * useful point where we can do the checking.
+     */
+    ret = krb5_generate_random(&rnd, sizeof(rnd));
+    if (ret)
+	return ret;
 
     p = calloc(1, sizeof(*p));
     if(!p)
 	return ENOMEM;
 
-    p->mutex = malloc(sizeof(HEIMDAL_MUTEX));
-    if (p->mutex == NULL) {
-	free(p);
-	return ENOMEM;
-    }
-    HEIMDAL_MUTEX_init(p->mutex);
+    HEIMDAL_MUTEX_init(&p->mutex);
 
     p->flags |= KRB5_CTX_F_HOMEDIR_ACCESS;
 
@@ -419,6 +446,9 @@ krb5_error_code _krb5_init_context_with_vasctx2( krb5_context *context,
     krb5_free_config_files(files);
     if(ret)
 	goto out;
+
+    /* done enough to load plugins */
+    heim_base_once_f(&init_context, p, init_context_once);
 
     /* init error tables */
     krb5_init_ets(p);
@@ -448,8 +478,6 @@ out:
         }
 	krb5_free_context(p);
 	p = NULL;
-    } else {
-	heim_base_once_f(&init_context, p, init_context_once);
     }
     *context = p;
     return ret;
@@ -479,13 +507,10 @@ copy_etypes (krb5_context context,
 	;
     i++;
 
-    *ret_enctypes = malloc(sizeof(ret_enctypes[0]) * i);
-    if (*ret_enctypes == NULL) {
-	krb5_set_error_message(context, ENOMEM,
-			       N_("malloc: out of memory", ""));
-	return ENOMEM;
-    }
-    memcpy(*ret_enctypes, enctypes, sizeof(ret_enctypes[0]) * i);
+    *ret_enctypes = malloc(sizeof(enctypes[0]) * i);
+    if (*ret_enctypes == NULL)
+	return krb5_enomem(context);
+    memcpy(*ret_enctypes, enctypes, sizeof(enctypes[0]) * i);
     return 0;
 }
 
@@ -511,19 +536,10 @@ krb5_copy_context(krb5_context context, krb5_context *out)
     *out = NULL;
 
     p = calloc(1, sizeof(*p));
-    if (p == NULL) {
-	krb5_set_error_message(context, ENOMEM, N_("malloc: out of memory", ""));
-	return ENOMEM;
-    }
+    if (p == NULL)
+	return krb5_enomem(context);
 
-    p->mutex = malloc(sizeof(HEIMDAL_MUTEX));
-    if (p->mutex == NULL) {
-	krb5_set_error_message(context, ENOMEM, N_("malloc: out of memory", ""));
-	free(p);
-	return ENOMEM;
-    }
-    HEIMDAL_MUTEX_init(p->mutex);
-
+    HEIMDAL_MUTEX_init(&p->mutex);
 
     if (context->default_cc_name)
 	p->default_cc_name = strdup(context->default_cc_name);
@@ -598,6 +614,7 @@ krb5_copy_context(krb5_context context, krb5_context *out)
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_free_context(krb5_context context)
 {
+    _krb5_free_name_canon_rules(context, context->name_canon_rules);
     if (context->default_cc_name)
 	free(context->default_cc_name);
     if (context->default_cc_name_env)
@@ -623,7 +640,7 @@ krb5_free_context(krb5_context context)
 	hx509_context_free(&context->hx509ctx);
 #endif
 
-    HEIMDAL_MUTEX_destroy(context->mutex);
+    HEIMDAL_MUTEX_destroy(&context->mutex);
     free(context->mutex);
 
     if( context->rcache_ctx )
@@ -804,7 +821,7 @@ krb5_prepend_config_files_default(const char *filelist, char ***pfilenames)
  * to find the configuration file location in the
  * SOFTWARE\MIT\Kerberos registry key under the value "config".
  */
-char *
+KRB5_LIB_FUNCTION char * KRB5_LIB_CALL
 _krb5_get_default_config_config_files_from_registry()
 {
     static const char * KeyName = "Software\\MIT\\Kerberos";
@@ -917,6 +934,14 @@ krb5_kerberos_enctypes(krb5_context context)
 	ETYPE_AES256_CTS_HMAC_SHA1_96,
 	ETYPE_AES128_CTS_HMAC_SHA1_96,
 	ETYPE_DES3_CBC_SHA1,
+	ETYPE_ARCFOUR_HMAC_MD5,
+	ETYPE_NULL
+    };
+
+    static const krb5_enctype weak[] = {
+	ETYPE_AES256_CTS_HMAC_SHA1_96,
+	ETYPE_AES128_CTS_HMAC_SHA1_96,
+	ETYPE_DES3_CBC_SHA1,
 	ETYPE_DES3_CBC_MD5,
 	ETYPE_ARCFOUR_HMAC_MD5,
 	ETYPE_DES_CBC_MD5,
@@ -924,6 +949,20 @@ krb5_kerberos_enctypes(krb5_context context)
 	ETYPE_DES_CBC_CRC,
 	ETYPE_NULL
     };
+
+    /*
+     * if the list of enctypes enabled by "allow_weak_crypto"
+     * are valid, then return the former default enctype list
+     * that contained the weak entries.
+     */
+    if (krb5_enctype_valid(context, ETYPE_DES_CBC_CRC) == 0 &&
+        krb5_enctype_valid(context, ETYPE_DES_CBC_MD4) == 0 &&
+        krb5_enctype_valid(context, ETYPE_DES_CBC_MD5) == 0 &&
+        krb5_enctype_valid(context, ETYPE_DES_CBC_NONE) == 0 &&
+        krb5_enctype_valid(context, ETYPE_DES_CFB64_NONE) == 0 &&
+        krb5_enctype_valid(context, ETYPE_DES_PCBC_NONE) == 0)
+        return weak;
+
     return p;
 }
 
@@ -1168,10 +1207,8 @@ krb5_set_extra_addresses(krb5_context context, const krb5_addresses *addresses)
     }
     if(context->extra_addresses == NULL) {
 	context->extra_addresses = malloc(sizeof(*context->extra_addresses));
-	if(context->extra_addresses == NULL) {
-	    krb5_set_error_message (context, ENOMEM, N_("malloc: out of memory", ""));
-	    return ENOMEM;
-	}
+	if (context->extra_addresses == NULL)
+	    return krb5_enomem(context);
     }
     return krb5_copy_addresses(context, addresses, context->extra_addresses);
 }
@@ -1250,10 +1287,8 @@ krb5_set_ignore_addresses(krb5_context context, const krb5_addresses *addresses)
     }
     if(context->ignore_addresses == NULL) {
 	context->ignore_addresses = malloc(sizeof(*context->ignore_addresses));
-	if(context->ignore_addresses == NULL) {
-	    krb5_set_error_message (context, ENOMEM, N_("malloc: out of memory", ""));
-	    return ENOMEM;
-	}
+	if (context->ignore_addresses == NULL)
+	    return krb5_enomem(context);
     }
     return krb5_copy_addresses(context, addresses, context->ignore_addresses);
 }
@@ -1492,16 +1527,10 @@ _krb5_init_etype(krb5_context context,
 static HEIMDAL_MUTEX homedir_mutex = HEIMDAL_MUTEX_INITIALIZER;
 static krb5_boolean allow_homedir = TRUE;
 
-krb5_boolean
+KRB5_LIB_FUNCTION krb5_boolean KRB5_LIB_CALL
 _krb5_homedir_access(krb5_context context)
 {
     krb5_boolean allow;
-
-#ifdef HAVE_GETEUID
-    /* is never allowed for root */
-    if (geteuid() == 0)
-	return FALSE;
-#endif
 
     if (context && (context->flags & KRB5_CTX_F_HOMEDIR_ACCESS) == 0)
 	return FALSE;
@@ -1520,8 +1549,6 @@ _krb5_homedir_access(krb5_context context)
  *
  * For home directory access to be allowed, both the global state and
  * the krb5_context state have to be allowed.
- *
- * Administrator (root user), never uses the home directory.
  *
  * @param context a Kerberos 5 context or NULL
  * @param allow allow if TRUE home directory

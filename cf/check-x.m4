@@ -32,6 +32,7 @@ if test "$no_x" != yes; then
 			done
 		fi
 		LIBS="$ac_save_libs $foo $X_PRE_LIBS -lX11 $X_EXTRA_LIBS"
+		AC_LANG(C)
 		AC_RUN_IFELSE([AC_LANG_SOURCE([
 		#include <X11/Xlib.h>
 		foo(void)

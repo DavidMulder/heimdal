@@ -44,9 +44,13 @@
 
 sig_atomic_t exit_flag = 0;
 
-#ifdef SUPPORT_DETACH
 int detach_from_console = -1;
-#endif
+int daemon_child = -1;
+
+static RETSIGTYPE
+sigchld(int sig)
+{
+}
 
 static RETSIGTYPE
 sigterm(int sig)
@@ -105,13 +109,13 @@ switch_environment(void)
 #endif
 }
 
-
 int
 main(int argc, char **argv)
 {
     krb5_error_code ret;
     krb5_context context;
     krb5_kdc_configuration *config;
+    int optidx = 0;
 
     setprogname(argv[0]);
 
@@ -121,11 +125,11 @@ main(int argc, char **argv)
     else if (ret)
 	errx (1, "krb5_init_context failed: %d", ret);
 
-    ret = krb5_kt_register(context, &hdb_kt_ops);
+    ret = krb5_kt_register(context, &hdb_get_kt_ops);
     if (ret)
 	errx (1, "krb5_kt_register(HDB) failed: %d", ret);
 
-    config = configure(context, argc, argv);
+    config = configure(context, argc, argv, &optidx);
 
 #ifdef HAVE_SIGACTION
     {
@@ -141,6 +145,11 @@ main(int argc, char **argv)
 	sigaction(SIGXCPU, &sa, NULL);
 #endif
 
+#ifdef SIGCHLD
+	sa.sa_handler = sigchld;
+	sigaction(SIGCHLD, &sa, NULL);
+#endif
+
 	sa.sa_handler = SIG_IGN;
 #ifdef SIGPIPE
 	sigaction(SIGPIPE, &sa, NULL);
@@ -149,6 +158,9 @@ main(int argc, char **argv)
 #else
     signal(SIGINT, sigterm);
     signal(SIGTERM, sigterm);
+#ifdef SIGCHLD
+    signal(SIGCHLD, sigchld);
+#endif
 #ifdef SIGXCPU
     signal(SIGXCPU, sigterm);
 #endif
@@ -156,18 +168,11 @@ main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
 #endif
 #endif
-#ifdef SUPPORT_DETACH
-    if (detach_from_console)
-	daemon(0, 0);
-#endif
-#ifdef __APPLE__
-    bonjour_announce(context, config);
-#endif
     pidfile(NULL);
 
     switch_environment();
 
-    loop(context, config);
+    start_kdc(context, config);
     krb5_free_context(context);
     return 0;
 }

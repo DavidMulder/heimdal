@@ -12,12 +12,12 @@ case "$host" in
 *-*-solaris2*)
 	native_pthread_support=yes
 	if test "$GCC" = yes; then
-		PTHREAD_CFLAGS=-pthreads
-		PTHREAD_LIBADD=-pthreads
+		PTHREAD_CFLAGS="-D_REENTRANT -D_TS_ERRNO"
+		PTHREAD_LIBADD=-lpthread
 	else
-		PTHREAD_CFLAGS=-mt
+		PTHREAD_CFLAGS="-mt -D_REENTRANT -D_TS_ERRNO"
 		PTHREAD_LDADD=-mt
-		PTHREAD_LIBADD=-mt
+		PTHREAD_LIBADD="-mt -lpthread"
 	fi
 	;;
 *-*-netbsd[[12]]*)
@@ -38,6 +38,11 @@ case "$host" in
 	native_pthread_support=yes
 	PTHREAD_CFLAGS=-pthread
 	PTHREAD_LIBADD=-pthread
+	;;
+*-*-gnu*)
+	native_pthread_support=yes
+	PTHREADS_CFLAGS=-pthread
+	PTHREAD_LIBADD="-pthread -lpthread"
 	;;
 *-*-linux* | *-*-linux-gnu)
 	case `uname -r` in
@@ -84,6 +89,10 @@ else
   PTHREAD_CFLAGS=""
   PTHREAD_LIBADD=""
 fi
+
+CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
+LDADD="$LDADD $PTHREAD_LDADD"
+LIBADD="$LIBADD $PTHREAD_LIBADD"
 
 AC_SUBST(PTHREAD_CFLAGS)
 AC_SUBST(PTHREAD_LDADD)

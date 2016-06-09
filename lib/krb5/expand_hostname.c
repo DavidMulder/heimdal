@@ -49,7 +49,7 @@ copy_hostname(krb5_context context,
     /* End VAS modification */
 	krb5_set_error_message(context, ENOMEM,
 			       N_("malloc: out of memory", ""));
-	return ENOMEM;
+	return krb5_enomem(context);
     }
     strlwr (*new_hostname);
     return 0;

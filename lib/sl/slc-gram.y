@@ -341,7 +341,7 @@ gen_command(struct assignment *as)
     fprintf(cfile, " },\n");
     for(a = a->next; a != NULL; a = a->next)
 	if(strcmp(a->name, "name") == 0)
-	    cprint(1, "    { \"%s\" },\n", a->u.value);
+	    cprint(1, "    { \"%s\", NULL, NULL, NULL },\n", a->u.value);
     cprint(0, "\n");
     free(f);
 }
@@ -361,6 +361,7 @@ make_name(struct assignment *as)
     struct assignment *lopt;
     struct assignment *type;
     char *s;
+    int ret;
 
     lopt = find(as, "long");
     if(lopt == NULL)
@@ -370,9 +371,11 @@ make_name(struct assignment *as)
 
     type = find(as, "type");
     if(strcmp(type->u.value, "-flag") == 0)
-	asprintf(&s, "%s_flag", lopt->u.value);
+	ret = asprintf(&s, "%s_flag", lopt->u.value);
     else
-	asprintf(&s, "%s_%s", lopt->u.value, type->u.value);
+	ret = asprintf(&s, "%s_%s", lopt->u.value, type->u.value);
+    if (ret == -1)
+	return NULL;
     gen_name(s);
     return s;
 }
@@ -447,7 +450,6 @@ struct type_handler {
 	  defval_neg_flag,
 	  NULL
 	},
-    /* VAS Modification -- initialize all members */
 	{ NULL, NULL, NULL, NULL, NULL }
 };
 
@@ -713,7 +715,7 @@ gen(struct assignment *as)
     cprint(0, "SL_cmd commands[] = {\n");
     for(a = as; a != NULL; a = a->next)
 	gen_command(a->u.assignment);
-    cprint(1, "{ NULL, NULL, NULL, NULL }\n"); /* VAS Modification - initialize all members */
+    cprint(1, "{ NULL, NULL, NULL, NULL }\n");
     cprint(0, "};\n");
 
     hprint(0, "extern SL_cmd commands[];\n");
