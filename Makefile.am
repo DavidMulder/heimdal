@@ -6,7 +6,7 @@ if KCM
 kcm_dir = kcm
 endif
 
-SUBDIRS=  include base lib kuser admin
+SUBDIRS=  include lib kuser admin
 
 
 
