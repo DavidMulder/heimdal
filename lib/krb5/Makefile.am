@@ -199,7 +199,7 @@ dist_libkrb5_la_SOURCES =			\
 	rd_safe.c				\
 	read_message.c				\
 	recvauth.c				\
-	replay.c				\
+	mem_replay.c			\
 	salt.c					\
 	salt-aes.c				\
 	salt-arcfour.c				\
