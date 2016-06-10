@@ -90,6 +90,9 @@ dist_libhdb_la_SOURCES =			\
 	ndbm.c					\
 	print.c
 
+# To fix builds with make -j
+$(dist_libhdb_la_SOURCES): hdb_asn1.h
+
 nodist_libhdb_la_SOURCES = $(BUILT_SOURCES)
 
 libhdb_la_DEPENDENCIES = version-script.map
