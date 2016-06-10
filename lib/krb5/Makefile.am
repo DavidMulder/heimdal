@@ -40,7 +40,8 @@ TESTS =						\
 	test_pkinit_dh2key			\
 	test_time				\
 	test_expand_toks			\
-	test_x500
+	test_x500				\
+	test_rcache
 
 check_DATA = test_config_strings.out
 
@@ -59,6 +60,9 @@ endif
 if have_scc
 use_sqlite = $(LIB_sqlite3)
 endif
+
+test_rcache_SOURCES = mem_replay.c
+test_rcache_CFLAGS = -DMEMRCACHE_UNITTESTS=1
 
 libkrb5_la_LIBADD = \
 	$(top_builddir)/lib/asn1/libasn1.la \
@@ -209,7 +213,7 @@ dist_libkrb5_la_SOURCES =			\
 	rd_safe.c				\
 	read_message.c				\
 	recvauth.c				\
-	replay.c				\
+	mem_replay.c			\
 	salt.c					\
 	salt-aes.c				\
 	salt-arcfour.c				\
