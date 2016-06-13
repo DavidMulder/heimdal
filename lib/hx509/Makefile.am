@@ -3,6 +3,8 @@ include $(top_srcdir)/Makefile.am.common
 lib_LTLIBRARIES = libhx509.la
 libhx509_la_LDFLAGS = -version-info 5:0:0
 
+AM_CFLAGS = -Wno-unused-function
+
 BUILT_SOURCES =				\
 	sel-gram.h			\
 	$(gen_files_ocsp:.x=.c)		\

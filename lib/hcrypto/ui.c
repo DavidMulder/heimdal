@@ -224,7 +224,6 @@ UI_UTIL_read_pw_string(char *buf, int length, const char *prompt, int verify)
 int
 UI_UTIL_read_pw_string_with_verify_prompt(char *buf, int length, char *prompt, char* verify)
 {
-    size_t plen;
     int ret;
 
     ret = read_string("", prompt, buf, length, 0);
