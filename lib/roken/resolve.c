@@ -54,6 +54,13 @@
 
 #define DECL(X) {#X, rk_ns_t_##X}
 
+#ifdef NEED_DN_EXPAND_PROTO
+int dn_expand(const unsigned char *msg, const unsigned char *eomorig, const unsigned char *comp_dn, char *exp_dn, int length);
+#endif
+#ifdef NEED_RES_SEARCH_PROTO
+int res_search(const char *dname, int class, int type, unsigned char *answer, int anslen);
+#endif
+
 static struct stot{
     const char *name;
     int type;

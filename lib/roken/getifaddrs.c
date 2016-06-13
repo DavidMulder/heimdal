@@ -1082,7 +1082,7 @@ getlifaddrs2(struct ifaddrs **ifap,
 	size_t salen;
 
 	ifr = (struct lifreq *)p;
-	sa  = &ifr->lifr_addr;
+	sa  = (struct sockaddr_storage *)&ifr->lifr_addr;
 
 	sz = ifreq_sz;
 	salen = sizeof(struct sockaddr_storage);

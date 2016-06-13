@@ -35,11 +35,11 @@
 
 #ifndef HAVE_HSTRERROR
 
-#if !(defined(SunOS) && (SunOS >= 50))
+#if (defined(SunOS) && (SunOS >= 50))
 #define hstrerror broken_proto
 #endif
 #include "roken.h"
-#if !(defined(SunOS) && (SunOS >= 50))
+#if (defined(SunOS) && (SunOS >= 50))
 #undef hstrerror
 #endif
 
