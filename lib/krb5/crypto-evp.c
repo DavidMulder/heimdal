@@ -36,7 +36,7 @@
 void
 _krb5_evp_schedule(krb5_context context,
 		   struct _krb5_key_type *kt,
-		   struct _krb5_key_data *kd)
+		   struct _krb5_key_data *kd, const void *params)
 {
     struct _krb5_evp_schedule *key = kd->schedule->data;
     const EVP_CIPHER *c = (*kt->evp)();
