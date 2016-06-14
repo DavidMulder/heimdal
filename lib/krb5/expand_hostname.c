@@ -90,7 +90,6 @@ krb5_expand_hostname (krb5_context context,
     /* VAS Modification - additional variables need for the VAS enhancements */
     int ret = 0;
     char localhost[MAXHOSTNAMELEN] = {0};
-    size_t orig_len = 0;
     struct in_addr addr;
     struct hostent* hostinfo = NULL;
 
@@ -148,7 +147,6 @@ krb5_expand_hostname (krb5_context context,
             goto FINISHED;
         } else {
             int     i;
-            size_t  len = strlen( hostinfo->h_name );
 
             for( i = 0; hostinfo->h_aliases[i]; i++ ) {
 
@@ -237,31 +235,6 @@ FINISHED:
 
     return ret;
     /* End VAS Modification */
-}
-
-/*
- * handle the case of the hostname being unresolvable and thus identical
- */
-
-static krb5_error_code
-vanilla_hostname (krb5_context context,
-		  const char *orig_hostname,
-		  char **new_hostname,
-		  char ***realms)
-{
-    krb5_error_code ret;
-
-    ret = copy_hostname (context, orig_hostname, new_hostname);
-    if (ret)
-	return ret;
-    strlwr (*new_hostname);
-
-    ret = krb5_get_host_realm (context, *new_hostname, realms);
-    if (ret) {
-	free (*new_hostname);
-	return ret;
-    }
-    return 0;
 }
 
 /**
