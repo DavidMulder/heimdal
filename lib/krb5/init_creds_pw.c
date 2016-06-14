@@ -68,7 +68,7 @@ typedef struct krb5_get_init_creds_ctx {
 #define  USED_ENC_TS_INFO        8
 
     METHOD_DATA md;
-    METHOD_DATA preload_md;
+    METHOD_DATA *preload_md;
     KRB_ERROR error;
     AS_REP as_rep;
     EncKDCRepPart enc_part;
@@ -1355,7 +1355,7 @@ static krb5_error_code preload_preauth_to_md(krb5_context context, krb5_get_init
             
         case KRB5_PADATA_ENC_TIMESTAMP:
             /* make a v5 salted pa-data */
-            ret = add_enc_ts_padata(context, ctx->preload_md, ctx->cred->client, 
+            ret = add_enc_ts_padata(context, ctx->preload_md, ctx->cred.client, 
                                     ctx->keyproc, ctx->password,
                                     ctx->as_req.req_body.etype.val, 
                                     ctx->as_req.req_body.etype.len, NULL, NULL);
@@ -1367,7 +1367,7 @@ static krb5_error_code preload_preauth_to_md(krb5_context context, krb5_get_init
         case KRB5_PADATA_PK_AS_REQ_WIN:
         case KRB5_PADATA_PK_AS_REQ:
             /* TODO verify that context->pk_init_ctx is not NULL */
-            ret = pa_data_to_md_pkinit(context, &(ctx->as_req), ctx->cred->client, 0, ctx, ctx->preload_md);
+            ret = pa_data_to_md_pkinit(context, &(ctx->as_req), ctx->cred.client, 0, ctx, ctx->preload_md);
             if( ret )
                 goto FINISHED;
             break;
