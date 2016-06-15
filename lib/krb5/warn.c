@@ -203,6 +203,7 @@ krb5_err(krb5_context context, int eval, krb5_error_code code,
      __attribute__ ((noreturn, format (printf, 4, 5)))
 {
     FUNC(1, code, 0);
+    ret = ret ? ret : 0;
     exit(eval);
     UNREACHABLE(return 0);
 }
@@ -242,6 +243,7 @@ krb5_errx(krb5_context context, int eval, const char *fmt, ...)
      __attribute__ ((noreturn, format (printf, 3, 4)))
 {
     FUNC(0, 0, 0);
+    ret = ret ? ret : 0;
     exit(eval);
     UNREACHABLE(return 0);
 }
@@ -284,6 +286,7 @@ krb5_abort(krb5_context context, krb5_error_code code, const char *fmt, ...)
      __attribute__ ((noreturn, format (printf, 3, 4)))
 {
     FUNC(1, code, 0);
+    ret = ret ? ret : 0;
     abort();
     UNREACHABLE(return 0);
 }
@@ -312,6 +315,7 @@ krb5_abortx(krb5_context context, const char *fmt, ...)
      __attribute__ ((noreturn, format (printf, 2, 3)))
 {
     FUNC(0, 0, 0);
+    ret = ret ? ret : 0;
     abort();
     UNREACHABLE(return 0);
 }

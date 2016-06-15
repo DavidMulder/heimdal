@@ -40,7 +40,9 @@ krb5_error_code
 _krb5_load_ccache_plugins(krb5_context context)
 {
     struct krb5_plugin * plist = NULL;
+#if 0
     struct krb5_plugin *p;
+#endif
     krb5_error_code code;
 
     code = _krb5_plugin_find(context, PLUGIN_TYPE_DATA, KRB5_PLUGIN_CCACHE,
