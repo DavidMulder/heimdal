@@ -138,7 +138,13 @@ check_directory(krb5_context context,
 	int fd;
 	struct stat st2;
 
+#ifdef HAVE_DIRFD
 	fd = dirfd(d);
+#elif defined(__sun) && defined(__XOPEN_OR_POSIX)
+	fd = d->d_fd;
+#elif defined(__sun)
+	fd = d->dd_fd;
+#endif
 	if(fstat(fd, &st2) < 0) {
 	    closedir(d);
 	    return errno;
