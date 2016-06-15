@@ -175,7 +175,12 @@ AM_CONDITIONAL([HAVE_CAPNG], [test "$with_capng" != "no"])
 AC_SUBST([CAPNG_CFLAGS])
 AC_SUBST([CAPNG_LIBS])
 
-AM_CONDITIONAL(HAVE_OPENSSL, 0)
+AC_ARG_ENABLE(hdb,
+    AS_HELP_STRING([--disable-hdb],[if you want support for hdb in Heimdal.]))
+if test "$enable_hdb" != no; then
+    AC_DEFINE(HAVE_HDB, 1, [Define if you want support for hdb in Heimdal.])
+fi
+AM_CONDITIONAL(HAVE_HDB, test "X$enable_hdb" = Xyes)
 
 AC_ARG_ENABLE(sqlite3,
     AS_HELP_STRING([--disable-sqlite3],[if you want support for sqlite in Heimdal.]))
