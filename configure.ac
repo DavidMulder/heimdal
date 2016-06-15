@@ -625,9 +625,12 @@ AC_CONFIG_FILES(Makefile 		\
 	lib/ipc/Makefile		\
 	lib/kadm5/Makefile		\
 	lib/kafs/Makefile		\
+	lib/kdfs/Makefile		\
 	lib/krb5/Makefile		\
+	lib/otp/Makefile		\
 	lib/roken/Makefile		\
 	lib/sl/Makefile			\
+	lib/sqlite/Makefile		\
 	lib/vers/Makefile		\
 	lib/wind/Makefile		\
 	kuser/Makefile			\
