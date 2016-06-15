@@ -69,5 +69,4 @@ rk_cloexec_dir(DIR * d)
     rk_cloexec(d->dd_fd);
 #endif
 #endif
-#endif
 }
