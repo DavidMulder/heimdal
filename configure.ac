@@ -175,21 +175,16 @@ AM_CONDITIONAL([HAVE_CAPNG], [test "$with_capng" != "no"])
 AC_SUBST([CAPNG_CFLAGS])
 AC_SUBST([CAPNG_LIBS])
 
-dnl Check for sqlite
-rk_TEST_PACKAGE(sqlite3,
-[#include <sqlite3.h>
-#ifndef SQLITE_OPEN_CREATE
-#error "old version"
-#endif],
-[-lsqlite3],,,SQLITE3)
+AM_CONDITIONAL(HAVE_OPENSSL, 0)
 
-if test "X$with_sqlite3" != Xyes ; then
-   INCLUDE_sqlite3="-I\$(top_srcdir)/lib/sqlite"
-   LIB_sqlite3="\$(top_builddir)/lib/sqlite/libheimsqlite.la"
+AC_ARG_ENABLE(sqlite3,
+    AS_HELP_STRING([--disable-sqlite3],[if you want support for sqlite in Heimdal.]))
+if test "$enable_sqlite3" != no; then
+    AC_DEFINE(HAVE_SQLITE3, 1, [Define if you want support for sqlite in Heimdal.])
+    INCLUDE_sqlite3="-I\$(top_srcdir)/lib/sqlite"
+    LIB_sqlite3="\$(top_builddir)/lib/sqlite/libheimsqlite.la"
 fi
-AM_CONDITIONAL(SQLITE3,  test "X$with_sqlite3" = Xyes)
-
-#AC_DEFINE(HAVE_SQLITE3, 1, [Define if you want support for sqlite in Heimdal.])
+AM_CONDITIONAL(SQLITE3,  test "X$enable_sqlite3" = Xyes)
 
 AC_ARG_ENABLE(sqlite-cache, 
 	AS_HELP_STRING([--disable-sqlite-cache],[if you want support for cache in sqlite]))
