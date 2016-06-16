@@ -213,7 +213,7 @@ void
 _krb5_evp_schedule (
 	krb5_context /*context*/,
 	struct _krb5_key_type */*kt*/,
-	struct _krb5_key_data */*kd*/);
+	struct _krb5_key_data */*kd*/, const void *);
 
 krb5_error_code
 _krb5_expand_default_cc_name (

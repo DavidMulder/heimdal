@@ -10,6 +10,12 @@ if HAVE_DBHEADER
 AM_CPPFLAGS += -I$(DBHEADER)
 endif
 
+if SQLITE3
+AM_CPPFLAGS += $(INCLUDE_sqlite3)
+hdb_sqlite = hdb-sqlite.c
+sqlite_lib = $(LIB_sqlite3)
+endif
+
 BUILT_SOURCES = \
 	$(gen_files_hdb:.x=.c)	\
 	hdb_err.c \
@@ -64,7 +70,6 @@ ldap_lib = $(LIB_openldap)
 
 endif
 
-
 lib_LTLIBRARIES = libhdb.la $(ldap_so)
 libhdb_la_LDFLAGS = -version-info 11:0:2
 
@@ -81,6 +86,7 @@ dist_libhdb_la_SOURCES =			\
 	ext.c					\
 	$(ldap)					\
 	hdb.c					\
+	$(hdb_sqlite)			\
 	hdb-keytab.c				\
 	hdb-mdb.c				\
 	hdb-mitdb.c				\
@@ -105,6 +111,7 @@ libhdb_la_LIBADD = \
 	$(LIB_com_err) \
 	../krb5/libkrb5.la \
 	../asn1/libasn1.la \
+	$(sqlite_lib) \
 	$(LIBADD_roken) \
 	$(ldap_lib) \
 	$(LIB_dlopen) \

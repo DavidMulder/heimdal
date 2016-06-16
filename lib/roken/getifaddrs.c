@@ -1082,7 +1082,7 @@ getlifaddrs2(struct ifaddrs **ifap,
 	size_t salen;
 
 	ifr = (struct lifreq *)p;
-	sa  = &ifr->lifr_addr;
+	sa  = (struct sockaddr_storage *)&ifr->lifr_addr;
 
 	sz = ifreq_sz;
 	salen = sizeof(struct sockaddr_storage);
@@ -1170,6 +1170,7 @@ getlifaddrs2(struct ifaddrs **ifap,
  * Either may be NULL. The new list head (usually base) will be
  * returned.
  */
+#if defined(HAVE_IPV6) && defined(SIOCGLIFCONF) && defined(SIOCGLIFFLAGS)
 static struct ifaddrs *
 append_ifaddrs(struct ifaddrs *base, struct ifaddrs *supp) {
     if (!base)
@@ -1185,6 +1186,7 @@ append_ifaddrs(struct ifaddrs *base, struct ifaddrs *supp) {
 
     return base;
 }
+#endif
 
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 rk_getifaddrs(struct ifaddrs **ifap)

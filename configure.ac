@@ -177,21 +177,21 @@ AM_CONDITIONAL([HAVE_CAPNG], [test "$with_capng" != "no"])
 AC_SUBST([CAPNG_CFLAGS])
 AC_SUBST([CAPNG_LIBS])
 
-dnl Check for sqlite
-rk_TEST_PACKAGE(sqlite3,
-[#include <sqlite3.h>
-#ifndef SQLITE_OPEN_CREATE
-#error "old version"
-#endif],
-[-lsqlite3],,,SQLITE3)
-
-if test "X$with_sqlite3" != Xyes ; then
-   INCLUDE_sqlite3="-I\$(top_srcdir)/lib/sqlite"
-   LIB_sqlite3="\$(top_builddir)/lib/sqlite/libheimsqlite.la"
+AC_ARG_ENABLE(hdb,
+    AS_HELP_STRING([--disable-hdb],[if you want support for hdb in Heimdal.]))
+if test "$enable_hdb" != no; then
+    AC_DEFINE(HAVE_HDB, 1, [Define if you want support for hdb in Heimdal.])
 fi
-AM_CONDITIONAL(SQLITE3,  test "X$with_sqlite3" = Xyes)
+AM_CONDITIONAL(HAVE_HDB, test "X$enable_hdb" = Xyes)
 
-#AC_DEFINE(HAVE_SQLITE3, 1, [Define if you want support for sqlite in Heimdal.])
+AC_ARG_ENABLE(sqlite3,
+    AS_HELP_STRING([--disable-sqlite3],[if you want support for sqlite in Heimdal.]))
+if test "$enable_sqlite3" != no; then
+    AC_DEFINE(HAVE_SQLITE3, 1, [Define if you want support for sqlite in Heimdal.])
+    INCLUDE_sqlite3="-I\$(top_srcdir)/lib/sqlite"
+    LIB_sqlite3="\$(top_builddir)/lib/sqlite/libheimsqlite.la"
+fi
+AM_CONDITIONAL(SQLITE3,  test "X$enable_sqlite3" = Xyes)
 
 AC_ARG_ENABLE(sqlite-cache, 
 	AS_HELP_STRING([--disable-sqlite-cache],[if you want support for cache in sqlite]))
@@ -254,6 +254,7 @@ AC_ARG_ENABLE([afs-support],
 if test "$enable_afs_support" = no; then
 	AC_DEFINE(NO_AFS, 1, [Define if you don't wan't support for AFS.])
 	NO_AFS="1"
+	AM_CONDITIONAL(HAVE_AFS, 0)
 fi
 AC_SUBST(NO_AFS)dnl
 
@@ -624,9 +625,12 @@ AC_CONFIG_FILES(Makefile 		\
 	lib/ipc/Makefile		\
 	lib/kadm5/Makefile		\
 	lib/kafs/Makefile		\
+	lib/kdfs/Makefile		\
 	lib/krb5/Makefile		\
+	lib/otp/Makefile		\
 	lib/roken/Makefile		\
 	lib/sl/Makefile			\
+	lib/sqlite/Makefile		\
 	lib/vers/Makefile		\
 	lib/wind/Makefile		\
 	kuser/Makefile			\

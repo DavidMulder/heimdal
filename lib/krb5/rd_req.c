@@ -131,6 +131,7 @@ krb5_decode_ap_req(krb5_context context,
     return 0;
 }
 
+#if 0
 static krb5_error_code
 check_transited(krb5_context context, Ticket *ticket, EncTicketPart *enc)
 {
@@ -166,6 +167,7 @@ check_transited(krb5_context context, Ticket *ticket, EncTicketPart *enc)
     free(realms);
     return ret;
 }
+#endif
 
 static krb5_error_code
 find_etypelist(krb5_context context,

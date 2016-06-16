@@ -14,30 +14,33 @@ endif
 if COM_ERR
 dir_com_err = com_err
 endif
-if !SQLITE3
+if SQLITE3
 dir_sqlite = sqlite
 endif
-if MAINTAINER_MODE
-dir_sqlite = sqlite
+if HAVE_AFS
+dir_afs = kafs
 endif
 
 SUBDIRS = \
 	roken \
 	base \
 	vers \
-	libedit \
-	com_err \
+	$(dir_editline) \
+	$(dir_com_err) \
 	sl \
 	wind \
 	asn1 \
-	hcrypto \
+	$(dir_sqlite) \
+	$(dir_hcrypto) \
 	ipc \
 	hx509 \
 	krb5 \
 	ntlm \
-	kafs \
+	$(dir_afs) \
 	gssapi \
 	hdb \
-	kadm5
+	kadm5 \
+	$(dir_otp) \
+	$(dir_dce)
 
 EXTRA_DIST = NTMakefile heimdal

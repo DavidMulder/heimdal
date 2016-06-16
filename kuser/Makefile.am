@@ -20,8 +20,12 @@ libexec_PROGRAMS = kdigest kimpersonate
 
 noinst_PROGRAMS = kverify kdecode_ticket generate-requests
 
+if HAVE_AFS
+afs_lib = $(LIB_kafs)
+endif
+
 kinit_LDADD = \
-    $(LIB_kafs) \
+    $(afs_lib) \
     $(top_builddir)/lib/wind/libwind.la \
     $(top_builddir)/lib/krb5/libkrb5.la \
     $(top_builddir)/lib/ntlm/libheimntlm.la \
