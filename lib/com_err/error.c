@@ -40,7 +40,7 @@
 #include <com_right.h>
 #include <roken.h>
 
-#ifdef LIBINTL
+#ifdef HAVE_LIBINTL_H
 #include <libintl.h>
 #else
 #define dgettext(d,s) (s)
@@ -64,7 +64,7 @@ com_right_r(struct et_list *list, long code, char *str, size_t len)
     for (p = list; p; p = p->next) {
 	if (code >= p->table->base && code < p->table->base + p->table->n_msgs) {
 	    const char *msg = p->table->msgs[code - p->table->base];
-#ifdef LIBINTL
+#ifdef HAVE_LIBINTL_H
 	    char domain[12 + 20];
 	    snprintf(domain, sizeof(domain), "heim_com_err%d", p->table->base);
 #endif

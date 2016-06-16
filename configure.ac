@@ -198,12 +198,6 @@ if test "$enable_sqlite_cache" != no; then
 fi
 AM_CONDITIONAL(have_scc, test "$enable_sqlite_cache" != no)
 
-
-dnl check for libintl
-rk_TEST_PACKAGE(libintl,
-[#include <libintl.h>],
-[-lintl],,,LIBINTL)
-
 dnl path where the hdb directory is stored
 AC_ARG_WITH([hdbdir], 
 	[AS_HELP_STRING([--with-hdbdir],[Default location for KDC database @<:@default=/var/heimdal@:>@])],
@@ -395,6 +389,7 @@ AC_CHECK_HEADERS([\
 	util.h					\
 	utmp.h					\
 	utmpx.h					\
+	libintl.h				\
 ])
 
 dnl On Solaris 8 there's a compilation warning for term.h because
