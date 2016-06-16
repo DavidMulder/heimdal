@@ -139,7 +139,9 @@ struct sockaddr_dl;
 #define N_(x,y) dgettext(HEIMDAL_TEXTDOMAIN, x)
 #else
 #define N_(x,y) (x)
+#ifndef bindtextdomain
 #define bindtextdomain(package, localedir)
+#endif
 #endif
 
 

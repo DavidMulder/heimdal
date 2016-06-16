@@ -99,8 +99,12 @@
 #define N_(x,y) (x)
 #define NP_(x,y) (x)
 #define getarg_i18n NULL
+#ifndef bindtextdomain
 #define bindtextdomain(package, localedir)
+#endif
+#ifndef textdomain
 #define textdomain(package)
+#endif
 #endif
 
 extern krb5_context kcc_context;
