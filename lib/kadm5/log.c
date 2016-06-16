@@ -51,13 +51,17 @@ RCSID("$Id$");
  * of an record's start or end one can traverse the log forwards and
  * backwards.
  *
- * The log always starts with a nop record that contains the offset (8
- * bytes) where the next record should start after the last one, and the
- * version number and timestamp of the last record:
+ * The log always starts with a nop record (uber record) that contains the
+ * offset (8 bytes) of the first unconfirmed record (typically EOF), and the
+ * version number and timestamp of the preceding last confirmed record:
  *
  * offset of next new record    8 bytes
  * last record time             4 bytes
  * last record version number   4 bytes
+ *
+ * When an iprop slave receives a complete database, it saves that version as
+ * the last confirmed version, without writing any other records to the log.  We
+ * use that version as the basis for further updates.
  *
  * kadm5 write operations are done in this order:
  *
@@ -117,8 +121,8 @@ RCSID("$Id$");
  *  - The zeroth record in new logs is a nop with a 16 byte payload:
  *
  *    offset of end of last confirmed record        8 bytes
- *    version number of last confirmed record       4 bytes
  *    timestamp of last confirmed record            4 bytes
+ *    version number of last confirmed record       4 bytes
  *
  *  - New non-zeroth nop records:
  *
@@ -173,7 +177,8 @@ RCSID("$Id$");
 #define LOG_HEADER_SZ   (sizeof(uint32_t) * 4)
 #define LOG_TRAILER_SZ  (sizeof(uint32_t) * 2)
 #define LOG_WRAPPER_SZ  (LOG_HEADER_SZ + LOG_TRAILER_SZ)
-#define LOG_UBER_SZ    (sizeof(uint64_t) + sizeof(uint32_t) * 2)
+#define LOG_UBER_LEN    (sizeof(uint64_t) + sizeof(uint32_t) * 2)
+#define LOG_UBER_SZ     (LOG_WRAPPER_SZ + LOG_UBER_LEN)
 
 #define LOG_NOPEEK 0
 #define LOG_DOPEEK 1
@@ -376,6 +381,7 @@ log_corrupt:
 
 /*
  * Get the version of the entry ending at the current offset into sp.
+ * If it is the uber record, return its nominal version instead.
  *
  * Returns HEIM_ERR_EOF if sp is at offset zero.
  *
@@ -385,7 +391,7 @@ static kadm5_ret_t
 get_version_prev(krb5_storage *sp, uint32_t *verp, uint32_t *tstampp)
 {
     krb5_error_code ret;
-    uint32_t ver2, len, len2;
+    uint32_t ver, ver2, len, len2;
     off_t off, prev_off, new_off;
 
     *verp = 0;
@@ -399,13 +405,28 @@ get_version_prev(krb5_storage *sp, uint32_t *verp, uint32_t *tstampp)
         return HEIM_ERR_EOF;
 
     /* Read the trailer and seek back */
-    prev_off = seek_prev(sp, verp, &len);
+    prev_off = seek_prev(sp, &ver, &len);
     if (prev_off == -1)
         return errno;
 
+    /* Uber record? Return nominal version. */
+    if (prev_off == 0 && len == LOG_UBER_LEN && ver == 0) {
+        /* Skip 8 byte offset and 4 byte time */
+        if (krb5_storage_seek(sp, LOG_HEADER_SZ + 12, SEEK_SET)
+            != LOG_HEADER_SZ + 12)
+            return errno;
+        ret = krb5_ret_uint32(sp, verp);
+        if (krb5_storage_seek(sp, 0, SEEK_SET) != 0)
+            return errno;
+        if (ret != 0)
+            return ret;
+    } else {
+        *verp = ver;
+    }
+
     /* Verify that the trailer matches header */
     ret = get_header(sp, LOG_NOPEEK, &ver2, tstampp, NULL, &len2);
-    if (ret || *verp != ver2 || len != len2)
+    if (ret || ver != ver2 || len != len2)
         goto log_corrupt;
 
     /* Preserve offset */
@@ -434,7 +455,7 @@ get_max_log_size(krb5_context context)
                                     "kdc",
                                     "log-max-size",
                                     NULL);
-    if (n >= 4 * (LOG_UBER_SZ + LOG_WRAPPER_SZ) && n == (size_t)n)
+    if (n >= 4 * (LOG_UBER_LEN + LOG_WRAPPER_SZ) && n == (size_t)n)
         return (size_t)n;
     return 0;
 }
@@ -446,11 +467,17 @@ static krb5_storage *log_goto_first(kadm5_server_context *, int);
  * Get the version and timestamp metadata of either the first, or last
  * confirmed entry in the log.
  *
- * If `which' is LOG_VERSION_UBER (0), then this gets the metadata for
- * the uber record.  If `which' is LOG_VERSION_FIRST (1), then this gets
- * the metadata for the logically first entry past the uberblock.  If
- * `which' is LOG_VERSION_LAST (-1), then this gets metadata for the
- * last confirmed entry's version and timestpamp.
+ * If `which' is LOG_VERSION_UBER, then this gets the version number of the uber
+ * uber record which must be 0, or else we need to upgrade the log.
+ *
+ * If `which' is LOG_VERSION_FIRST, then this gets the metadata for the
+ * logically first entry past the uberblock, or returns HEIM_EOF if
+ * only the uber record is present.
+ *
+ * If `which' is LOG_VERSION_LAST, then this gets metadata for the last
+ * confirmed entry's version and timestamp. If only the uber record is present,
+ * then the version will be its "nominal" version, which may differ from its
+ * actual version (0).
  *
  * The `fd''s offset will be set to the start of the header of the entry
  * identified by `which'.
@@ -497,7 +524,7 @@ kadm5_log_get_version_fd(kadm5_server_context *server_context, int fd,
             ret = get_header(sp, LOG_DOPEEK, ver, tstamp, &op, &len);
         else
             ret = errno;
-        if (ret == 0 && (op != kadm_nop || len != LOG_UBER_SZ))
+        if (ret == 0 && (op != kadm_nop || len != LOG_UBER_LEN || *ver != 0))
             ret = KADM5_LOG_NEEDS_UPGRADE;
         krb5_storage_free(sp);
         break;
@@ -529,19 +556,14 @@ kadm5_log_set_version(kadm5_server_context *context, uint32_t vno)
 
 /*
  * Open the log and setup server_context->log_context
- *
- * XXX: This and its callers should be named after "open", not "init"
  */
 static kadm5_ret_t
-log_init(kadm5_server_context *server_context, int lock_mode)
+log_open(kadm5_server_context *server_context, int lock_mode)
 {
     int fd = -1;
     int lock_it = 0;
     int lock_nb = 0;
     int oflags = O_RDWR;
-    struct stat st;
-    uint32_t uber_ver;
-    size_t maxbytes = get_max_log_size(server_context->context);
     kadm5_ret_t ret;
     kadm5_log_context *log_context = &server_context->log_context;
 
@@ -572,8 +594,7 @@ log_init(kadm5_server_context *server_context, int lock_mode)
         if (fd < 0) {
             ret = errno;
             krb5_set_error_message(server_context->context, ret,
-                                   "kadm5_log_init: open %s",
-                                   log_context->log_file);
+                                   "log_open: open %s", log_context->log_file);
             return ret;
         }
         lock_it = (lock_mode != LOCK_UN);
@@ -581,8 +602,7 @@ log_init(kadm5_server_context *server_context, int lock_mode)
     if (lock_it && flock(fd, lock_mode | lock_nb) < 0) {
 	ret = errno;
 	krb5_set_error_message(server_context->context, ret,
-                               "kadm5_log_init: flock %s",
-			       log_context->log_file);
+                               "log_open: flock %s", log_context->log_file);
         if (fd != log_context->log_fd)
             (void) close(fd);
 	return ret;
@@ -592,7 +612,32 @@ log_init(kadm5_server_context *server_context, int lock_mode)
     log_context->lock_mode = lock_mode;
     log_context->read_only = (lock_mode != LOCK_EX);
 
-    ret = 0;
+    return 0;
+}
+
+/*
+ * Open the log and setup server_context->log_context
+ */
+static kadm5_ret_t
+log_init(kadm5_server_context *server_context, int lock_mode)
+{
+    int fd;
+    struct stat st;
+    uint32_t vno;
+    size_t maxbytes = get_max_log_size(server_context->context);
+    kadm5_ret_t ret;
+    kadm5_log_context *log_context = &server_context->log_context;
+
+    if (strcmp(log_context->log_file, "/dev/null") == 0) {
+        /* log_context->log_fd should be -1 here */
+        return 0;
+    }
+
+    ret = log_open(server_context, lock_mode);
+    if (ret)
+        return ret;
+
+    fd = log_context->log_fd;
     if (!log_context->read_only) {
         if (fstat(fd, &st) == -1)
             ret = errno;
@@ -605,7 +650,7 @@ log_init(kadm5_server_context *server_context, int lock_mode)
         }
         if (ret == 0) {
             ret = kadm5_log_get_version_fd(server_context, fd,
-                                           LOG_VERSION_UBER, &uber_ver, NULL);
+                                           LOG_VERSION_UBER, &vno, NULL);
 
             /* Upgrade the log if it was an old-style log */
             if (ret == KADM5_LOG_NEEDS_UPGRADE)
@@ -662,12 +707,12 @@ kadm5_log_init_sharedlock(kadm5_server_context *server_context, int lock_flags)
  * Reinitialize the log and open it
  */
 kadm5_ret_t
-kadm5_log_reinit(kadm5_server_context *server_context)
+kadm5_log_reinit(kadm5_server_context *server_context, uint32_t vno)
 {
     int ret;
     kadm5_log_context *log_context = &server_context->log_context;
 
-    ret = log_init(server_context, LOCK_EX);
+    ret = log_open(server_context, LOCK_EX);
     if (ret)
 	return ret;
     if (log_context->log_fd != -1) {
@@ -680,10 +725,10 @@ kadm5_log_reinit(kadm5_server_context *server_context)
             return ret;
         }
     }
-    log_context->version = 0;
 
-    /* Write uber entry */
-    ret = kadm5_log_nop(server_context, kadm_nop_trunc);
+    /* Write uber entry and truncation nop with version `vno` */
+    log_context->version = vno;
+    ret = kadm5_log_nop(server_context, kadm_nop_plain);
     return 0;
 }
 
@@ -719,13 +764,14 @@ kadm5_log_end(kadm5_server_context *server_context)
 static kadm5_ret_t
 kadm5_log_preamble(kadm5_server_context *context,
 		   krb5_storage *sp,
-		   enum kadm_ops op)
+		   enum kadm_ops op,
+		   uint32_t vno)
 {
     kadm5_log_context *log_context = &context->log_context;
     time_t now = time(NULL);
     kadm5_ret_t ret;
 
-    ret = krb5_store_uint32(sp, log_context->version + 1);
+    ret = krb5_store_uint32(sp, vno);
     if (ret)
         return ret;
     ret = krb5_store_uint32(sp, now);
@@ -741,9 +787,10 @@ kadm5_log_preamble(kadm5_server_context *context,
 /* Writes the version part of the trailer */
 static kadm5_ret_t
 kadm5_log_postamble(kadm5_log_context *context,
-		    krb5_storage *sp)
+		    krb5_storage *sp,
+		    uint32_t vno)
 {
-    return krb5_store_uint32(sp, context->version + 1);
+    return krb5_store_uint32(sp, vno);
 }
 
 /*
@@ -849,10 +896,10 @@ kadm5_log_flush(kadm5_server_context *context, krb5_storage *sp)
         return ret;
     }
 
-    if (prev_ver != log_context->version)
+    if (prev_ver != 0 && prev_ver != log_context->version)
         return EINVAL; /* Internal error, really; just a consistency check */
 
-    if (new_ver != prev_ver + 1) {
+    if (prev_ver != 0 && new_ver != prev_ver + 1) {
         krb5_warnx(context->context, "refusing to write a log record "
                    "with non-monotonic version (new: %u, old: %u)",
                    new_ver, prev_ver);
@@ -876,7 +923,9 @@ kadm5_log_flush(kadm5_server_context *context, krb5_storage *sp)
     if (ret)
         return ret;
 
-    log_context->version = new_ver;
+    /* Retain the nominal database version when flushing the uber record */
+    if (new_ver != 0)
+        log_context->version = new_ver;
     return 0;
 }
 
@@ -919,7 +968,8 @@ kadm5_log_create(kadm5_server_context *context, hdb_entry *entry)
     if (sp == NULL)
         ret = ENOMEM;
     if (ret == 0)
-        ret = kadm5_log_preamble(context, sp, kadm_create);
+        ret = kadm5_log_preamble(context, sp, kadm_create,
+                                 log_context->version + 1);
     if (ret == 0)
         ret = krb5_store_uint32(sp, value.length);
     if (ret == 0) {
@@ -930,7 +980,8 @@ kadm5_log_create(kadm5_server_context *context, hdb_entry *entry)
     if (ret == 0)
         ret = krb5_store_uint32(sp, value.length);
     if (ret == 0)
-        ret = kadm5_log_postamble(log_context, sp);
+        ret = kadm5_log_postamble(log_context, sp,
+                                  log_context->version + 1);
     if (ret == 0)
         ret = kadm5_log_flush(context, sp);
     krb5_storage_free(sp);
@@ -1000,7 +1051,8 @@ kadm5_log_delete(kadm5_server_context *context,
     if (sp == NULL)
         ret = ENOMEM;
     if (ret == 0)
-        ret = kadm5_log_preamble(context, sp, kadm_delete);
+        ret = kadm5_log_preamble(context, sp, kadm_delete,
+                                 log_context->version + 1);
     if (ret) {
         krb5_storage_free(sp);
         return ret;
@@ -1041,7 +1093,8 @@ kadm5_log_delete(kadm5_server_context *context,
     if (ret == 0)
         ret = krb5_store_uint32(sp, len);
     if (ret == 0)
-        ret = kadm5_log_postamble(log_context, sp);
+        ret = kadm5_log_postamble(log_context, sp,
+                                  log_context->version + 1);
     if (ret == 0)
         ret = kadm5_log_flush(context, sp);
     if (ret == 0)
@@ -1128,7 +1181,8 @@ kadm5_log_rename(kadm5_server_context *context,
     if (sp == NULL)
 	ret = ENOMEM;
     if (ret == 0)
-        ret = kadm5_log_preamble(context, sp, kadm_rename);
+        ret = kadm5_log_preamble(context, sp, kadm_rename,
+                                 log_context->version + 1);
     if (ret == 0)
         ret = hdb_entry2value(context->context, entry, &value);
     if (ret) {
@@ -1177,7 +1231,8 @@ kadm5_log_rename(kadm5_server_context *context,
         if (ret == 0)
             ret = krb5_store_uint32(sp, len);
         if (ret == 0)
-            ret = kadm5_log_postamble(log_context, sp);
+            ret = kadm5_log_postamble(log_context, sp,
+                                      log_context->version + 1);
         if (ret == 0)
             ret = kadm5_log_flush(context, sp);
         if (ret == 0)
@@ -1286,7 +1341,8 @@ kadm5_log_modify(kadm5_server_context *context,
     if (value.length > len || len > INT32_MAX)
         ret = E2BIG;
     if (ret == 0)
-        ret = kadm5_log_preamble(context, sp, kadm_modify);
+        ret = kadm5_log_preamble(context, sp, kadm_modify,
+                                 log_context->version + 1);
     if (ret == 0)
         ret = krb5_store_uint32(sp, len);
     if (ret == 0)
@@ -1299,7 +1355,8 @@ kadm5_log_modify(kadm5_server_context *context,
     if (ret == 0)
         ret = krb5_store_uint32(sp, len);
     if (ret == 0)
-        ret = kadm5_log_postamble(log_context, sp);
+        ret = kadm5_log_postamble(log_context, sp,
+                                  log_context->version + 1);
     if (ret == 0)
         ret = kadm5_log_flush(context, sp);
     if (ret == 0)
@@ -1563,7 +1620,7 @@ log_update_uber(kadm5_server_context *context, off_t off)
 
     /* If the first entry is not a 16-byte nop, ditto */
     ret = krb5_ret_uint32(sp, &len);
-    if (ret || len != LOG_UBER_SZ)
+    if (ret || len != LOG_UBER_LEN)
         goto out;
 
     /*
@@ -1619,6 +1676,7 @@ kadm5_log_nop(kadm5_server_context *context, enum kadm_nop_type nop_type)
     kadm5_ret_t ret;
     kadm5_log_context *log_context = &context->log_context;
     off_t off;
+    uint32_t vno = log_context->version;
 
     if (strcmp(log_context->log_file, "/dev/null") == 0)
         return 0;
@@ -1628,7 +1686,7 @@ kadm5_log_nop(kadm5_server_context *context, enum kadm_nop_type nop_type)
         return errno;
 
     sp = krb5_storage_emem();
-    ret = kadm5_log_preamble(context, sp, kadm_nop);
+    ret = kadm5_log_preamble(context, sp, kadm_nop, off == 0 ? 0 : vno + 1);
     if (ret)
         goto out;
 
@@ -1637,16 +1695,16 @@ kadm5_log_nop(kadm5_server_context *context, enum kadm_nop_type nop_type)
          * First entry (uber-entry) gets room for offset of next new
          * entry and time and version of last entry.
          */
-        ret = krb5_store_uint32(sp, LOG_UBER_SZ);
+        ret = krb5_store_uint32(sp, LOG_UBER_LEN);
         /* These get overwritten with the same values below */
         if (ret == 0)
-            ret = krb5_store_uint64(sp, LOG_WRAPPER_SZ + LOG_UBER_SZ);
+            ret = krb5_store_uint64(sp, LOG_UBER_SZ);
         if (ret == 0)
             ret = krb5_store_uint32(sp, log_context->last_time);
         if (ret == 0)
-            ret = krb5_store_uint32(sp, log_context->version);
+            ret = krb5_store_uint32(sp, vno);
         if (ret == 0)
-            ret = krb5_store_uint32(sp, LOG_UBER_SZ);
+            ret = krb5_store_uint32(sp, LOG_UBER_LEN);
     } else if (nop_type == kadm_nop_plain) {
         ret = krb5_store_uint32(sp, 0);
         if (ret == 0)
@@ -1660,12 +1718,12 @@ kadm5_log_nop(kadm5_server_context *context, enum kadm_nop_type nop_type)
     }
 
     if (ret == 0)
-        ret = kadm5_log_postamble(log_context, sp);
+        ret = kadm5_log_postamble(log_context, sp, off == 0 ? 0 : vno + 1);
     if (ret == 0)
         ret = kadm5_log_flush(context, sp);
 
     if (ret == 0 && off == 0 && nop_type != kadm_nop_plain)
-        ret = kadm5_log_nop(context, nop_type); /* shouldn't happen */
+        ret = kadm5_log_nop(context, nop_type);
 
     if (ret == 0 && off != 0)
         ret = kadm5_log_recover(context, kadm_recover_commit);
@@ -2015,7 +2073,7 @@ log_goto_first(kadm5_server_context *server_context, int fd)
         errno = ret;
         return NULL;
     }
-    if (op == kadm_nop && len == LOG_UBER_SZ && seek_next(sp) == -1) {
+    if (op == kadm_nop && len == LOG_UBER_LEN && seek_next(sp) == -1) {
         krb5_storage_free(sp);
         return NULL;
     }
@@ -2062,7 +2120,7 @@ kadm5_log_goto_end(kadm5_server_context *server_context, int fd)
     if (ret)
         goto fail;
 
-    if (op == kadm_nop && len == LOG_UBER_SZ) {
+    if (op == kadm_nop && len == LOG_UBER_LEN) {
         /* New style log */
         ret = krb5_ret_uint64(sp, &off);
         if (ret)
@@ -2071,7 +2129,7 @@ kadm5_log_goto_end(kadm5_server_context *server_context, int fd)
         if (krb5_storage_seek(sp, off, SEEK_SET) == -1)
             goto fail;
 
-        if (off >= LOG_WRAPPER_SZ + LOG_UBER_SZ) {
+        if (off >= LOG_UBER_SZ) {
             ret = get_version_prev(sp, &ver, NULL);
             if (ret == 0)
                 return sp;
@@ -2097,7 +2155,7 @@ kadm5_log_goto_end(kadm5_server_context *server_context, int fd)
 truncate:
     /* If we can, truncate */
     if (server_context->log_context.lock_mode == LOCK_EX) {
-        ret = kadm5_log_reinit(server_context);
+        ret = kadm5_log_reinit(server_context, 0);
         if (ret == 0) {
             krb5_warn(server_context->context, ret,
                       "Invalid log; truncating to recover");
@@ -2140,6 +2198,7 @@ kadm5_log_previous(krb5_context context,
     if (oldoff == -1)
         goto log_corrupt;
 
+    /* This reads the physical version of the uber record */
     if (seek_prev(sp, verp, lenp) == -1)
         goto log_corrupt;
 
@@ -2198,6 +2257,7 @@ struct load_entries_data {
     krb5_data *entries;
     unsigned char *p;
     uint32_t first;
+    uint32_t last;
     size_t bytes;
     size_t nentries;
     size_t maxbytes;
@@ -2245,14 +2305,16 @@ load_entries_cb(kadm5_server_context *server_context,
          * If the log was huge we'd have to perhaps open a temp file for this.
          * For now KISS.
          */
-        if (ver < 2 /*1=uber*/ || entry_len < len /*overflow?*/ ||
+        if ((op == kadm_nop && entry_len == LOG_UBER_SZ) ||
+            entry_len < len /*overflow?*/ ||
             (entries->maxbytes > 0 && total > entries->maxbytes) ||
             total < entries->bytes /*overflow?*/ ||
             (entries->maxentries > 0 && entries->nentries == entries->maxentries))
             return -1; /* stop iteration */
         entries->bytes = total;
         entries->first = ver;
-        ++entries->nentries;
+        if (entries->nentries++ == 0)
+            entries->last = ver;
         return 0;
     }
 
@@ -2301,7 +2363,8 @@ load_entries_cb(kadm5_server_context *server_context,
  */
 static kadm5_ret_t
 load_entries(kadm5_server_context *context, krb5_data *p,
-             size_t maxentries, size_t maxbytes, uint32_t *first)
+             size_t maxentries, size_t maxbytes,
+             uint32_t *first, uint32_t *last)
 {
     struct load_entries_data entries;
     kadm5_ret_t ret;
@@ -2335,6 +2398,7 @@ load_entries(kadm5_server_context *context, krb5_data *p,
         return ret;
 
     *first = entries.first;
+    *last = entries.last;
     entries.entries = p;
     base = (unsigned char *)entries.entries->data;
     entries.p = base + entries.bytes;
@@ -2357,12 +2421,12 @@ kadm5_ret_t
 kadm5_log_truncate(kadm5_server_context *context, size_t keep, size_t maxbytes)
 {
     kadm5_ret_t ret;
-    uint32_t first, last_tstamp;
+    uint32_t first, last, last_tstamp;
     time_t now = time(NULL);
     krb5_data entries;
     krb5_storage *sp;
     ssize_t bytes;
-    uint64_t head_sz, sz;
+    uint64_t sz;
     off_t off;
 
     if (maxbytes == 0)
@@ -2376,7 +2440,7 @@ kadm5_log_truncate(kadm5_server_context *context, size_t keep, size_t maxbytes)
 
     /* Get the desired records. */
     krb5_data_zero(&entries);
-    ret = load_entries(context, &entries, keep, maxbytes, &first);
+    ret = load_entries(context, &entries, keep, maxbytes, &first, &last);
     if (ret)
         return ret;
 
@@ -2384,17 +2448,14 @@ kadm5_log_truncate(kadm5_server_context *context, size_t keep, size_t maxbytes)
         /*
          * No records found/fit within resource limits.  The caller should call
          * kadm5_log_reinit(context) to truly truncate and reset the log to
-         * version 1, else call again with better limits.
+         * version 0, else call again with better limits.
          */
         krb5_data_free(&entries);
         return EINVAL;
     }
 
-    /* Size of the uber record */
-    head_sz = LOG_WRAPPER_SZ + LOG_UBER_SZ;
-
     /* Check that entries.length won't overflow off_t */
-    sz = head_sz + entries.length;
+    sz = LOG_UBER_SZ + entries.length;
     off = (off_t)sz;
     if (off < 0 || off != sz || sz < entries.length) {
         krb5_data_free(&entries);
@@ -2440,23 +2501,23 @@ kadm5_log_truncate(kadm5_server_context *context, size_t keep, size_t maxbytes)
         krb5_data_free(&entries);
         return errno;
     }
-    ret = krb5_store_uint32(sp, first - 1);
+    ret = krb5_store_uint32(sp, 0);
     if (ret == 0)
         ret = krb5_store_uint32(sp, now);
     if (ret == 0)
         ret = krb5_store_uint32(sp, kadm_nop);      /* end of preamble */
     if (ret == 0)
-        ret = krb5_store_uint32(sp, LOG_UBER_SZ);   /* end of header */
+        ret = krb5_store_uint32(sp, LOG_UBER_LEN);  /* end of header */
     if (ret == 0)
-        ret = krb5_store_uint64(sp, 0);
+        ret = krb5_store_uint64(sp, LOG_UBER_SZ);
     if (ret == 0)
-        ret = krb5_store_uint32(sp, 0);
+        ret = krb5_store_uint32(sp, now);
     if (ret == 0)
-        ret = krb5_store_uint32(sp, 0);             /* end of payload */
+        ret = krb5_store_uint32(sp, last);
     if (ret == 0)
-        ret = krb5_store_uint32(sp, LOG_UBER_SZ);
+        ret = krb5_store_uint32(sp, LOG_UBER_LEN);
     if (ret == 0)
-        ret = krb5_store_uint32(sp, first - 1);     /* end of trailer */
+        ret = krb5_store_uint32(sp, 0);             /* end of trailer */
     if (ret == 0) {
         bytes = krb5_storage_write(sp, entries.data, entries.length);
         if (bytes == -1)
@@ -2476,7 +2537,7 @@ kadm5_log_truncate(kadm5_server_context *context, size_t keep, size_t maxbytes)
 
     if (ret) {
         krb5_warn(context->context, ret, "Unable to keep entries");
-        (void) ftruncate(context->log_context.log_fd, head_sz);
+        (void) ftruncate(context->log_context.log_fd, LOG_UBER_SZ);
         (void) lseek(context->log_context.log_fd, 0, SEEK_SET);
         return ret;
     }

@@ -150,7 +150,7 @@ get_creds(krb5_context context, const char *keytab_str,
     ret = krb5_cc_new_unique(context, krb5_cc_type_memory, NULL, cache);
     if(ret) krb5_err(context, 1, ret, "krb5_cc_new_unique");
 
-    ret = krb5_cc_initialize(context, *cache, client);
+    ret = krb5_cc_initialize(context, *cache, creds.client);
     if(ret) krb5_err(context, 1, ret, "krb5_cc_initialize");
 
     ret = krb5_cc_store_cred(context, *cache, &creds);
@@ -467,7 +467,7 @@ reinit_log(krb5_context context,
     if (verbose)
         krb5_warnx(context, "truncating log on slave");
 
-    ret = kadm5_log_reinit(server_context);
+    ret = kadm5_log_reinit(server_context, vno);
     if (ret)
         krb5_err(context, IPROPD_RESTART_SLOW, ret, "kadm5_log_reinit");
 }
@@ -567,7 +567,6 @@ receive_everything(krb5_context context, int fd,
     if (ret)
         krb5_err(context, IPROPD_RESTART_SLOW, ret, "db->rename");
 
-    server_context->log_context.version = vno;
 
     return 0;
 
