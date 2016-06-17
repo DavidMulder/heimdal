@@ -37,6 +37,10 @@
 #include <assert.h>
 #include <com_err.h>
 
+#ifndef bindtextdomain
+#define bindtextdomain(package, localedir)
+#endif
+
 #define INIT_FIELD(C, T, E, D, F)					\
     (C)->E = krb5_config_get_ ## T ## _default ((C), NULL, (D), 	\
 						"libdefaults", F, NULL)
