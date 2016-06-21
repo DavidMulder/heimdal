@@ -141,7 +141,6 @@ get_keytab(krb5_context context, krb5_keytab *keytab, const krb5_principal princ
 				name, 
 				sizeof(name));
 
-			char* basename = _basename( name );
 
 			asprintf( &service_kt_name, "%s/%s.keytab", name, service );
 		}
@@ -304,7 +303,6 @@ static OM_uint32 acquire_initiator_cred
 	}
 	kret = 0;
     }
- found:
     handle->ccache = ccache;
     ret = GSS_S_COMPLETE;
 
