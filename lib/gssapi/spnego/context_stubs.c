@@ -677,8 +677,6 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_canonicalize_name (
  * and encapsulate the result in a spnego_name.
  */
     OM_uint32 major_status;
-    struct _gss_mechanism_name *mn;
-    gssapi_mech_interface m;
     const spnego_name spname = (const spnego_name) input_name;
     /* Not pretty, but we need to know the internal (real) name type. */
     const gss_OID nametype = (*(struct _gss_name*)spname->mech).gn_mn.slh_first->gmn_mech_oid;
