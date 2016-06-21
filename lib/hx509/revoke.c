@@ -1146,7 +1146,7 @@ hx509_revoke_ocsp_print(hx509_context context, const char *path, FILE *out)
 	    status = "element unknown";
 	}
 
-	fprintf(out, "\t%d. status: %s\n", i, status);
+	fprintf(out, "\t%d. status: %s\n", (int)i, status);
 
 	fprintf(out, "\tthisUpdate: %s\n",
 		printable_time(ocsp.ocsp.tbsResponseData.responses.val[i].thisUpdate));
