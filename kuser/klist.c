@@ -64,7 +64,6 @@ printable_time_long(time_t t)
     return printable_time_internal(t, 20);
 }
 
-static char klist_command[] = "klist";
 
 #define COL_ISSUED		NP_("  Issued","")
 #define COL_EXPIRES		NP_("  Expires", "")
@@ -288,7 +287,6 @@ print_tickets (krb5_context context,
     char *str, *name;
     krb5_cc_cursor cursor;
     krb5_creds creds;
-    krb5_deltat sec;
 
     rtbl_t ct = NULL;
 
