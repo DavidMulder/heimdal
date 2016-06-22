@@ -2,6 +2,9 @@
 
 include $(top_srcdir)/Makefile.am.common
 
+if DARWIN
+AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation -lobjc /System/Library/Frameworks/Security.framework/Security
+endif
 AM_CPPFLAGS += $(INCLUDE_hcrypto) -I$(srcdir)/../lib/krb5 \
 	$(INCLUDE_libintl) \
 	-DHEIMDAL_LOCALEDIR='"$(localedir)"'

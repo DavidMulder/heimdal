@@ -608,6 +608,13 @@ AC_ARG_ENABLE(heimdal-documentation,
 		[if you want disable to heimdal documentation]))
 AM_CONDITIONAL(HEIMDAL_DOCUMENTATION, test "$enable_heimdal_documentation" != no)
 
+case $host in
+    *-*-darwin*)
+	is_darwin=true
+        ;;
+esac
+AM_CONDITIONAL(DARWIN,test x$is_darwin = xtrue)
+
 AC_CONFIG_FILES(Makefile 		\
 	include/Makefile		\
 	include/gssapi/Makefile		\

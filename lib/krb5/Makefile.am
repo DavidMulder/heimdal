@@ -2,6 +2,9 @@
 
 include $(top_srcdir)/Makefile.am.common
 
+if DARWIN
+AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation
+endif
 AM_CFLAGS += -Wno-deprecated-declarations
 AM_CPPFLAGS += $(INCLUDE_krb4) $(INCLUDE_hcrypto) -I../com_err -I$(srcdir)/../com_err $(INCLUDE_sqlite3) $(INCLUDE_libintl)
 

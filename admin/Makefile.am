@@ -2,6 +2,9 @@
 
 include $(top_srcdir)/Makefile.am.common
 
+if DARWIN
+AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation
+endif
 AM_CPPFLAGS += $(INCLUDE_readline) $(INCLUDE_hcrypto)
 
 man_MANS = ktutil.8
