@@ -31,6 +31,10 @@ $(srcdir)/heimntlm-protos.h:
 
 $(libheimntlm_la_OBJECTS): $(srcdir)/heimntlm-protos.h ntlm_err.h
 
+if DARWIN
+AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation
+endif
+
 TESTS = test_ntlm
 
 check_PROGRAMS = test_ntlm
