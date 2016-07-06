@@ -443,12 +443,12 @@ krb5_config_parse_debug (struct fileptr *f,
 	    b = NULL;
 	} else if (*p == '}') {
 	    *err_message = "unmatched }";
-	    ret = EINVAL;	/* XXX */
+	    ret = KRB5_CONFIG_BADFORMAT;
         goto out;
 	} else if(*p != '\0') {
 	    if (s == NULL) {
 		*err_message = "binding before section";
-		ret = EINVAL;
+		ret = KRB5_CONFIG_BADFORMAT;
         goto out;
 	    }
 	    ret = parse_binding(f, lineno, p, &b, &s->u.list, err_message);
