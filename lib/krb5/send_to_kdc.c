@@ -34,6 +34,11 @@
 #include "krb5_locl.h"
 #include "send_to_kdc_plugin.h"
 
+#if __hpux
+#undef socklen_t
+#define socklen_t int
+#endif
+
 struct send_to_kdc {
     krb5_send_to_kdc_func func;
     void *data;
@@ -82,7 +87,7 @@ timed_connect(int s, struct addrinfo *addr, time_t tmout)
 	return -1;
 
     sl = sizeof(err);
-    ret = getsockopt(s, SOL_SOCKET, SO_ERROR, &err, (int*)&sl);
+    ret = getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &sl);
     if (ret == -1)
 	return -1;
     if (err != 0)

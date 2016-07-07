@@ -33,6 +33,11 @@
 
 #include "krb5_locl.h"
 
+#if __hpux
+#undef socklen_t
+#define socklen_t int
+#endif
+
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_auth_con_init(krb5_context context,
 		   krb5_auth_context *auth_context)
@@ -252,7 +257,7 @@ krb5_auth_con_genaddrs(krb5_context context,
     if(flags & KRB5_AUTH_CONTEXT_GENERATE_LOCAL_ADDR) {
 	if (auth_context->local_address == NULL) {
 	    len = sizeof(ss_local);
-	    if(rk_IS_SOCKET_ERROR(getsockname(fd, local, (int*)&len))) {
+	    if(rk_IS_SOCKET_ERROR(getsockname(fd, local, &len))) {
 		char buf[128];
 		ret = rk_SOCK_ERRNO;
 		rk_strerror_r(ret, buf, sizeof(buf));
@@ -270,7 +275,7 @@ krb5_auth_con_genaddrs(krb5_context context,
     }
     if(flags & KRB5_AUTH_CONTEXT_GENERATE_REMOTE_ADDR) {
 	len = sizeof(ss_remote);
-	if(rk_IS_SOCKET_ERROR(getpeername(fd, remote, (int*)&len))) {
+	if(rk_IS_SOCKET_ERROR(getpeername(fd, remote, &len))) {
 	    char buf[128];
 	    ret = rk_SOCK_ERRNO;
 	    rk_strerror_r(ret, buf, sizeof(buf));

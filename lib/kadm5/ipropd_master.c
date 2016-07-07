@@ -34,6 +34,11 @@
 #include "iprop.h"
 #include <rtbl.h>
 
+#if __hpux
+#undef socklen_t
+#define socklen_t int
+#endif
+
 static krb5_log_facility *log_facility;
 
 const char *slave_stats_file;
@@ -245,7 +250,7 @@ add_slave (krb5_context context, krb5_keytab keytab, slave **root,
     s->ac = NULL;
 
     addr_len = sizeof(s->addr);
-    s->fd = accept (fd, (struct sockaddr *)&s->addr, (int*)&addr_len);
+    s->fd = accept (fd, (struct sockaddr *)&s->addr, &addr_len);
     if (rk_IS_BAD_SOCKET(s->fd)) {
 	krb5_warn (context, rk_SOCK_ERRNO, "accept");
 	goto error;
@@ -910,7 +915,7 @@ main(int argc, char **argv)
 	    socklen_t peer_len = sizeof(peer_addr);
 
 	    if(recvfrom(signal_fd, (void *)&vers, sizeof(vers), 0,
-			(struct sockaddr *)&peer_addr, (int*)&peer_len) < 0) {
+			(struct sockaddr *)&peer_addr, &peer_len) < 0) {
 		krb5_warn (context, errno, "recvfrom");
 		continue;
 	    }

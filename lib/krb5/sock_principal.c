@@ -33,6 +33,11 @@
 
 #include "krb5_locl.h"
 
+#if __hpux
+#undef socklen_t
+#define socklen_t int
+#endif
+
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_sock_to_principal (krb5_context context,
 			int sock,
@@ -46,7 +51,7 @@ krb5_sock_to_principal (krb5_context context,
     socklen_t salen = sizeof(__ss);
     char hostname[NI_MAXHOST];
 
-    if (getsockname (sock, sa, (int*)&salen) < 0) {
+    if (getsockname (sock, sa, &salen) < 0) {
 	ret = errno;
 	krb5_set_error_message (context, ret, "getsockname: %s", strerror(ret));
 	return ret;
