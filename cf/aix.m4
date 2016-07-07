@@ -46,9 +46,4 @@ fi
 
 AM_CONDITIONAL(AIX_DYNAMIC_AFS, test "$enable_dynamic_afs" != no)dnl
 AC_SUBST(AIX_EXTRA_KAFS)dnl
-
-if test "$aix" != no; then
-	AC_DEFINE([_ALL_SOURCE],1,[Required for functional/sane headers on AIX])
-fi
-
 ])
