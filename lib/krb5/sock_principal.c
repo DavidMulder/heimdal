@@ -46,7 +46,7 @@ krb5_sock_to_principal (krb5_context context,
     socklen_t salen = sizeof(__ss);
     char hostname[NI_MAXHOST];
 
-    if (getsockname (sock, sa, &salen) < 0) {
+    if (getsockname (sock, sa, (int*)&salen) < 0) {
 	ret = errno;
 	krb5_set_error_message (context, ret, "getsockname: %s", strerror(ret));
 	return ret;

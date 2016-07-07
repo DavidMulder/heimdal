@@ -82,7 +82,7 @@ timed_connect(int s, struct addrinfo *addr, time_t tmout)
 	return -1;
 
     sl = sizeof(err);
-    ret = getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &sl);
+    ret = getsockopt(s, SOL_SOCKET, SO_ERROR, &err, (int*)&sl);
     if (ret == -1)
 	return -1;
     if (err != 0)

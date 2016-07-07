@@ -30,6 +30,9 @@
  * SUCH DAMAGE.
  */
 
+#if __hpux
+#define _REENTRANT 1
+#endif
 #include "mech_locl.h"
 
 static OM_uint32
