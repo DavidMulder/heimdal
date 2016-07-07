@@ -535,6 +535,13 @@ if test "$enable_kcm" = yes; then
 fi
 AM_CONDITIONAL(KCM, test "$enable_kcm" = yes)
 
+AC_ARG_ENABLE(ipc,
+    AS_HELP_STRING([--disable-ipc],[if you want to build the ipc in Heimdal.]))
+if test "$enable_ipc" != no; then
+    AC_DEFINE(HAVE_IPC, 1, [Define if you want to build the ipc in Heimdal.])
+    LIB_ipc="\$(top_builddir)/lib/ipc/libheim-ipcc.la"
+fi
+AM_CONDITIONAL(IPC, test "X$enable_ipc" = Xyes)
 
 
 dnl Cray stuff
