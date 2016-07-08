@@ -115,6 +115,20 @@ AC_SUBST(LIB_com_err)
 AC_SUBST(LIB_com_err_a)
 AC_SUBST(LIB_com_err_so)
 
+INCLUDE_openssl_crypto='-I$(top_builddir)/lib'
+LIB_hcrypto='$(top_builddir)/lib/hcrypto/libhcrypto.la'
+LIB_hcrypto_a='$(top_builddir)/lib/hcrypto/.libs/libhcrypto.a'
+LIB_hcrypto_so='$(top_builddir)/lib/hcrypto/.libs/libhcrypto.so'
+LIB_hcrypto_appl="-lhcrypto"
+
+AC_SUBST(INCLUDE_openssl_crypto)
+AC_SUBST(LIB_hcrypto)
+AC_SUBST(LIB_hcrypto_a)
+AC_SUBST(LIB_hcrypto_so)
+AC_SUBST(LIB_hcrypto_appl)
+
+AM_CONDITIONAL(HAVE_HCRYPTO_W_OPENSSL, 0)
+
 dnl ---
 
 AC_DEFINE(HEIM_WEAK_CRYPTO, 1, [Define if you want support for weak crypto])
