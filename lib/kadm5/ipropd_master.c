@@ -36,7 +36,7 @@
 
 #if __hpux
 #undef socklen_t
-#define socklen_t int
+typedef size_t socklen_t;
 #endif
 
 static krb5_log_facility *log_facility;

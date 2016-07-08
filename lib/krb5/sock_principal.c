@@ -35,7 +35,7 @@
 
 #if __hpux
 #undef socklen_t
-#define socklen_t int
+typedef size_t socklen_t;
 #endif
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
