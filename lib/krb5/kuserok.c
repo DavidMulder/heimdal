@@ -146,7 +146,7 @@ check_directory(krb5_context context,
 	fd = dirfd(d);
 #elif defined(__sun) && defined(__XOPEN_OR_POSIX)
 	fd = d->d_fd;
-#elif defined(__sun) || defined(__hpux)
+#elif defined(__sun) || defined(__hpux) || defined(_AIX)
 	fd = d->dd_fd;
 #endif
 	if(fstat(fd, &st2) < 0) {
