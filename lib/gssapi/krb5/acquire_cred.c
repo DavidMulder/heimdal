@@ -69,21 +69,6 @@ static char* _service_from_princ( const krb5_principal princ )
     }
     return serviceName;
 }
-
-static char* _basename( char* name )
-{
-    int i = 0;
-    int len = strlen( name );
-    for( i = len -1; i >= 0; i-- )
-    {
-   if( name[i] == '/' )
-   {    
-       name[i] = '\0';
-       return name;
-   }
-    }
-    return NULL;
-}
 /* END VAS Modification */
 
 
@@ -120,7 +105,6 @@ get_keytab(krb5_context context, krb5_keytab *keytab, const krb5_principal princ
 				name, 
 				sizeof(name));
 
-			char* basename = _basename( name );
 
 			asprintf( &service_kt_name, "%s/%s.keytab", name, service );
 		}

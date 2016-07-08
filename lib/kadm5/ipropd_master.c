@@ -34,6 +34,11 @@
 #include "iprop.h"
 #include <rtbl.h>
 
+#if __hpux
+#undef socklen_t
+#define socklen_t int
+#endif
+
 static krb5_log_facility *log_facility;
 
 static int verbose;

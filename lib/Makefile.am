@@ -20,6 +20,9 @@ endif
 if HAVE_AFS
 dir_afs = kafs
 endif
+if IPC
+dir_ipc = ipc
+endif
 
 SUBDIRS = \
 	roken \
@@ -32,7 +35,7 @@ SUBDIRS = \
 	asn1 \
 	$(dir_sqlite) \
 	$(dir_hcrypto) \
-	ipc \
+	$(dir_ipc) \
 	hx509 \
 	krb5 \
 	ntlm \

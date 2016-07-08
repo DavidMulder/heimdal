@@ -31,6 +31,10 @@
  * SUCH DAMAGE.
  */
 
+#if __hpux
+#define _REENTRANT 1
+#endif
+
 #include "krb5_locl.h"
 #include "kuserok_plugin.h"
 #include <dirent.h>
@@ -158,7 +162,7 @@ check_owner_dir(krb5_context context,
     if (fstat(dirfd(dir), &st) == -1) {
 #elif defined(__sun) && defined(__XOPEN_OR_POSIX)
     if (fstat(dir->d_fd, &st) == -1) {
-#elif defined(__sun)
+#elif defined(__sun) || defined(__hpux) || defined(_AIX)
     if (fstat(dir->dd_fd, &st) == -1) {
 #endif
 	krb5_set_error_message(context, EACCES,

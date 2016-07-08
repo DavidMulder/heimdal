@@ -36,6 +36,9 @@
 #ifndef __HDB_LOCL_H__
 #define __HDB_LOCL_H__
 
+#ifdef HAVE_PWD_H
+#undef _POSIX_PTHREAD_SEMANTICS
+#endif
 #include <config.h>
 
 #include <assert.h>

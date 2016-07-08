@@ -4,6 +4,9 @@ include $(top_srcdir)/Makefile.am.common
 
 AUTOMAKE_OPTIONS = subdir-objects
 
+if DARWIN
+AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation
+endif
 AM_CPPFLAGS += \
 	-I$(srcdir)/../krb5 \
 	-I$(srcdir) \

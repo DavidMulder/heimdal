@@ -179,7 +179,7 @@ gss_display_status(OM_uint32 *minor_status,
 	switch (status_type) {
 	case GSS_C_GSS_CODE: {
 	    	char *buf = NULL;
-		int e;
+		int e = 0;
 
 		if (GSS_SUPPLEMENTARY_INFO(status_value))
 		    e = asprintf(&buf, "%s", supplementary_error(
@@ -205,7 +205,7 @@ gss_display_status(OM_uint32 *minor_status,
 		OM_uint32 maj_junk, min_junk;
 		gss_buffer_desc oid;
 		char *buf = NULL;
-		int e;
+		int e = 0;
 
         /* VAS Modification
          * This used to simply display the unknown mech code error regardless of what was passed into the

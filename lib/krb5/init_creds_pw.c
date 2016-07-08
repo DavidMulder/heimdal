@@ -1392,11 +1392,18 @@ static krb5_error_code preload_preauth_to_md(krb5_context context, krb5_get_init
             break;
             
         case KRB5_PADATA_ENC_TIMESTAMP:
-            /* make a v5 salted pa-data */
-            ret = add_enc_ts_padata(context, ctx->preload_md, ctx->cred.client, 
-                                    ctx->keyproc, ctx->password,
-                                    ctx->as_req.req_body.etype.val, 
-                                    ctx->as_req.req_body.etype.len, NULL, NULL);
+            /* TODO: Not a permanent fix, but we segfault in keytab_key_proc if
+             * ctx->password (the keyseed) is NULL. Bail out and let heimdal do
+             * a regular preauth. David Mulder */
+            /* We also segfault if the enctypes is NULL */
+            if (ctx->password && ctx->as_req.req_body.etype.val) {
+                /* make a v5 salted pa-data */
+                ret = add_enc_ts_padata(context, ctx->preload_md, ctx->cred.client, 
+                                        ctx->keyproc, ctx->password,
+                                        ctx->as_req.req_body.etype.val, 
+                                        ctx->as_req.req_body.etype.len, NULL, NULL);
+            } else
+                ret = KRB5_PREAUTH_FAILED;
             if( ret )
                 goto FINISHED;
             break;

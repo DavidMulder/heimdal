@@ -216,10 +216,11 @@ parse_list(struct fileptr *f, unsigned *lineno, krb5_config_binding **parent,
 	    continue;
     }
 	ret = parse_binding (f, lineno, p, &b, parent, err_message);
-	if (ret)
+	if (ret) {
         if( buf ) free(  buf );
         buf = NULL;
 	    return ret;
+    }
     }
     *lineno = beg_lineno;
     *err_message = "unclosed {";

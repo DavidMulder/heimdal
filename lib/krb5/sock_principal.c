@@ -33,6 +33,11 @@
 
 #include "krb5_locl.h"
 
+#if __hpux
+#undef socklen_t
+#define socklen_t int
+#endif
+
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_sock_to_principal (krb5_context context,
 			int sock,

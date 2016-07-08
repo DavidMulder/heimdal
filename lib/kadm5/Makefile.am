@@ -4,6 +4,10 @@ include $(top_srcdir)/Makefile.am.common
 
 libkadm5srv_la_CPPFLAGS = -I$(srcdir)/../krb5
 
+if DARWIN
+AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation
+endif
+
 lib_LTLIBRARIES = libkadm5srv.la libkadm5clnt.la
 libkadm5srv_la_LDFLAGS = -version-info 8:1:0
 libkadm5clnt_la_LDFLAGS = -version-info 7:1:0

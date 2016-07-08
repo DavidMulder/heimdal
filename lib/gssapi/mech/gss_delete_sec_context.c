@@ -33,7 +33,6 @@ gss_delete_sec_context(OM_uint32 *minor_status,
     gss_ctx_id_t *context_handle,
     gss_buffer_t output_token)
 {
-	OM_uint32 major_status = GSS_S_COMPLETE;
 	struct _gss_context *ctx = (struct _gss_context *) *context_handle;
 
 	if (output_token)
@@ -46,12 +45,12 @@ gss_delete_sec_context(OM_uint32 *minor_status,
 		 * otherwise fake an empty token.
 		 */
 		if (ctx->gc_ctx) {
-			major_status = ctx->gc_mech->gm_delete_sec_context(
+			ctx->gc_mech->gm_delete_sec_context(
 				minor_status, &ctx->gc_ctx, output_token);
 		}
 		free(ctx);
 		*context_handle = GSS_C_NO_CONTEXT;
 	}
 
-	return (major_status);
+	return (GSS_S_COMPLETE);
 }

@@ -30,6 +30,9 @@
  * SUCH DAMAGE.
  */
 
+#if __hpux
+#define _REENTRANT 1
+#endif
 #include "gsskrb5_locl.h"
 
 OM_uint32 GSSAPI_CALLCONV

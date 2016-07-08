@@ -33,6 +33,11 @@
 
 #include "krb5_locl.h"
 
+#if __hpux
+#undef socklen_t
+#define socklen_t int
+#endif
+
 /**
  * Allocate and initialize an autentication context.
  *

@@ -33,6 +33,10 @@
 
 #include <krb5_locl.h>
 
+#ifndef bindtextdomain
+#define bindtextdomain(package, localedir)
+#endif
+
 /* These are stub functions for the standalone RFC3961 crypto library */
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
