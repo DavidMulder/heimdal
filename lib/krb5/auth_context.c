@@ -33,11 +33,6 @@
 
 #include "krb5_locl.h"
 
-#if __hpux && !defined(GETSOCKNAME_PROTO_COMPATIBLE)
-#undef socklen_t
-#define socklen_t int
-#endif
-
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_auth_con_init(krb5_context context,
 		   krb5_auth_context *auth_context)

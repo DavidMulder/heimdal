@@ -34,11 +34,6 @@
 #include "iprop.h"
 #include <rtbl.h>
 
-#if __hpux && !defined(GETSOCKNAME_PROTO_COMPATIBLE)
-#undef socklen_t
-#define socklen_t int
-#endif
-
 static krb5_log_facility *log_facility;
 
 const char *slave_stats_file;

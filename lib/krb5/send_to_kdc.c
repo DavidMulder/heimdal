@@ -34,11 +34,6 @@
 #include "krb5_locl.h"
 #include "send_to_kdc_plugin.h"
 
-#if __hpux && !defined(GETSOCKNAME_PROTO_COMPATIBLE)
-#undef socklen_t
-#define socklen_t int
-#endif
-
 struct send_to_kdc {
     krb5_send_to_kdc_func func;
     void *data;
