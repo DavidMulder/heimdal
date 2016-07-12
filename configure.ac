@@ -610,6 +610,17 @@ AH_BOTTOM([#ifdef ROKEN_RENAME
 #include "roken_rename.h"
 #endif])
 
+AC_DEFINE(_XOPEN_SOURCE_EXTENDED,1)
+AH_BOTTOM([
+#if defined(__hpux)
+#ifndef __cplusplus
+#ifndef _XOPEN_SOURCE_EXTENDED
+#define _XOPEN_SOURCE_EXTENDED 1
+#endif
+#endif
+#endif
+])
+
 AC_ARG_ENABLE(heimdal-documentation,
 	AS_HELP_STRING([--disable-heimdal-documentation],
 		[if you want disable to heimdal documentation]))
