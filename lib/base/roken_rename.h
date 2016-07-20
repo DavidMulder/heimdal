@@ -45,9 +45,6 @@
 #ifndef HAVE_ASNPRINTF
 #define rk_asnprintf heimbase_asnprintf
 #endif
-#ifndef HAVE_VASPRINTF
-#define rk_vasprintf heimbase_vasprintf
-#endif
 #ifndef HAVE_VASNPRINTF
 #define rk_vasnprintf heimbase_vasnprintf
 #endif
