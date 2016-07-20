@@ -647,7 +647,7 @@ krb5_free_context(krb5_context context)
 #endif
 
     HEIMDAL_MUTEX_destroy(&context->mutex);
-    free(context->mutex);
+    free(&context->mutex);
 
     if( context->rcache_ctx )
     {

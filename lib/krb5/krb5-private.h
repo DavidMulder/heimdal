@@ -9,18 +9,28 @@
 #endif
 
 #ifndef KRB5_DEPRECATED_FUNCTION
-#if defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 1 )))
+#ifndef __has_extension
+#define __has_extension(x) 0
+#define KRB5_DEPRECATED_FUNCTIONhas_extension 1
+#endif
+#if __has_extension(attribute_deprecated_with_message)
+#define KRB5_DEPRECATED_FUNCTION(x) __attribute__((__deprecated__(x)))
+#elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 1 )))
 #define KRB5_DEPRECATED_FUNCTION(X) __attribute__((__deprecated__))
 #else
 #define KRB5_DEPRECATED_FUNCTION(X)
 #endif
+#ifdef KRB5_DEPRECATED_FUNCTIONhas_extension
+#undef __has_extension
+#undef KRB5_DEPRECATED_FUNCTIONhas_extension
 #endif
+#endif /* KRB5_DEPRECATED_FUNCTION */
 
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _heim_krb5_ipc_client_clear_target (void);
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _heim_krb5_ipc_client_set_target_uid (uid_t /*uid*/);
 
 void
@@ -64,7 +74,15 @@ _krb5_build_authenticator (
 	krb5_data */*result*/,
 	krb5_key_usage /*usage*/);
 
+#ifdef PKINIT
 krb5_error_code
+_krb5_build_authpack_subjectPK_EC (
+	krb5_context /*context*/,
+	krb5_pk_init_ctx /*ctx*/,
+	AuthPack */*a*/);
+#endif
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_cc_allocate (
 	krb5_context /*context*/,
 	const krb5_cc_ops */*ops*/,
@@ -83,7 +101,7 @@ _krb5_config_get (
 	int /*type*/,
 	...);
 
-krb5_config_section *
+KRB5_LIB_FUNCTION krb5_config_section * KRB5_LIB_CALL
 _krb5_config_get_entry (
 	krb5_config_section **/*parent*/,
 	const char */*name*/,
@@ -97,7 +115,7 @@ _krb5_config_get_next (
 	int /*type*/,
 	...);
 
-const void *
+KRB5_LIB_FUNCTION const void * KRB5_LIB_CALL
 _krb5_config_vget (
 	krb5_context /*context*/,
 	const krb5_config_section */*c*/,
@@ -117,10 +135,10 @@ _krb5_copy_send_to_kdc_func (
 	krb5_context /*context*/,
 	krb5_context /*to*/);
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _krb5_crc_init_table (void);
 
-uint32_t
+KRB5_LIB_FUNCTION uint32_t KRB5_LIB_CALL
 _krb5_crc_update (
 	const char */*p*/,
 	size_t /*len*/,
@@ -134,10 +152,10 @@ _krb5_debug (
 	...)
      __attribute__((format (printf, 3, 4)));
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _krb5_debug_backtrace (krb5_context /*context*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_derive_key (
 	krb5_context /*context*/,
 	struct _krb5_encryption_type */*et*/,
@@ -145,7 +163,7 @@ _krb5_derive_key (
 	const void */*constant*/,
 	size_t /*len*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_des_checksum (
 	krb5_context /*context*/,
 	const EVP_MD */*evp_md*/,
@@ -154,7 +172,7 @@ _krb5_des_checksum (
 	size_t /*len*/,
 	Checksum */*cksum*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_des_verify (
 	krb5_context /*context*/,
 	const EVP_MD */*evp_md*/,
@@ -163,7 +181,7 @@ _krb5_des_verify (
 	size_t /*len*/,
 	Checksum */*C*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_dh_group_ok (
 	krb5_context /*context*/,
 	unsigned long /*bits*/,
@@ -173,13 +191,13 @@ _krb5_dh_group_ok (
 	struct krb5_dh_moduli **/*moduli*/,
 	char **/*name*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_einval (
 	krb5_context /*context*/,
 	const char */*func*/,
 	unsigned long /*argn*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_erase_file (
 	krb5_context /*context*/,
 	const char */*filename*/);
@@ -213,9 +231,10 @@ void
 _krb5_evp_schedule (
 	krb5_context /*context*/,
 	struct _krb5_key_type */*kt*/,
-	struct _krb5_key_data */*kd*/, const void *);
+	struct _krb5_key_data */*kd*/,
+	const void */*params*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_expand_default_cc_name (
 	krb5_context /*context*/,
 	const char */*str*/,
@@ -225,9 +244,18 @@ KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_expand_path_tokens (
 	krb5_context /*context*/,
 	const char */*path_in*/,
+	int /*filepath*/,
 	char **/*ppath_out*/);
 
-int
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+_krb5_expand_path_tokensv (
+	krb5_context /*context*/,
+	const char */*path_in*/,
+	int /*filepath*/,
+	char **/*ppath_out*/,
+	...);
+
+KRB5_LIB_FUNCTION int KRB5_LIB_CALL
 _krb5_extract_ticket (
 	krb5_context /*context*/,
 	krb5_kdc_rep */*rep*/,
@@ -238,26 +266,58 @@ _krb5_extract_ticket (
 	krb5_addresses */*addrs*/,
 	unsigned /*nonce*/,
 	unsigned /*flags*/,
+	krb5_data */*request*/,
 	krb5_decrypt_proc /*decrypt_proc*/,
 	krb5_const_pointer /*decryptarg*/);
 
-struct _krb5_checksum_type *
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+_krb5_fast_armor_key (
+	krb5_context /*context*/,
+	krb5_keyblock */*subkey*/,
+	krb5_keyblock */*sessionkey*/,
+	krb5_keyblock */*armorkey*/,
+	krb5_crypto */*armor_crypto*/);
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+_krb5_fast_cf2 (
+	krb5_context /*context*/,
+	krb5_keyblock */*key1*/,
+	const char */*pepper1*/,
+	krb5_keyblock */*key2*/,
+	const char */*pepper2*/,
+	krb5_keyblock */*armorkey*/,
+	krb5_crypto */*armor_crypto*/);
+
+KRB5_LIB_FUNCTION struct _krb5_checksum_type * KRB5_LIB_CALL
 _krb5_find_checksum (krb5_cksumtype /*type*/);
 
-struct _krb5_encryption_type *
+KRB5_LIB_FUNCTION struct _krb5_encryption_type * KRB5_LIB_CALL
 _krb5_find_enctype (krb5_enctype /*type*/);
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _krb5_free_key_data (
 	krb5_context /*context*/,
 	struct _krb5_key_data */*key*/,
 	struct _krb5_encryption_type */*et*/);
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _krb5_free_krbhst_info (krb5_krbhst_info */*hi*/);
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _krb5_free_moduli (struct krb5_dh_moduli **/*moduli*/);
+
+KRB5_LIB_FUNCTION void
+_krb5_free_name_canon_rules (
+	krb5_context /*context*/,
+	krb5_name_canon_rule /*rules*/);
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+_krb5_get_ad (
+	krb5_context /*context*/,
+	const AuthorizationData */*ad*/,
+	krb5_keyblock */*sessionkey*/,
+	int /*type*/,
+	krb5_data */*data*/);
 
 krb5_error_code KRB5_LIB_FUNCTION
 _krb5_get_cred_kdc (
@@ -283,7 +343,7 @@ _krb5_get_cred_kdc_address (
 	Ticket */*second_ticket*/,
 	krb5_creds */*out_creds*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_get_cred_kdc_any (
 	krb5_context /*context*/,
 	krb5_kdc_flags /*flags*/,
@@ -294,13 +354,13 @@ _krb5_get_cred_kdc_any (
 	krb5_creds **/*out_creds*/,
 	krb5_creds ***/*ret_tgts*/);
 
-char *
+KRB5_LIB_FUNCTION char * KRB5_LIB_CALL
 _krb5_get_default_cc_name_from_registry (krb5_context /*context*/);
 
-char *
+KRB5_LIB_FUNCTION char * KRB5_LIB_CALL
 _krb5_get_default_config_config_files_from_registry (void);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_get_default_principal_local (
 	krb5_context /*context*/,
 	krb5_principal */*princ*/);
@@ -327,19 +387,30 @@ _krb5_get_int (
 	unsigned long */*value*/,
 	size_t /*size*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_ssize_t KRB5_LIB_CALL
+_krb5_get_int64 (
+	void */*buffer*/,
+	uint64_t */*value*/,
+	size_t /*size*/);
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_get_krbtgt (
 	krb5_context /*context*/,
 	krb5_ccache /*id*/,
 	krb5_realm /*realm*/,
 	krb5_creds **/*cred*/);
 
-krb5_boolean KRB5_LIB_FUNCTION
+KRB5_LIB_FUNCTION krb5_error_code
+_krb5_get_name_canon_rules (
+	krb5_context /*context*/,
+	krb5_name_canon_rule */*rules*/);
+
+KRB5_LIB_FUNCTION krb5_boolean KRB5_LIB_CALL
 _krb5_have_debug (
 	krb5_context /*context*/,
 	int /*level*/);
 
-krb5_boolean
+KRB5_LIB_FUNCTION krb5_boolean KRB5_LIB_CALL
 _krb5_homedir_access (krb5_context /*context*/);
 
 krb5_error_code
@@ -356,7 +427,7 @@ _krb5_init_etype (
 	krb5_enctype **/*val*/,
 	const krb5_enctype */*etypes*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_internal_hmac (
 	krb5_context /*context*/,
 	struct _krb5_checksum_type */*cm*/,
@@ -389,7 +460,7 @@ _krb5_kcm_noop (
 	krb5_context /*context*/,
 	krb5_ccache /*id*/);
 
-krb5_error_code KRB5_CALLCONV
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_kdc_retry (
 	krb5_context /*context*/,
 	krb5_sendto_ctx /*ctx*/,
@@ -397,16 +468,16 @@ _krb5_kdc_retry (
 	const krb5_data */*reply*/,
 	int */*action*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_krbhost_info_move (
 	krb5_context /*context*/,
 	krb5_krbhst_info */*from*/,
 	krb5_krbhst_info **/*to*/);
 
-const char *
+KRB5_LIB_FUNCTION const char * KRB5_LIB_CALL
 _krb5_krbhst_get_realm (krb5_krbhst_handle /*handle*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_kt_principal_not_found (
 	krb5_context /*context*/,
 	krb5_error_code /*ret*/,
@@ -416,21 +487,33 @@ _krb5_kt_principal_not_found (
 	int /*kvno*/);
 
 KRB5_LIB_FUNCTION krb5_boolean KRB5_LIB_CALL
-_krb5_kuserok_internal (
+_krb5_kuserok (
 	krb5_context /*context*/,
 	krb5_principal /*principal*/,
-	const char */*luser*/);
+	const char */*luser*/,
+	krb5_boolean /*an2ln_ok*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_load_ccache_plugins (krb5_context /*context*/);
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
+_krb5_load_db_plugins (krb5_context /*context*/);
+
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _krb5_load_plugins (
 	krb5_context /*context*/,
 	const char */*name*/,
 	const char **/*paths*/);
 
 krb5_error_code
+_krb5_make_fast_ap_fxarmor (
+	krb5_context /*context*/,
+	krb5_ccache /*armor_ccache*/,
+	krb5_data */*armor_value*/,
+	krb5_keyblock */*armor_key*/,
+	krb5_crypto */*armor_crypto*/);
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_mk_req_internal (
 	krb5_context /*context*/,
 	krb5_auth_context */*auth_context*/,
@@ -448,7 +531,7 @@ _krb5_n_fold (
 	void */*key*/,
 	size_t /*size*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_pac_sign (
 	krb5_context /*context*/,
 	krb5_pac /*p*/,
@@ -458,13 +541,13 @@ _krb5_pac_sign (
 	const krb5_keyblock */*priv_key*/,
 	krb5_data */*data*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_parse_moduli (
 	krb5_context /*context*/,
 	const char */*file*/,
 	struct krb5_dh_moduli ***/*moduli*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_parse_moduli_line (
 	krb5_context /*context*/,
 	const char */*file*/,
@@ -472,10 +555,10 @@ _krb5_parse_moduli_line (
 	char */*p*/,
 	struct krb5_dh_moduli **/*m*/);
 
-KRB5_LIB_FUNCTION void KRB5_LIB_CALL
-_krb5_pk_cert_free (struct krb5_pk_cert */*cert*/);
+void
+_krb5_pk_eckey_free (void */*eckey*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_pk_kdf (
 	krb5_context /*context*/,
 	const struct AlgorithmIdentifier */*ai*/,
@@ -502,23 +585,6 @@ _krb5_pk_load_id (
 	char */*password*/);
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
-_krb5_pk_mk_ContentInfo (
-	krb5_context /*context*/,
-	const krb5_data */*buf*/,
-	const heim_oid */*oid*/,
-	struct ContentInfo */*content_info*/);
-
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
-_krb5_pk_mk_padata (
-	krb5_context /*context*/,
-	void */*c*/,
-	int /*ic_flags*/,
-	int /*win2k*/,
-	const KDC_REQ_BODY */*req_body*/,
-	unsigned /*nonce*/,
-	METHOD_DATA */*md*/);
-
-krb5_error_code
 _krb5_pk_octetstring2key (
 	krb5_context /*context*/,
 	krb5_enctype /*type*/,
@@ -540,23 +606,28 @@ _krb5_pk_rd_pa_reply (
 	PA_DATA */*pa*/,
 	krb5_keyblock **/*key*/);
 
+#ifdef PKINIT
 krb5_error_code
+_krb5_pk_rd_pa_reply_ecdh_compute_key (
+	krb5_context /*context*/,
+	krb5_pk_init_ctx /*ctx*/,
+	const unsigned char */*in*/,
+	size_t /*in_sz*/,
+	unsigned char **/*out*/,
+	int */*out_sz*/);
+#endif
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_plugin_find (
 	krb5_context /*context*/,
 	enum krb5_plugin_type /*type*/,
 	const char */*name*/,
 	struct krb5_plugin **/*list*/);
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _krb5_plugin_free (struct krb5_plugin */*list*/);
 
-struct krb5_plugin *
-_krb5_plugin_get_next (struct krb5_plugin */*p*/);
-
-void *
-_krb5_plugin_get_symbol (struct krb5_plugin */*p*/);
-
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_plugin_run_f (
 	krb5_context /*context*/,
 	const char */*module*/,
@@ -564,7 +635,7 @@ _krb5_plugin_run_f (
 	int /*min_version*/,
 	int /*flags*/,
 	void */*userctx*/,
-	krb5_error_code (*/*func*/)(krb5_context, const void *, void *, void *));
+	krb5_error_code (KRB5_LIB_CALL *func)(krb5_context, const void *, void *, void *));
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_principal2principalname (
@@ -587,7 +658,7 @@ _krb5_principalname2krb5_principal (
 KRB5_LIB_FUNCTION krb5_ssize_t KRB5_LIB_CALL
 _krb5_put_int (
 	void */*buffer*/,
-	unsigned long /*value*/,
+	uint64_t /*value*/,
 	size_t /*size*/);
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
@@ -596,41 +667,46 @@ _krb5_s4u2self_to_checksumdata (
 	const PA_S4U2Self */*self*/,
 	krb5_data */*data*/);
 
-int
-_krb5_send_and_recv_tcp (
-	krb5_socket_t /*fd*/,
-	time_t /*tmout*/,
-	const krb5_data */*req*/,
-	krb5_data */*rep*/);
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
+_krb5_sendto_ctx_set_krb5hst (
+	krb5_context /*context*/,
+	krb5_sendto_ctx /*ctx*/,
+	krb5_krbhst_handle /*handle*/);
 
-int
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
+_krb5_sendto_ctx_set_prexmit (
+	krb5_sendto_ctx /*ctx*/,
+	krb5_sendto_prexmit /*prexmit*/,
+	void */*data*/);
+
+KRB5_LIB_FUNCTION int KRB5_LIB_CALL
 _krb5_set_default_cc_name_to_registry (
 	krb5_context /*context*/,
 	krb5_ccache /*id*/);
 
-void
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _krb5_unload_plugins (
 	krb5_context /*context*/,
 	const char */*name*/);
 
-krb5_error_code
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 _krb5_usage2arcfour (
 	krb5_context /*context*/,
 	unsigned */*usage*/);
 
-int
+KRB5_LIB_FUNCTION int KRB5_LIB_CALL
 _krb5_xlock (
 	krb5_context /*context*/,
 	int /*fd*/,
 	krb5_boolean /*exclusive*/,
 	const char */*filename*/);
 
-void
-_krb5_xor (
-	DES_cblock */*key*/,
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
+_krb5_xor8 (
+	unsigned char */*a*/,
 	const unsigned char */*b*/);
 
-int
+KRB5_LIB_FUNCTION int KRB5_LIB_CALL
 _krb5_xunlock (
 	krb5_context /*context*/,
 	int /*fd*/);
