@@ -31,7 +31,7 @@ SUBDIRS = \
 	wind \
 	asn1 \
 	$(dir_sqlite) \
-	$(dir_hcrypto) \
+	hcrypto \
 	ipc \
 	hx509 \
 	krb5 \
