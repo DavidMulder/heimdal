@@ -94,8 +94,7 @@ main(int argc, char **argv)
 #else
 #define EXPANDED_SHOULD_BE "/tmp/abc/dcefgh/x"
 #endif
-printf("What we got:\n%s\n\n", expanded);
-printf("What we wanted:\n%s\n\n", EXPANDED_SHOULD_BE);
+
     if (strcmp(expanded, EXPANDED_SHOULD_BE))
         krb5_errx(context, 1, "Token expansion incorrect");
 
