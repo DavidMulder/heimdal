@@ -288,7 +288,7 @@ print_tickets (krb5_context context,
 	       int do_hidden,
 	       int do_json)
 {
-    char *str, *name, *fullname;
+    char *str, *name;
     krb5_error_code ret;
     krb5_cc_cursor cursor;
     krb5_creds creds;
@@ -431,31 +431,7 @@ check_expiration(krb5_context context,
 		 time_t *expiration)
 {
     krb5_error_code ret;
-    krb5_creds pattern;
-    krb5_creds creds;
-    krb5_const_realm client_realm;
-    int expired;
     time_t t;
-
-    krb5_cc_clear_mcred(&pattern);
-    /* VAS Modification - clear this out too */
-    krb5_cc_clear_mcred(&creds);
-
-    client_realm = krb5_principal_get_realm(context, principal);
-
-    ret = krb5_make_principal (context, &pattern.server,
-			       client_realm, KRB5_TGS_NAME, client_realm, NULL);
-    if (ret)
-	krb5_err (context, 1, ret, "krb5_make_principal");
-    pattern.client = principal;
-
-    ret = krb5_cc_retrieve_cred (context, ccache, 0, &pattern, &creds);
-    krb5_free_principal (context, pattern.server);
-    if (ret) {
-	if (ret == KRB5_CC_END)
-	    return 1;
-	krb5_err (context, 1, ret, "krb5_cc_retrieve_cred");
-    }
 
     ret = krb5_cc_get_lifetime(context, ccache, &t);
     if (ret || t == 0)
