@@ -946,6 +946,62 @@ krbhost_dealloc(void *ptr)
     free(handle->realm);
 }
 
+static krb5_error_code
+krb524_get_next(krb5_context context,
+        struct krb5_krbhst_data *kd,
+        krb5_krbhst_info **host)
+{
+    if ((kd->flags & KD_PLUGIN) == 0) {
+    plugin_get_hosts(context, kd, locate_service_krb524);
+    kd->flags |= KD_PLUGIN;
+    if(get_next(kd, host))
+        return 0;
+    }
+
+    if((kd->flags & KD_CONFIG) == 0) {
+    config_get_hosts(context, kd, "krb524_server");
+    if(get_next(kd, host))
+        return 0;
+    kd->flags |= KD_CONFIG;
+    }
+
+    if (kd->flags & KD_CONFIG_EXISTS) {
+    _krb5_debug(context, 1,
+            "Configuration exists for realm %s, wont go to DNS",
+            kd->realm);
+    return KRB5_KDC_UNREACH;
+    }
+
+    if(context->srv_lookup) {
+    if((kd->flags & KD_SRV_UDP) == 0) {
+        srv_get_hosts(context, kd, "udp", "krb524");
+        kd->flags |= KD_SRV_UDP;
+        if(get_next(kd, host))
+        return 0;
+    }
+
+    if((kd->flags & KD_SRV_TCP) == 0) {
+        srv_get_hosts(context, kd, "tcp", "krb524");
+        kd->flags |= KD_SRV_TCP;
+        if(get_next(kd, host))
+        return 0;
+    }
+    }
+
+    /* no matches -> try kdc */
+
+    if (krbhst_empty(kd)) {
+    kd->flags = 0;
+    kd->port  = kd->def_port;
+    kd->get_next = kdc_get_next;
+    return (*kd->get_next)(context, kd, host);
+    }
+
+    _krb5_debug(context, 0, "No kpasswd entries found for realm %s", kd->realm);
+
+    return KRB5_KDC_UNREACH;
+}
+
 static struct krb5_krbhst_data*
 common_init(krb5_context context,
 	    const char *service,

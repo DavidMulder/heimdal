@@ -680,7 +680,7 @@ krb5_string_to_enctype(krb5_context context,
 		       krb5_enctype *etype)
 {
     int i;
-    for(i = 0; (unsigned) i < _krb5_num_etypes; i++) /* VAS Modification - explicit cast */
+    for(i = 0; (unsigned) i < _krb5_num_etypes; i++) { /* VAS Modification - explicit cast */
 	if(strcasecmp(_krb5_etypes[i]->name, string) == 0){
 	    *etype = _krb5_etypes[i]->type;
 	    return 0;

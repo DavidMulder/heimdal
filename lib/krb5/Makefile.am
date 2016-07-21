@@ -70,7 +70,7 @@ test_rcache_CFLAGS = -DMEMRCACHE_UNITTESTS=1
 
 libkrb5_la_LIBADD = \
 	$(top_builddir)/lib/asn1/libasn1.la \
-	$(LIB_ipc) \
+	$(top_builddir)/lib/ipc/libheim-ipcc.la \
 	$(top_builddir)/lib/wind/libwind.la \
 	$(top_builddir)/lib/base/libheimbase.la \
 	$(LIB_pkinit) \
@@ -86,7 +86,7 @@ libkrb5_la_LIBADD = \
 
 librfc3961_la_LIBADD = \
 	$(top_builddir)/lib/asn1/libasn1.la \
-	$(LIB_ipc) \
+	$(top_builddir)/lib/ipc/libheim-ipcc.la \
 	$(top_builddir)/lib/wind/libwind.la \
 	$(LIB_pkinit) \
 	$(use_sqlite) \

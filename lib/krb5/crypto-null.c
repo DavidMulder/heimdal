@@ -92,6 +92,7 @@ struct _krb5_encryption_type _krb5_enctype_null = {
     "any",
     /* End VAS modification */
     NULL,
+    NULL,
     1,
     1,
     0,

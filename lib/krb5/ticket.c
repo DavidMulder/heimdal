@@ -549,43 +549,22 @@ check_client_referral(krb5_context context,
 		      krb5_const_principal mapped,
 		      krb5_keyblock const * key)
 {
+    /* VAS Modification -- Get a little bit more debug about the mismatch */
     if (krb5_principal_compare(context, requested, mapped) == FALSE &&
 	!rep->enc_part.flags.enc_pa_rep)
     {
-	free_PA_ClientCanonicalized(&canon);
-	krb5_set_error_message(context, KRB5_PRINC_NOMATCH,
-			       N_("Requested name doesn't match"
-				  " in client referral", ""));
-	return KRB5_PRINC_NOMATCH;
-    }
-    if (!_krb5_principal_compare_PrincipalName(context,
-					       mapped,
-					       &canon.names.mapped_name))
-    {
-	free_PA_ClientCanonicalized(&canon);
-	krb5_set_error_message(context, KRB5_PRINC_NOMATCH,
-			       N_("Mapped name doesn't match"
-				  " in client referral", ""));
-	return KRB5_PRINC_NOMATCH;
-    }
-
-    return 0;
-
-noreferral:
-    /* VAS Modification -- Get a little bit more debug about the mismatch */
-    if (krb5_principal_compare(context, requested, mapped) == FALSE) {
         char* requested_str = NULL;
         char* returned_str = NULL;
         krb5_unparse_name( context, requested, &requested_str );
         krb5_unparse_name( context, mapped, &returned_str );
         krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED, "Not same client principal returned as requested. "
-                              " Requested %s, returned %s", requested_str ? requested_str : "Not Set", 
+                              " Requested %s, returned %s", requested_str ? requested_str : "Not Set",
                               returned_str ? returned_str : "Not Set" );
         if( returned_str )
             free( returned_str );
         if( requested_str )
             free( requested_str );
-	return KRB5KRB_AP_ERR_MODIFIED;
+        return KRB5KRB_AP_ERR_MODIFIED;
     }
     /*END VAS Modification */
     return 0;

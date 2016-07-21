@@ -216,6 +216,7 @@ static struct _krb5_encryption_type enctype_rc2_cbc_none = {
     ETYPE_RC2_CBC_NONE,
     "rc2-cbc-none",
     &rc2CBC_oid,
+    NULL,
     8,
     8,
     0,
