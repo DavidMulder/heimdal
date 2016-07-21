@@ -6,6 +6,7 @@ if DARWIN
 AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation -lobjc /System/Library/Frameworks/Security.framework/Security
 endif
 AM_CPPFLAGS += -I$(srcdir)/../lib/krb5 \
+	-I$(srcdir)/../lib \
 	$(INCLUDE_libintl) \
 	-DHEIMDAL_LOCALEDIR='"$(localedir)"'
 

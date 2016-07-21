@@ -2,7 +2,7 @@
 
 include $(top_srcdir)/Makefile.am.common
 
-libkadm5srv_la_CPPFLAGS = -I$(srcdir)/../krb5
+libkadm5srv_la_CPPFLAGS = -I$(srcdir)/../krb5 -I$(srcdir)/../
 
 if DARWIN
 AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation

@@ -3,6 +3,7 @@
 #define __krb5_protos_h__
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #if !defined(__GNUC__) && !defined(__attribute__)
 #define __attribute__(x)
