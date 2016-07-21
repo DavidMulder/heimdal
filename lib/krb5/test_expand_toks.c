@@ -80,7 +80,7 @@ main(int argc, char **argv)
     if (ret)
 	errx (1, "krb5_init_context failed: %d", ret);
 
-    ret = _krb5_expand_path_tokensv(context, "/tmp/%{foo}/%{bar}%{baz}/x", 0,
+    ret = _krb5_expand_path_tokensv(context, "/tmp/${foo}/${bar}${baz}/x", 0,
                                     &expanded,
                                     "foo", "abc",
                                     "bar", "dce",
@@ -94,7 +94,8 @@ main(int argc, char **argv)
 #else
 #define EXPANDED_SHOULD_BE "/tmp/abc/dcefgh/x"
 #endif
-
+printf("What we got:\n%s\n\n", expanded);
+printf("What we wanted:\n%s\n\n", EXPANDED_SHOULD_BE);
     if (strcmp(expanded, EXPANDED_SHOULD_BE))
         krb5_errx(context, 1, "Token expansion incorrect");
 
