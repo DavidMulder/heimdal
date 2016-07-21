@@ -128,6 +128,7 @@ AC_SUBST(LIB_hcrypto_so)
 AC_SUBST(LIB_hcrypto_appl)
 
 AM_CONDITIONAL(HAVE_HCRYPTO_W_OPENSSL, 0)
+AC_DEFINE([HCRYPTO_FALLBACK],1,[Set to 1 to allow fallback to hcrypto for unavailable algorithms])
 
 dnl ---
 
