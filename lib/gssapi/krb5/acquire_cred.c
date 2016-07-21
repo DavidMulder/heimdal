@@ -336,58 +336,6 @@ acquire_initiator_cred(OM_uint32 *minor_status,
             goto found;
         /* else we fall through and try using a keytab */
     }
-    if (def_princ == NULL) {
-	/* We have no existing credentials cache,
-	 * so attempt to get a TGT using a keytab.
-	 */
-	if (handle->principal == NULL) {
-	    kret = krb5_get_default_principal(context, &handle->principal);
-	    if (kret)
-		goto end;
-	}
-	kret = krb5_get_init_creds_opt_alloc(context, &opt);
-	if (kret)
-	    goto end;
-	if (credential_type != GSS_C_NO_OID &&
-	    gss_oid_equal(credential_type, GSS_C_CRED_PASSWORD)) {
-	    gss_buffer_t password = (gss_buffer_t)credential_data;
-
-	    /* XXX are we requiring password to be NUL terminated? */
-
-	    kret = krb5_get_init_creds_password(context, &cred,
-						handle->principal,
-						password->value,
-						NULL, NULL, 0, NULL, opt);
-	} else {
-	    kret = get_keytab(context, &keytab, handle->principal);
-	    if (kret) {
-		krb5_get_init_creds_opt_free(context, opt);
-		goto end;
-	    }
-	    kret = krb5_get_init_creds_keytab(context, &cred,
-					      handle->principal, keytab,
-					      0, NULL, opt);
-	}
-	krb5_get_init_creds_opt_free(context, opt);
-	if (kret)
-	    goto end;
-	kret = krb5_cc_new_unique(context, krb5_cc_type_memory,
-				  NULL, &ccache);
-	if (kret)
-	    goto end;
-	kret = krb5_cc_initialize(context, ccache, cred.client);
-	if (kret) {
-	    krb5_cc_destroy(context, ccache);
-	    goto end;
-	}
-	kret = krb5_cc_store_cred(context, ccache, &cred);
-	if (kret) {
-	    krb5_cc_destroy(context, ccache);
-	    goto end;
-	}
-	handle->lifetime = cred.times.endtime;
-	handle->cred_flags |= GSS_CF_DESTROY_CRED_ON_RELEASE;
-    } else {
 
 try_keytab:
     if (handle->principal == NULL) {
@@ -396,7 +344,7 @@ try_keytab:
         if (kret)
             goto end;
     }
-    kret = get_keytab(context, &keytab);
+    kret = get_keytab(context, &keytab, handle->principal);
     if (kret)
         goto end;
 
@@ -484,12 +432,7 @@ acquire_acceptor_cred(OM_uint32 * minor_status,
 
     ret = GSS_S_FAILURE;
 
-    if (credential_type != GSS_C_NO_OID) {
-	kret = EINVAL;
-	goto end;
-    }
-
-    kret = get_keytab(context, &handle->keytab);
+    kret = get_keytab(context, &handle->keytab, handle->principal);
     if (kret)
 	goto end;
 
@@ -526,8 +469,8 @@ acquire_acceptor_cred(OM_uint32 * minor_status,
      * We don't know how long this will last, but setting it to indefinite seems
      * to work better than leaving the lifetime at 0
      **/
-    if( handle->lifetime == 0 )
-        handle->lifetime = GSS_C_INDEFINITE;
+    if( handle->endtime == 0 )
+        handle->endtime = GSS_C_INDEFINITE;
     /** End addition */
 
 end:

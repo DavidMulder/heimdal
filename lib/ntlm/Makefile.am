@@ -2,6 +2,8 @@
 
 include $(top_srcdir)/Makefile.am.common
 
+AM_CPPFLAGS += -I$(srcdir)/../
+
 lib_LTLIBRARIES = libheimntlm.la
 
 dist_include_HEADERS = heimntlm.h $(srcdir)/heimntlm-protos.h

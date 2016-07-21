@@ -15,7 +15,8 @@ AM_CPPFLAGS += \
 	-I$(srcdir)/ntlm \
 	-I$(srcdir)/krb5 \
 	-I$(srcdir)/spnego \
-	$(INCLUDE_libintl)
+	$(INCLUDE_libintl) \
+	-I$(srcdir)/../
 
 lib_LTLIBRARIES = libgssapi.la
 
