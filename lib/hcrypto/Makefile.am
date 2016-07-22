@@ -338,7 +338,6 @@ EXTRA_DIST = \
 	DESperate.txt \
 	passwd_dialog.rc \
 	libhcrypto-exports.def \
-	dllmain.c \
 	ec.h \
 	ecdh.h \
 	ecdsa.h \
