@@ -165,9 +165,6 @@ _der_gmtime(time_t t, struct tm *tm)
 
 struct tm* _heim_gmtime_r( const time_t *t, struct tm* tm )
 {
-  static const unsigned ndays[2][12] = {
-     {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31},
-     {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}};
   time_t days   = 0;
   time_t months = 0;
   time_t years  = 0;

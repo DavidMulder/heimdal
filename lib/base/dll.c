@@ -320,5 +320,4 @@ heim_w32_getspecific(HEIM_PRIV_thread_key key)
 }
 
 #else
-static char dummy;
 #endif /* HEIM_WIN32_TLS */
