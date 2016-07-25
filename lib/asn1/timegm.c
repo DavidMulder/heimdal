@@ -169,25 +169,25 @@ struct tm* _heim_gmtime_r( const time_t *t, struct tm* tm )
   time_t months = 0;
   time_t years  = 0;
   int    isleap = 0;
-  time_t loc_t = 0;
+  time_t ngloc_t = 0;
   int days_in_year = 0;
   int days_in_month = 0;
  
   if( !t )
       return( NULL );
   else
-      loc_t = *t;
+      ngloc_t = *t;
  
   /* Zero out the tm structure */
   memset( tm, 0, sizeof(*tm) );
 
   /* seconds, minuts, hours */
-  tm->tm_sec  = loc_t % SECSPERMINUTE;
-  tm->tm_min  = (loc_t % SECSPERHOUR) / SECSPERMINUTE;
-  tm->tm_hour = (loc_t % SECSPERDAY) / SECSPERHOUR;
+  tm->tm_sec  = ngloc_t % SECSPERMINUTE;
+  tm->tm_min  = (ngloc_t % SECSPERHOUR) / SECSPERMINUTE;
+  tm->tm_hour = (ngloc_t % SECSPERDAY) / SECSPERHOUR;
 
   /* days */
-  days = loc_t / SECSPERDAY;
+  days = ngloc_t / SECSPERDAY;
   tm->tm_wday = ((4 + (days % 7)) % 7);
 
   /* years */
