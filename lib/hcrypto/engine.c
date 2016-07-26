@@ -206,10 +206,10 @@ static unsigned int num_engines;
 static int
 add_engine(ENGINE *engine)
 {
-    ENGINE **d, *dup;
+    ENGINE **d, *ngdup;
 
-    dup = ENGINE_by_id(engine->id);
-    if (dup)
+    ngdup = ENGINE_by_id(engine->id);
+    if (ngdup)
 	return 0;
 
     d = realloc(engines, (num_engines + 1) * sizeof(*engines));
