@@ -33,6 +33,12 @@
 
 #include "der_locl.h"
 
+#ifdef __hpux
+#ifndef SIZE_MAX
+#define SIZE_MAX ((size_t)-1)
+#endif
+#endif
+
 /*
  * All decoding functions take a pointer `p' to first position in
  * which to read, from the left, `len' which means the maximum number
