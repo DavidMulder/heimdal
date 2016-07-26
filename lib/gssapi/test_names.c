@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -43,8 +45,15 @@
 #include <gssapi.h>
 #include <gssapi_krb5.h>
 #include <gssapi_spnego.h>
+#include <gssapi_ntlm.h>
+#include <gssapi_spi.h>
 #include <err.h>
 #include <getarg.h>
+
+static void
+gss_err(int exitval, int status, const char *fmt, ...)
+    __attribute__((format (printf, 3, 4)));
+
 
 static void
 gss_print_errors (int min_stat)
@@ -81,10 +90,12 @@ gss_err(int exitval, int status, const char *fmt, ...)
     exit (exitval);
 }
 
+static int verbose_flag = 0;
 static int version_flag = 0;
 static int help_flag	= 0;
 
 static struct getargs args[] = {
+    {"verbose",	0,	arg_counter,	&verbose_flag, "verbose output", NULL },
     {"version",	0,	arg_flag,	&version_flag, "print version", NULL },
     {"help",	0,	arg_flag,	&help_flag,  NULL, NULL }
 };
@@ -97,33 +108,46 @@ usage (int ret)
     exit (ret);
 }
 
-
-int
-main(int argc, char **argv)
+static void
+test_import_export(void)
 {
     gss_buffer_desc name_buffer;
     OM_uint32 maj_stat, min_stat;
     gss_name_t name, MNname, MNname2;
-    int optidx = 0;
-    char *str;
     int len, equal;
+    char *str;
 
-    setprogname(argv[0]);
-    if(getarg(args, sizeof(args) / sizeof(args[0]), argc, argv, &optidx))
-	usage(1);
+    /*
+     * test import/export
+     */
 
-    if (help_flag)
-	usage (0);
+    len = asprintf(&str, "ftp@freeze-arrow.mit.edu");
+    if (len == -1)
+	errx(1, "asprintf");
 
-    if(version_flag){
-	print_version(NULL);
-	exit(0);
-    }
+    name_buffer.value = str;
+    name_buffer.length = len;
 
-    argc -= optidx;
-    argv += optidx;
+    maj_stat = gss_import_name(&min_stat, &name_buffer,
+			       GSS_C_NT_HOSTBASED_SERVICE,
+			       &name);
+    if (maj_stat != GSS_S_COMPLETE)
+	gss_err(1, min_stat, "import name error");
+    free(str);
 
-    gsskrb5_set_default_realm("MIT.EDU");
+    maj_stat = gss_canonicalize_name (&min_stat,
+				      name,
+				      GSS_KRB5_MECHANISM,
+				      &MNname);
+    if (maj_stat != GSS_S_COMPLETE)
+	gss_err(1, min_stat, "canonicalize name error");
+
+    maj_stat = gss_export_name(&min_stat,
+			       MNname,
+			       &name_buffer);
+    if (maj_stat != GSS_S_COMPLETE)
+	gss_err(1, min_stat, "export name error (KRB5)");
+
 
     /*
      * test import/export
@@ -233,6 +257,69 @@ main(int argc, char **argv)
     gss_release_name(&min_stat, &MNname);
     gss_release_buffer(&min_stat, &name_buffer);
 #endif
+}
+
+struct {
+    gss_OID type;
+    const char *name;
+    OM_uint32 e;
+} names[] = {
+    { GSS_C_NT_USER_NAME, "DOMAIN\\user", GSS_S_COMPLETE },
+    { GSS_C_NT_USER_NAME, "user", GSS_S_COMPLETE },
+    { GSS_C_NT_USER_NAME, "DOMAIN@user", GSS_S_COMPLETE },
+    { GSS_C_NT_NTLM, "user", GSS_S_FAILURE },
+    { GSS_C_NT_NTLM, "DOMAIN\\user", GSS_S_COMPLETE },
+    { GSS_C_NT_HOSTBASED_SERVICE, "service@host.domain", GSS_S_COMPLETE },
+    { GSS_C_NT_HOSTBASED_SERVICE, "host.domain", GSS_S_BAD_NAME }
+};
+
+
+static void
+test_names(void)
+{
+    gss_buffer_desc buffer;
+    OM_uint32 maj_stat, min_stat;
+    gss_name_t name;
+    unsigned i;
+
+    for (i = 0; i < sizeof(names)/sizeof(names[0]); i++) {
+	buffer.value = rk_UNCONST(names[i].name);
+	buffer.length = strlen(names[i].name);
+
+	if (verbose_flag)
+	    printf("running name test: %s\n", names[i].name);
+
+	maj_stat = gss_import_name(&min_stat, &buffer, names[i].type, &name);
+	if (maj_stat != names[i].e)
+	    errx(1, "gss_import_name unexpected: %u:%s", i, names[i].name);
+
+	gss_release_name(&min_stat, &name);
+    }
+}
+
+
+int
+main(int argc, char **argv)
+{
+    int optidx = 0;
+
+    setprogname(argv[0]);
+    if(getarg(args, sizeof(args) / sizeof(args[0]), argc, argv, &optidx))
+	usage(1);
+
+    if (help_flag)
+	usage (0);
+
+    if(version_flag){
+	print_version(NULL);
+	exit(0);
+    }
+
+    gsskrb5_set_default_realm("MIT.EDU");
+
+    test_names();
+
+    test_import_export();
 
     return 0;
 }

@@ -66,8 +66,10 @@ dist_libkadm5clnt_la_SOURCES =			\
 	kadm5_locl.h				\
 	marshall.c				\
 	modify_c.c				\
+	mit.c					\
 	private.h				\
 	privs_c.c				\
+	oncrpc.c				\
 	randkey_c.c				\
 	rename_c.c				\
 	send_recv.c				\
@@ -102,6 +104,7 @@ dist_libkadm5srv_la_SOURCES =			\
 	password_quality.c			\
 	private.h				\
 	privs_s.c				\
+	oncrpc.c				\
 	randkey_s.c				\
 	rename_s.c				\
 	server_glue.c				\

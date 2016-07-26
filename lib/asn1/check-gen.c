@@ -33,9 +33,7 @@
  * SUCH DAMAGE.
  */
 
-#ifdef HAVE_CONFIG_H
 #include <config.h>
-#endif
 #include <stdio.h>
 #include <string.h>
 #include <err.h>
@@ -48,10 +46,9 @@
 #include <heim_asn1.h>
 #include <rfc2459_asn1.h>
 #include <test_asn1.h>
+#include <cms_asn1.h>
 
 #include "check-common.h"
-
-RCSID("$Id$");
 
 static char *lha_principal[] = { "lha" };
 static char *lharoot_princ[] = { "lha", "root" };
@@ -79,7 +76,7 @@ cmp_principal (void *a, void *b)
 {
     Principal *pa = a;
     Principal *pb = b;
-    int i;
+    unsigned i;
 
     COMPARE_STRING(pa,pb,realm);
     COMPARE_INTEGER(pa,pb,name.name_type);
@@ -148,7 +145,7 @@ cmp_authenticator (void *a, void *b)
 {
     Authenticator *aa = a;
     Authenticator *ab = b;
-    int i;
+    unsigned i;
 
     COMPARE_INTEGER(aa,ab,authenticator_vno);
     COMPARE_STRING(aa,ab,crealm);
@@ -218,7 +215,7 @@ cmp_KRB_ERROR (void *a, void *b)
 {
     KRB_ERROR *aa = a;
     KRB_ERROR *ab = b;
-    int i;
+    unsigned i;
 
     COMPARE_INTEGER(aa,ab,pvno);
     COMPARE_INTEGER(aa,ab,msg_type);
@@ -668,6 +665,91 @@ test_cert(void)
     return 0;
 }
 
+struct {
+    const char *sd;
+    size_t len;
+} signeddata[] = {
+    {
+	"\x30\x80\x02\x01\x03\x31\x0b\x30\x09\x06\x05\x2b\x0e\x03\x02\x1a"
+	"\x05\x00\x30\x80\x06\x07\x2b\x06\x01\x05\x02\x03\x03\xa0\x80\x24"
+	"\x80\x04\x50\x30\x4e\xa0\x2b\x30\x29\xa0\x03\x02\x01\x12\xa1\x22"
+	"\x04\x20\x78\xf4\x86\x31\xc6\xc2\xc9\xcb\xef\x0c\xd7\x3a\x2a\xcd"
+	"\x8c\x13\x34\x83\xb1\x5c\xa8\xbe\xbf\x2f\xea\xd2\xbb\xd8\x8c\x18"
+	"\x47\x01\xa1\x1f\x30\x1d\xa0\x03\x02\x01\x0c\xa1\x16\x04\x14\xa6"
+	"\x2c\x52\xb2\x80\x98\x30\x40\xbc\x5f\xb0\x77\x2d\x8a\xd7\xa1\xda"
+	"\x3c\xc5\x62\x00\x00\x00\x00\x00\x00\xa0\x82\x02\x09\x30\x82\x02"
+	"\x05\x30\x82\x01\x6e\xa0\x03\x02\x01\x02\x02\x04\x49\x75\x57\xbf"
+	"\x30\x0b\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x01\x05\x30\x3b\x31"
+	"\x1f\x30\x1d\x06\x03\x55\x04\x03\x0c\x16\x63\x6f\x6d\x2e\x61\x70"
+	"\x70\x6c\x65\x2e\x6b\x65\x72\x62\x65\x72\x6f\x73\x2e\x6b\x64\x63"
+	"\x31\x18\x30\x16\x06\x03\x55\x04\x0a\x0c\x0f\x53\x79\x73\x74\x65"
+	"\x6d\x20\x49\x64\x65\x6e\x74\x69\x74\x79\x30\x1e\x17\x0d\x30\x39"
+	"\x31\x32\x30\x34\x30\x30\x32\x30\x32\x34\x5a\x17\x0d\x32\x39\x31"
+	"\x31\x32\x39\x30\x30\x32\x30\x32\x34\x5a\x30\x3b\x31\x1f\x30\x1d"
+	"\x06\x03\x55\x04\x03\x0c\x16\x63\x6f\x6d\x2e\x61\x70\x70\x6c\x65"
+	"\x2e\x6b\x65\x72\x62\x65\x72\x6f\x73\x2e\x6b\x64\x63\x31\x18\x30"
+	"\x16\x06\x03\x55\x04\x0a\x0c\x0f\x53\x79\x73\x74\x65\x6d\x20\x49"
+	"\x64\x65\x6e\x74\x69\x74\x79\x30\x81\x9f\x30\x0d\x06\x09\x2a\x86"
+	"\x48\x86\xf7\x0d\x01\x01\x01\x05\x00\x03\x81\x8d\x00\x30\x81\x89"
+	"\x02\x81\x81\x00\xb2\xc5\x4b\x34\xe3\x93\x99\xbb\xaa\xd1\x70\x62"
+	"\x6c\x9c\xcc\xa6\xbc\x47\xc3\x23\xff\x15\xb9\x11\x27\x0a\xf8\x55"
+	"\x4c\xb2\x43\x34\x75\xad\x55\xbb\xb9\x8a\xd0\x25\x64\xa4\x8c\x82"
+	"\x74\x5d\x89\x52\xe2\x76\x75\x08\x67\xb5\x9c\x9c\x69\x86\x0c\x6d"
+	"\x79\xf7\xa0\xbe\x42\x8f\x90\x46\x0c\x18\xf4\x7a\x56\x17\xa4\x65"
+	"\x00\x3a\x5e\x3e\xbf\xbc\xf5\xe2\x2c\x26\x03\x52\xdd\xd4\x85\x3f"
+	"\x03\xd7\x0c\x45\x7f\xff\xdd\x1e\x70\x6c\x9f\xb0\x8c\xd0\x33\xad"
+	"\x92\x54\x17\x9d\x88\x89\x1a\xee\xef\xf7\x96\x3e\x68\xc3\xd1\x60"
+	"\x47\x86\x80\x5d\x02\x03\x01\x00\x01\xa3\x18\x30\x16\x30\x14\x06"
+	"\x03\x55\x1d\x25\x04\x0d\x30\x0b\x06\x09\x2a\x86\x48\x86\xf7\x63"
+	"\x64\x04\x04\x30\x0d\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x01\x05"
+	"\x05\x00\x03\x81\x81\x00\x9b\xbb\xaa\x63\x66\xd8\x70\x84\x3e\xf6"
+	"\xa1\x3b\xf3\xe6\xd7\x3d\xfc\x4f\xc9\x45\xaa\x31\x43\x8d\xb5\x72"
+	"\xe4\x34\x95\x7b\x6e\x5f\xe5\xc8\x5e\xaf\x12\x08\x6d\xd7\x25\x76"
+	"\x40\xd5\xdc\x83\x7f\x2f\x74\xd1\x63\xc0\x7c\x26\x4d\x53\x10\xe7"
+	"\xfa\xcc\xf2\x60\x41\x63\xdf\x56\xd6\xd9\xc0\xb4\xd0\x73\x99\x54"
+	"\x40\xad\x90\x79\x2d\xd2\x5e\xcb\x13\x22\x2b\xd0\x76\xef\x8a\x48"
+	"\xfd\xb2\x6e\xca\x04\x4e\x91\x3f\xb4\x63\xad\x22\x3a\xf7\x20\x9c"
+	"\x4c\x0e\x47\x78\xe5\x2a\x85\x0e\x90\x7a\xce\x46\xe6\x15\x02\xb0"
+	"\x83\xe7\xac\xfa\x92\xf8\x31\x81\xe8\x30\x81\xe5\x02\x01\x01\x30"
+	"\x43\x30\x3b\x31\x1f\x30\x1d\x06\x03\x55\x04\x03\x0c\x16\x63\x6f"
+	"\x6d\x2e\x61\x70\x70\x6c\x65\x2e\x6b\x65\x72\x62\x65\x72\x6f\x73"
+	"\x2e\x6b\x64\x63\x31\x18\x30\x16\x06\x03\x55\x04\x0a\x0c\x0f\x53"
+	"\x79\x73\x74\x65\x6d\x20\x49\x64\x65\x6e\x74\x69\x74\x79\x02\x04"
+	"\x49\x75\x57\xbf\x30\x09\x06\x05\x2b\x0e\x03\x02\x1a\x05\x00\x30"
+	"\x0d\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x01\x01\x05\x00\x04\x81"
+	"\x80\x50\x2c\x69\xe1\xd2\xc4\xd1\xcc\xdc\xe0\xe9\x8a\x6b\x6a\x97"
+	"\x1b\xb4\xe0\xa8\x20\xbe\x09\x6d\xe1\x55\x5f\x07\x70\x94\x2e\x14"
+	"\xed\x4e\xb1\x69\x75\x40\xbb\x99\x87\xed\x23\x50\x27\x5f\xaa\xc4"
+	"\x84\x60\x06\xfe\x45\xfd\x7e\x1b\x18\xe0\x0b\x77\x35\x2a\xb2\xf2"
+	"\xe0\x88\x31\xad\x82\x31\x4a\xbc\x6d\x71\x62\xe6\x4d\x33\xb4\x09"
+	"\x6e\x3f\x14\x12\xf2\x89\x29\x31\x84\x60\x2b\xa8\x2d\xe6\xca\x2f"
+	"\x03\x3d\xd4\x69\x89\xb3\x98\xfd\xac\x63\x14\xaf\x6a\x52\x2a\xac"
+	"\xe3\x8e\xfa\x21\x41\x8f\xcc\x04\x2d\x52\xee\x49\x54\x0d\x58\x51"
+	"\x77\x00\x00",
+	883
+    }
+};
+
+static int
+test_SignedData(void)
+{
+    SignedData sd;
+    size_t size, i;
+    int ret;
+
+    for (i = 0; i < sizeof(signeddata) / sizeof(signeddata[0]); i++) {
+
+	ret = decode_SignedData((unsigned char *)signeddata[i].sd,
+				signeddata[i].len, &sd, &size);
+	if (ret)
+	    return ret;
+
+	free_SignedData(&sd);
+    }
+
+    return 0;
+}
+
 
 static int
 cmp_TESTLargeTag (void *a, void *b)
@@ -731,8 +813,9 @@ check_tag_length(void)
     TESTuint32 values[] = {0, 127, 128, 256, 512,
 			 0, 127, 128, 256, 512 };
     TESTuint32 u;
-    int i, ret, failed = 0;
+    int ret, failed = 0;
     void *buf;
+    size_t i;
 
     for (i = 0; i < sizeof(td)/sizeof(td[0]); i++) {
 	struct map_page *page;
@@ -742,20 +825,20 @@ check_tag_length(void)
 	ret = decode_TESTuint32(buf, td[i].len, &u, &sz);
 	if (ret) {
 	    if (td[i].ok) {
-		printf("failed with tag len test %d\n", i);
+		printf("failed with tag len test %d\n", (int)i);
 		failed = 1;
 	    }
 	} else {
 	    if (td[i].ok == 0) {
-		printf("failed with success for tag len test %d\n", i);
+		printf("failed with success for tag len test %d\n", (int)i);
 		failed = 1;
 	    }
 	    if (td[i].expected_len != sz) {
-		printf("wrong expected size for tag test %d\n", i);
+		printf("wrong expected size for tag test %d\n", (int)i);
 		failed = 1;
 	    }
 	    if (values[i] != u) {
-		printf("wrong value for tag test %d\n", i);
+		printf("wrong value for tag test %d\n", (int)i);
 		failed = 1;
 	    }
 	}
@@ -843,9 +926,9 @@ static int
 test_implicit (void)
 {
     struct test_case tests[] = {
-	{ NULL,  16,
-	  "\x30\x0e\x80\x01\x00\xa1\x06\xbf"
-	  "\x7f\x03\x02\x01\x02\x82\x01\x03",
+	{ NULL,  18,
+	  "\x30\x10\x80\x01\x00\xa1\x06\xbf"
+	  "\x7f\x03\x02\x01\x02\xa2\x03\x84\x01\x03",
 	  "implicit 1" }
     };
 
@@ -1129,6 +1212,30 @@ check_fail_choice(void)
 }
 
 static int
+check_fail_Ticket(void)
+{
+    char buf[100];
+    size_t i;
+    int ret;
+    struct test_case test;
+    Ticket ticket;
+
+    for (i = 0; i < sizeof(buf); i++) {
+	memset(buf, 0, sizeof(buf));
+	memset(&ticket, 0, sizeof(ticket));
+	test.val = &ticket;
+	test.byte_len = i;
+	test.bytes = buf;
+	test.name = "zero life";
+	ret = generic_decode_fail(&test, 1, sizeof(Ticket),
+				  (generic_decode)decode_Ticket);
+	if (ret)
+	    return ret;
+    }
+    return 0;
+}
+
+static int
 check_seq(void)
 {
     TESTSeqOf seq;
@@ -1261,7 +1368,7 @@ check_TESTMechTypeList(void)
                             { 7, oid2 },
                             { 10, oid3 },
                             { 10, oid4 }};
-    size_t size, len;
+    size_t size = 0, len;
     void *ptr;
     int ret;
 
@@ -1273,6 +1380,48 @@ check_TESTMechTypeList(void)
 	errx(1, "TESTMechTypeList: %d", ret);
     if (len != size)
 	abort();
+    return 0;
+}
+
+static unsigned char token[] = {
+  0x30, 0x81, 0xb1, 0xa0, 0x03, 0x0a, 0x05, 0x00, 0xa2, 0x81, 0xa9, 0x04,
+  0x81, 0xa6, 0x4e, 0x54, 0x4c, 0x4d, 0x53, 0x53, 0x50, 0x00, 0x03, 0x00,
+  0x00, 0x00, 0x18, 0x00, 0x18, 0x00, 0x76, 0x00, 0x00, 0x00, 0x18, 0x00,
+  0x18, 0x00, 0x8e, 0x00, 0x00, 0x00, 0x14, 0x00, 0x14, 0x00, 0x48, 0x00,
+  0x00, 0x00, 0x0e, 0x00, 0x0e, 0x00, 0x5c, 0x00, 0x00, 0x00, 0x0c, 0x00,
+  0x0c, 0x00, 0x6a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x01, 0x02, 0x00, 0x00, 0x05, 0x01, 0x28, 0x0a, 0x00, 0x00,
+  0x00, 0x0f, 0x54, 0x00, 0x45, 0x00, 0x53, 0x00, 0x54, 0x00, 0x44, 0x00,
+  0x4f, 0x00, 0x4d, 0x00, 0x41, 0x00, 0x49, 0x00, 0x4e, 0x00, 0x73, 0x00,
+  0x6d, 0x00, 0x62, 0x00, 0x74, 0x00, 0x65, 0x00, 0x73, 0x00, 0x74, 0x00,
+  0x54, 0x00, 0x45, 0x00, 0x53, 0x00, 0x54, 0x00, 0x50, 0x00, 0x43, 0x00,
+  0x73, 0x8c, 0x0f, 0xb0, 0xd4, 0xc1, 0xab, 0x7f, 0xe6, 0xeb, 0xb9, 0xc4,
+  0x04, 0xfb, 0x3d, 0xda, 0x5d, 0x76, 0x55, 0x5f, 0x3c, 0x75, 0xcc, 0xf9,
+  0xd5, 0x4a, 0x55, 0xc7, 0x0f, 0x2e, 0x03, 0xaf, 0xcf, 0x66, 0x1e, 0xc0,
+  0x52, 0x70, 0x89, 0xaa, 0x99, 0xa2, 0x9b, 0xa5, 0x91, 0x26, 0x61, 0x94
+};
+static size_t token_len = 180;
+
+static int
+check_negToken(void)
+{
+    TESTNegotiationToken tl;
+    TESTNegTokenResp tr;
+    size_t size;
+    int ret;
+
+    ret = decode_TESTNegotiationToken(token, token_len, &tl, &size);
+    if (ret)
+	;
+    else if (token_len != size)
+	errx(1, "token contains extra data");
+
+    ret = decode_TESTNegTokenResp(token, token_len, &tr, &size);
+    if (ret)
+	;
+    else if (token_len != size)
+	errx(1, "token contains extra data");
+
     return 0;
 }
 
@@ -1301,11 +1450,15 @@ main(int argc, char **argv)
     ret += check_fail_largetag();
     ret += check_fail_sequence();
     ret += check_fail_choice();
+    ret += check_fail_Ticket();
 
     ret += check_seq();
     ret += check_seq_of_size();
+    ret += test_SignedData();
 
     ret += check_TESTMechTypeList();
+    ret += check_negToken();
+
 
     return ret;
 }

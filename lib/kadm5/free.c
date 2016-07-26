@@ -76,6 +76,7 @@ kadm5_free_principal_ent(void *server_handle,
     }
     if (princ->key_data != NULL)
 	free (princ->key_data);
+    memset(princ, 0, sizeof(*princ));
 }
 
 void

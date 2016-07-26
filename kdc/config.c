@@ -37,6 +37,9 @@
 #include <getarg.h>
 #include <parse_bytes.h>
 
+static void usage(int ret) __attribute__((noreturn));
+
+
 struct dbinfo {
     char *realm;
     char *dbname;
@@ -60,6 +63,9 @@ static struct getarg_strings addresses_str;	/* addresses to listen on */
 char *runas_string;
 char *chroot_string;
 
+int listen_on_ipc = 1;
+int listen_on_network = 1;
+
 
 static struct getargs args[] = {
     {
@@ -74,11 +80,18 @@ static struct getargs args[] = {
 	"max-request",	0,	arg_string, &max_request_str,
 	"max size for a kdc-request", "size"
     },
-    { "enable-http", 'H', arg_flag, &enable_http, "turn on HTTP support",
-   	 NULL },
-    {	"ports",	'P', 	arg_string, rk_UNCONST(&port_str),
+    { "enable-http", 'H', arg_flag, &enable_http, "turn on HTTP support" },
+    { "listen-on-ipc", 0, arg_flag, &listen_on_ipc, "listen on local IPC requests" },
+    { "listen-on-network", 0, arg_flag, &listen_on_network, "listen on network requests" },
+
+    {	"ports",	'P', 	arg_string, &port_str,
 	"ports to listen to", "portspec"
     },
+#ifdef __APPLE__
+    {	"sandbox",	0, 	arg_negative_flag, &sandbox_flag,
+	"use sandbox or not"
+    },
+#endif /* __APPLE__ */
 #ifdef SUPPORT_DETACH
 #if DETACH_IS_DEFAULT
     {
@@ -163,7 +176,6 @@ configure(krb5_context context, int argc, char **argv)
     }
 
     argc -= optidx;
-    argv += optidx;
 
     if (argc != 0)
 	usage(1);
@@ -268,6 +280,33 @@ configure(krb5_context context, int argc, char **argv)
 
     if (port_str == NULL)
 	port_str = "+";
+
+#ifdef __APPLE__
+    if (config->lkdc_realm == NULL) {
+	unsigned int n;
+
+	for (n = 0; n < config->num_db; n++) {
+	    char **realms = NULL, **r;
+
+	    if (config->db[n]->hdb_get_realms == NULL)
+		continue;
+
+	    ret = (config->db[n]->hdb_get_realms)(context, config->db[n], &realms);
+	    if (ret == 0 && realms) {
+		for (r = realms; *r; r++) {
+		    if (krb5_realm_is_lkdc(*r)) {
+			config->lkdc_realm = strdup(*r);
+			break;
+		    }
+		}
+		krb5_free_host_realm(context, realms);
+	    }
+	    if (config->lkdc_realm)
+		break;
+	}
+    }
+#endif
+
 
     if(disable_des == -1)
 	disable_des = krb5_config_get_bool_default(context, NULL,

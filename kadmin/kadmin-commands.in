@@ -60,6 +60,11 @@ command = {
 		help = "use a random password (and print the password to stdout)"
 	}
 	option = {
+		long = "print-password"
+		type = "-flag"
+		help = "dont print the random password to stdout"
+	}
+	option = {
 		long = "master-key-fd"
 		type = "integer"
 		argument = "fd"
@@ -76,12 +81,34 @@ command = {
 		type = "flag"
 		help = "decrypt keys"
 	}
+	option = {
+		long = "format"
+		type = "string"
+		help = "dump format, default heimdal"
+	}
+	option = {
+		long = "mit-dump-file"
+		type = "string"
+		help = "mit dump file"
+	}
 	argument = "[dump-file]"
 	min_args = "0"
 	max_args = "1"
-	help = "Dumps the database in a human readable format to the specified file, \nor the standard out. Local (-l) mode only."
+	help = "Dumps the database or a dump file in a human readable format to the specified file, \nor the standard out. Local (-l) mode only."
 }
-
+command = {
+	name = "od-dump"
+	option = {
+		long = "decrypt"
+		short = "d"
+		type = "flag"
+		help = "decrypt keys"
+	}
+	argument = "[dump-file]"
+	min_args = "0"
+	max_args = "1"
+	help = "Command to be removed."
+}
 command = {
 	name = "init"
 	option = {
@@ -105,16 +132,26 @@ command = {
 }
 command = {
 	name = "load"
+	option = {
+		long = "fix-salts"
+		type = "flag"
+		help = "Fixup salts for principals from a different realm name."
+	}
 	argument = "file"
 	min_args = "1"
-	max_args = "1"
+	max_args = "2"
 	help = "Loads a previously dumped file. Local (-l) mode only."
 }
 command = {
 	name = "merge"
+	option = {
+		long = "fix-salts"
+		type = "flag"
+		help = "Fixup salts for principals from a different realm name."
+	}
 	argument = "file"
 	min_args = "1"
-	max_args = "1"
+	max_args = "2"
 	help = "Merges the contents of a dump file into the database. Local (-l) mode only."
 }
 command = {
@@ -192,6 +229,11 @@ command = {
 		long = "use-defaults"
 		type = "flag"
 		help = "use default values"
+	}
+	option = {
+		long = "verbose"
+		type = "flag"
+		help = "verbose output"
 	}
 	option = {
 		long = "policy"
@@ -454,6 +496,11 @@ command = {
 command = {
 	name = "check"
 	function = "check"
+	option = {
+		long = "ds-local"
+		type = "flag"
+		help = "Only perform local checks."
+	}
 	argument = "[realm]"
 	min_args = "0"
 	max_args = "1"

@@ -35,9 +35,6 @@
 
 #include "krb5_locl.h"
 
-#undef __attribute__
-#define __attribute__(x)
-
 /**
  * @page krb5_init_creds_intro The initial credential handing functions
  * @section section_krb5_init_creds Initial credential
@@ -100,13 +97,13 @@ krb5_get_init_creds_opt_free(krb5_context context,
     free(opt);
 }
 
-static int
+static krb5_deltat
 get_config_time (krb5_context context,
 		 const char *realm,
 		 const char *name,
 		 int def)
 {
-    int ret;
+    krb5_deltat ret;
 
     ret = krb5_config_get_time (context, NULL,
 				"realms",
@@ -364,9 +361,11 @@ krb5_get_init_creds_opt_set_win2k(krb5_context context,
     if (req) {
 	opt->opt_private->flags |= KRB5_INIT_CREDS_NO_C_CANON_CHECK;
 	opt->opt_private->flags |= KRB5_INIT_CREDS_NO_C_NO_EKU_CHECK;
+	opt->opt_private->flags |= KRB5_INIT_CREDS_PKINIT_NO_KRBTGT_OTHERNAME_CHECK;
     } else {
 	opt->opt_private->flags &= ~KRB5_INIT_CREDS_NO_C_CANON_CHECK;
 	opt->opt_private->flags &= ~KRB5_INIT_CREDS_NO_C_NO_EKU_CHECK;
+	opt->opt_private->flags &= ~KRB5_INIT_CREDS_PKINIT_NO_KRBTGT_OTHERNAME_CHECK;
     }
     return 0;
 }
@@ -388,7 +387,6 @@ krb5_get_init_creds_opt_set_process_last_req(krb5_context context,
 
     return 0;
 }
-
 
 #ifndef HEIMDAL_SMALLER
 

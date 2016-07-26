@@ -34,6 +34,10 @@
 #include <getarg.h>
 #include <err.h>
 
+#ifdef __APPLE_PRIVATE__
+#include <dispatch/dispatch.h>
+#endif
+
 static int debug_flag	= 0;
 static int version_flag = 0;
 static int help_flag	= 0;
@@ -57,7 +61,7 @@ test_default_name(krb5_context context)
     p1 = estrdup(p);
 
     ret = krb5_cc_set_default_name(context, NULL);
-    if (p == NULL)
+    if (ret)
 	krb5_errx (context, 1, "krb5_cc_set_default_name failed");
 
     p = krb5_cc_default_name(context);
@@ -69,7 +73,7 @@ test_default_name(krb5_context context)
 	krb5_errx (context, 1, "krb5_cc_default_name no longer same");
 
     ret = krb5_cc_set_default_name(context, test_cc_name);
-    if (p == NULL)
+    if (ret)
 	krb5_errx (context, 1, "krb5_cc_set_default_name 1 failed");
 
     p = krb5_cc_default_name(context);
@@ -291,6 +295,28 @@ struct {
     int fail;
     char *res;
 } cc_names[] = {
+#ifdef KRB5_USE_PATH_TOKENS
+#ifdef _WIN32
+    { "%{APPDATA}", 0 },
+    { "%{COMMON_APPDATA}", 0},
+    { "%{LOCAL_APPDATA}", 0},
+    { "%{SYSTEM}", 0},
+    { "%{WINDOWS}", 0},
+    { "%{USERCONFIG}", 0},
+    { "%{COMMONCONFIG}", 0},
+#else
+    { "%{LIBDIR}", 0},
+    { "%{BINDIR}", 0},
+    { "%{LIBEXEC}", 0},
+    { "%{SBINDIR}", 0},
+#endif
+#if __APPLE__
+    { "%{ApplicationResources}", 1}, /* only for .app's */
+#endif
+    { "%{USERID}", 0},
+    { "%{uid}", 0},
+    { "%{TEMP}", 0},
+#endif
     { "foo", 0, "foo" },
     { "foo%}", 0, "foo%}" },
     { "%{uid}", 0 },
@@ -302,23 +328,7 @@ struct {
     { "%{{}", 1 },
     { "%{nulll}", 1 },
     { "%{does not exist}", 1 },
-    { "%{}", 1 },
-#ifdef KRB5_USE_PATH_TOKENS
-    { "%{APPDATA}", 0 },
-    { "%{COMMON_APPDATA}", 0},
-    { "%{LOCAL_APPDATA}", 0},
-    { "%{SYSTEM}", 0},
-    { "%{WINDOWS}", 0},
-    { "%{TEMP}", 0},
-    { "%{USERID}", 0},
-    { "%{uid}", 0},
-    { "%{USERCONFIG}", 0},
-    { "%{COMMONCONFIG}", 0},
-    { "%{LIBDIR}", 0},
-    { "%{BINDIR}", 0},
-    { "%{LIBEXEC}", 0},
-    { "%{SBINDIR}", 0},
-#endif
+    { "%{}", 1 }
 };
 
 static void
@@ -326,21 +336,21 @@ test_def_cc_name(krb5_context context)
 {
     krb5_error_code ret;
     char *str;
-    int i;
+    size_t i;
 
     for (i = 0; i < sizeof(cc_names)/sizeof(cc_names[0]); i++) {
 	ret = _krb5_expand_default_cc_name(context, cc_names[i].str, &str);
 	if (ret) {
 	    if (cc_names[i].fail == 0)
 		krb5_errx(context, 1, "test %d \"%s\" failed",
-			  i, cc_names[i].str);
+			  (int)i, cc_names[i].str);
 	} else {
 	    if (cc_names[i].fail)
 		krb5_errx(context, 1, "test %d \"%s\" was successful",
-			  i, cc_names[i].str);
+			  (int)i, cc_names[i].str);
 	    if (cc_names[i].res && strcmp(cc_names[i].res, str) != 0)
 		krb5_errx(context, 1, "test %d %s != %s",
-			  i, cc_names[i].res, str);
+			  (int)i, cc_names[i].res, str);
 	    if (debug_flag)
 		printf("%s => %s\n", cc_names[i].str, str);
 	    free(str);
@@ -406,6 +416,8 @@ test_cache_iter(krb5_context context, const char *type, int destroy)
 	else
 	    krb5_cc_close(context, id);
     }
+    if (ret != KRB5_CC_END)
+	krb5_err(context, 1, ret, "krb5_cc_cache_next returned not expected error");
 
     krb5_cc_cache_end_seq_get(context, cursor);
 }
@@ -440,6 +452,8 @@ test_cache_iter_all(krb5_context context)
 	}
 	krb5_cc_close(context, id);
     }
+    if (ret != KRB5_CC_END)
+	krb5_err(context, 1, ret, "krb5_cccol_cursor_next returned not expected error");
 
     krb5_cccol_cursor_free(context, &cursor);
 }
@@ -610,6 +624,85 @@ test_cc_config(krb5_context context)
     krb5_free_principal(context, p);
 }
 
+#ifdef HAVE_DISPATCH_DISPATCH_H
+
+static void
+test_threaded(krb5_context context)
+{
+    dispatch_semaphore_t sema;
+    dispatch_queue_t q;
+    dispatch_group_t group;
+    time_t old;
+    const char *type = "API";
+
+    /* clean up old caches first */
+    test_cache_iter(context, type, 1);
+
+    sema = dispatch_semaphore_create(10);
+
+    q = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+
+    old = time(NULL);
+
+    group = dispatch_group_create();
+    if (group == NULL) abort();
+
+    while (time(NULL) - old < 10) {
+	size_t number = 100;
+
+	dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+
+	if (debug_flag)
+	    printf("time: %d\n", (int)(time(NULL) - old));
+
+	dispatch_group_async(group, q, ^{
+		dispatch_group_t inner = dispatch_group_create();
+		if (inner == NULL) abort();
+
+		dispatch_group_async(inner, q, ^{
+			dispatch_apply(number, q, ^(size_t num) {
+				krb5_context c;
+				krb5_init_context(&c);
+				test_move(c, "API");
+				krb5_free_context(c);
+			    });
+		    });
+		dispatch_group_async(inner, q, ^{
+			dispatch_apply(number, q, ^(size_t num) {
+				krb5_context c;
+				krb5_init_context(&c);
+				test_move(c, "API");
+				krb5_free_context(c);
+			    });
+		    });
+		dispatch_group_async(inner, q, ^{
+			dispatch_apply(number / 10, q, ^(size_t num) {
+				krb5_context c;
+				krb5_init_context(&c);
+				test_cache_iter(c, type, 0);
+				krb5_free_context(c);
+			    });
+		    });
+		dispatch_group_async(inner, q, ^{
+			dispatch_apply(number / 10, q, ^(size_t num) {
+				krb5_context c;
+				krb5_init_context(&c);
+				test_cache_iter_all(c);
+				krb5_free_context(c);
+			    });
+		    });
+
+		dispatch_group_wait(inner, DISPATCH_TIME_FOREVER);
+		dispatch_release(inner);
+		dispatch_semaphore_signal(sema);
+	    });
+    }
+
+    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+    dispatch_release(group);
+}
+
+#endif
 
 static struct getargs args[] = {
     {"debug",	'd',	arg_flag,	&debug_flag,
@@ -648,16 +741,13 @@ main(int argc, char **argv)
 	exit(0);
     }
 
-    argc -= optidx;
-    argv += optidx;
-
     ret = krb5_init_context(&context);
     if (ret)
 	errx (1, "krb5_init_context failed: %d", ret);
 
     test_cache_remove(context, krb5_cc_type_file);
     test_cache_remove(context, krb5_cc_type_memory);
-#ifdef USE_SQLITE
+#ifdef HAVE_SCC
     test_cache_remove(context, krb5_cc_type_scc);
 #endif
 
@@ -668,7 +758,9 @@ main(int argc, char **argv)
 #if 0
     test_init_vs_destroy(context, krb5_cc_type_api);
 #endif
+#ifdef HAVE_SCC
     test_init_vs_destroy(context, krb5_cc_type_scc);
+#endif
     test_mcc_default();
     test_def_cc_name(context);
 
@@ -681,6 +773,11 @@ main(int argc, char **argv)
 	krb5_cc_new_unique(context, krb5_cc_type_memory, "baz", &id2);
 	krb5_parse_name(context, "lha@SU.SE", &p);
 	krb5_cc_initialize(context, id1, p);
+	krb5_cc_initialize(context, id1, p);
+	krb5_cc_initialize(context, id1, p);
+	krb5_cc_initialize(context, id1, p);
+	krb5_cc_initialize(context, id1, p);
+	krb5_cc_initialize(context, id1, p);
 	krb5_free_principal(context, p);
     }
 
@@ -692,24 +789,39 @@ main(int argc, char **argv)
     test_cache_iter(context, krb5_cc_type_memory, 0);
     test_cache_iter(context, krb5_cc_type_file, 0);
     test_cache_iter(context, krb5_cc_type_api, 0);
+#ifdef HAVE_SCC
     test_cache_iter(context, krb5_cc_type_scc, 0);
     test_cache_iter(context, krb5_cc_type_scc, 1);
+#endif
+#ifdef HAVE_KCC
+    test_cache_iter(context, krb5_cc_type_kcc, 0);
+    test_cache_iter(context, krb5_cc_type_kcc, 1);
+#endif
 
     test_copy(context, krb5_cc_type_file, krb5_cc_type_file);
     test_copy(context, krb5_cc_type_memory, krb5_cc_type_memory);
     test_copy(context, krb5_cc_type_file, krb5_cc_type_memory);
     test_copy(context, krb5_cc_type_memory, krb5_cc_type_file);
+#ifdef HAVE_SCC
     test_copy(context, krb5_cc_type_scc, krb5_cc_type_file);
     test_copy(context, krb5_cc_type_file, krb5_cc_type_scc);
     test_copy(context, krb5_cc_type_scc, krb5_cc_type_memory);
     test_copy(context, krb5_cc_type_memory, krb5_cc_type_scc);
-
+#endif
+#ifdef HAVE_KCC
+    test_copy(context, krb5_cc_type_kcc, krb5_cc_type_file);
+    test_copy(context, krb5_cc_type_file, krb5_cc_type_kcc);
+    test_copy(context, krb5_cc_type_kcc, krb5_cc_type_memory);
+    test_copy(context, krb5_cc_type_memory, krb5_cc_type_kcc);
+#endif	
     test_move(context, krb5_cc_type_file);
     test_move(context, krb5_cc_type_memory);
 #ifdef HAVE_KCM
     test_move(context, krb5_cc_type_kcm);
 #endif
+#ifdef HAVE_SCC
     test_move(context, krb5_cc_type_scc);
+#endif
 
     test_prefix_ops(context, "FILE:/tmp/foo", &krb5_fcc_ops);
     test_prefix_ops(context, "FILE", &krb5_fcc_ops);
@@ -720,17 +832,25 @@ main(int argc, char **argv)
     test_prefix_ops(context, "SCC:", &krb5_scc_ops);
     test_prefix_ops(context, "SCC:foo", &krb5_scc_ops);
 #endif
+#ifdef HAVE_KCC
+    test_prefix_ops(context, "KCC:", &krb5_kcc_ops);
+    test_prefix_ops(context, "KCC:foo", &krb5_kcc_ops);
+#endif
+#ifdef HAVE_XCC
+    test_prefix_ops(context, "XCACHE:", &krb5_xcc_ops);
+    test_prefix_ops(context, "XCACHE:68ADE5C1-C1FF-4088-8AA2-8AF815CDCC5A", &krb5_xcc_ops);
+#endif
 
     krb5_cc_destroy(context, id1);
     krb5_cc_destroy(context, id2);
 
     test_cc_config(context);
 
-    krb5_free_context(context);
-
-#if 0
-    sleep(60);
+#ifdef HAVE_DISPATCH_DISPATCH_H
+    test_threaded(context);
 #endif
+
+    krb5_free_context(context);
 
     return 0;
 }

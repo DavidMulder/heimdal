@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997 - 2001 Kungliga Tekniska HÃ¶gskolan
+ * Copyright (c) 1997 - 2001 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
@@ -32,21 +32,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#define KRB5_KDB_DISALLOW_POSTDATED	0x00000001
-#define KRB5_KDB_DISALLOW_FORWARDABLE	0x00000002
-#define KRB5_KDB_DISALLOW_TGT_BASED	0x00000004
-#define KRB5_KDB_DISALLOW_RENEWABLE	0x00000008
-#define KRB5_KDB_DISALLOW_PROXIABLE	0x00000010
-#define KRB5_KDB_DISALLOW_DUP_SKEY	0x00000020
-#define KRB5_KDB_DISALLOW_ALL_TIX	0x00000040
-#define KRB5_KDB_REQUIRES_PRE_AUTH	0x00000080
-#define KRB5_KDB_REQUIRES_HW_AUTH	0x00000100
-#define KRB5_KDB_REQUIRES_PWCHANGE	0x00000200
-#define KRB5_KDB_DISALLOW_SVR		0x00001000
-#define KRB5_KDB_PWCHANGE_SERVICE	0x00002000
-#define KRB5_KDB_SUPPORT_DESMD5		0x00004000
-#define KRB5_KDB_NEW_PRINC		0x00008000
 
 /*
 
@@ -128,10 +113,10 @@ mdb_principal2key(krb5_context context,
 #define KRB5_KDB_SALTTYPE_CERTHASH	6
 
 static krb5_error_code
-fix_salt(krb5_context context, hdb_entry *ent, int key_num)
+fix_salt(krb5_context context, hdb_entry *ent, Key *k)
 {
     krb5_error_code ret;
-    Salt *salt = ent->keys.val[key_num].salt;
+    Salt *salt = k->salt;
     /* fix salt type */
     switch((int)salt->type) {
     case KRB5_KDB_SALTTYPE_NORMAL:
@@ -187,8 +172,8 @@ fix_salt(krb5_context context, hdb_entry *ent, int key_num)
 	break;
     case KRB5_KDB_SALTTYPE_CERTHASH:
 	krb5_data_free(&salt->salt);
-	free(ent->keys.val[key_num].salt);
-	ent->keys.val[key_num].salt = NULL;
+	free(k->salt);
+	k->salt = NULL;
 	break;
     default:
 	abort();
@@ -263,7 +248,7 @@ mdb_keyvalue2key(krb5_context context, hdb_entry *entry, krb5_storage *sp, uint1
 		k->salt->salt.length = u16;
 		krb5_storage_read(sp, k->salt->salt.data, k->salt->salt.length);
 	    }
-	    fix_salt(context, entry, entry->keys.len - 1);
+	    fix_salt(context, entry, k);
 	} else {
 	    /*
 	     * Whatever this "version" might be, we skip it
@@ -304,7 +289,10 @@ mdb_value2entry(krb5_context context, krb5_data *data, krb5_kvno target_kvno,
     uint32_t u32;
     uint16_t u16, num_keys, num_tl;
     size_t i;
-    char *p;
+    char *p = NULL;
+    off_t e_length;
+
+    memset(entry, 0, sizeof(*entry));
 
     memset(&k, 0, sizeof (k));
     memset(entry, 0, sizeof(*entry));
@@ -334,7 +322,14 @@ mdb_value2entry(krb5_context context, krb5_data *data, krb5_kvno target_kvno,
      * noisy.  For now we do nothing.
      */
     CHECK(ret = krb5_ret_uint16(sp, &u16));
-    if (u16 != KDB_V1_BASE_LENGTH) { ret = EINVAL; goto out; }
+    if (u16 < KDB_V1_BASE_LENGTH) {
+	krb5_set_error_message(context, EINVAL,
+			       "length too short %d", (int)u16);
+	ret = EINVAL;
+	goto out;
+    }
+    e_length = u16 - KDB_V1_BASE_LENGTH;
+
     /* 32: attributes */
     CHECK(ret = krb5_ret_uint32(sp, &u32));
     entry->flags.postdate =	 !(u32 & KRB5_KDB_DISALLOW_POSTDATED);
@@ -386,6 +381,13 @@ mdb_value2entry(krb5_context context, krb5_data *data, krb5_kvno target_kvno,
     /* 16: num key data */
     CHECK(ret = krb5_ret_uint16(sp, &u16));
     num_keys = u16;
+
+    /* e_data */
+    if (e_length) {
+	/* ignore extra e_data that we don't know how to parse */
+	krb5_storage_seek(sp, e_length, SEEK_CUR);
+    }
+
     /* 16: principal length */
     CHECK(ret = krb5_ret_uint16(sp, &u16));
     /* length: principal */
@@ -818,7 +820,6 @@ mdb_open(krb5_context context, HDB *db, int flags, mode_t mode)
 	return ENOMEM;
     }
     db->hdb_db = dbopen(fn, flags, mode, DB_BTREE, NULL);
-    free(fn);
 
     if (db->hdb_db == NULL) {
 	switch (errno) {
@@ -829,6 +830,7 @@ mdb_open(krb5_context context, HDB *db, int flags, mode_t mode)
 	    db->hdb_db = dbopen(fn, flags, mode, DB_BTREE, NULL);
 	}
     }
+    free(fn);
 
     /* try to open without .db extension */
     if(db->hdb_db == NULL && errno == ENOENT)

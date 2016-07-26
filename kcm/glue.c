@@ -32,8 +32,6 @@
 
 #include "kcm_locl.h"
 
-RCSID("$Id$");
-
 /*
  * Server-side loopback glue for credentials cache operations; this
  * must be initialized with kcm_internal_ccache(), it is not for real
@@ -118,11 +116,10 @@ kcmss_store_cred(krb5_context context,
 {
     krb5_error_code ret;
     kcm_ccache c = KCMCACHE(id);
-    krb5_creds *tmp;
 
     KCM_ASSERT_VALID(c);
 
-    ret = kcm_ccache_store_cred_internal(context, c, creds, 1, &tmp);
+    ret = kcm_ccache_store_cred_internal(context, c, creds, NULL, 1);
 
     return ret;
 }

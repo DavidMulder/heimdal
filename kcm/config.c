@@ -34,7 +34,8 @@
 
 #include "kcm_locl.h"
 #include <getarg.h>
-#include <parse_bytes.h>
+
+static void usage(int ret) __attribute__((noreturn));
 
 static const char *config_file;	/* location of kcm config file */
 
@@ -53,7 +54,6 @@ static const char *system_cache_name = NULL;
 static const char *system_keytab = NULL;
 static const char *system_principal = NULL;
 static const char *system_server = NULL;
-static const char *system_perms = NULL;
 static const char *system_user = NULL;
 static const char *system_group = NULL;
 
@@ -62,7 +62,10 @@ static const char *ticket_life = NULL;
 
 int launchd_flag = 0;
 int disallow_getting_krbtgt = 0;
-int name_constraints = -1;
+int use_uid_matching = -1;
+int disable_ntlm_reflection_detection = 0;
+int max_num_requests = 100000;
+int kcm_timeout = -1;
 
 static int help_flag;
 static int version_flag;
@@ -111,16 +114,12 @@ static struct getargs args[] = {
 	"lifetime of system tickets", "time"
     },
     {
-	"mode",		'm', arg_string, &system_perms,
-	"octal mode of system cache", "mode"
-    },
-    {
-	"name-constraints",	'n', arg_negative_flag, &name_constraints,
-	"disable credentials cache name constraints"
-    },
-    {
 	"disallow-getting-krbtgt", 0, arg_flag, &disallow_getting_krbtgt,
 	"disable fetching krbtgt from the cache"
+    },
+    {
+	"use-uid-matching", 0, arg_flag, &use_uid_matching,
+	"only use UID when matching allowed credentials or not"
     },
     {
 	"renewable-life",	'r', arg_string, &renew_life,
@@ -148,6 +147,14 @@ static struct getargs args[] = {
 	"user",		'u',	arg_string,	&system_user,
 	"system cache owner",	"user"
     },
+    {
+	"number-requests",	0, arg_integer, &max_num_requests,
+	"number of requests processed before exit"
+    },
+    {
+	"idle-timeout",	0, arg_integer, &kcm_timeout,
+	"number of seconds of idle time before timeout (0 disables timeout)", "seconds"
+    },
     {	"version",	'v',	arg_flag,   &version_flag }
 };
 
@@ -163,11 +170,8 @@ usage(int ret)
 static int parse_owners(kcm_ccache ccache)
 {
     uid_t uid = 0;
-    gid_t gid = 0;
     struct passwd *pw;
-    struct group *gr;
     int uid_p = 0;
-    int gid_p = 0;
 
     if (system_user != NULL) {
 	if (isdigit((unsigned char)system_user[0])) {
@@ -185,31 +189,12 @@ static int parse_owners(kcm_ccache ccache)
 	}
 
 	uid = pw->pw_uid; uid_p = 1;
-	gid = pw->pw_gid; gid_p = 1;
-    }
-
-    if (system_group != NULL) {
-	if (isdigit((unsigned char)system_group[0])) {
-	    gr = getgrgid(atoi(system_group));
-	} else {
-	    gr = getgrnam(system_group);
-	}
-	if (gr == NULL) {
-	    return errno;
-	}
-
-	gid = gr->gr_gid; gid_p = 1;
     }
 
     if (uid_p)
 	ccache->uid = uid;
     else
 	ccache->uid = 0; /* geteuid() XXX */
-
-    if (gid_p)
-	ccache->gid = gid;
-    else
-	ccache->gid = 0; /* getegid() XXX */
 
     return 0;
 }
@@ -264,9 +249,9 @@ ccache_init_system(void)
 	system_keytab = kcm_system_config_get_string("keytab_name");
 
     if (system_keytab != NULL) {
-	ret = krb5_kt_resolve(kcm_context, system_keytab, &ccache->key.keytab);
+	ret = krb5_kt_resolve(kcm_context, system_keytab, &ccache->keytab);
     } else {
-	ret = krb5_kt_default(kcm_context, &ccache->key.keytab);
+	ret = krb5_kt_default(kcm_context, &ccache->keytab);
     }
     if (ret) {
 	kcm_release_ccache(kcm_context, ccache);
@@ -298,24 +283,6 @@ ccache_init_system(void)
 	}
     }
 
-    if (system_perms == NULL)
-	system_perms = kcm_system_config_get_string("mode");
-
-    if (system_perms != NULL) {
-	int mode;
-
-	if (sscanf(system_perms, "%o", &mode) != 1)
-	    return EINVAL;
-
-	ccache->mode = mode;
-    }
-
-    if (disallow_getting_krbtgt == -1) {
-	disallow_getting_krbtgt =
-	    krb5_config_get_bool_default(kcm_context, NULL, FALSE, "kcm",
-					 "disallow-getting-krbtgt", NULL);
-    }
-
     /* enqueue default actions for credentials cache */
     ret = kcm_ccache_enqueue_default(kcm_context, ccache, NULL);
 
@@ -328,11 +295,11 @@ void
 kcm_configure(int argc, char **argv)
 {
     krb5_error_code ret;
-    int optind = 0;
+    int optidx = 0;
     const char *p;
 
-    while(getarg(args, num_args, argc, argv, &optind))
-	warnx("error at argument `%s'", argv[optind]);
+    while(getarg(args, num_args, argc, argv, &optidx))
+	warnx("error at argument `%s'", argv[optidx]);
 
     if(help_flag)
 	usage (0);
@@ -342,8 +309,7 @@ kcm_configure(int argc, char **argv)
 	exit(0);
     }
 
-    argc -= optind;
-    argv += optind;
+    argc -= optidx;
 
     if (argc != 0)
 	usage(1);
@@ -387,6 +353,12 @@ kcm_configure(int argc, char **argv)
 	    krb5_err(kcm_context, 1, ret, "initializing system ccache");
     }
 
+    if (disallow_getting_krbtgt == -1) {
+	disallow_getting_krbtgt =
+	    krb5_config_get_bool_default(kcm_context, NULL, FALSE, "kcm",
+					 "disallow-getting-krbtgt", NULL);
+    }
+
 #ifdef SUPPORT_DETACH
     if(detach_from_console == -1)
 	detach_from_console = krb5_config_get_bool_default(kcm_context, NULL,
@@ -394,6 +366,18 @@ kcm_configure(int argc, char **argv)
 							   "kcm",
 							   "detach", NULL);
 #endif
+
+    if (use_uid_matching == -1)
+	use_uid_matching = krb5_config_get_bool_default(kcm_context, NULL,
+							0,
+							"kcm",
+							"use-uid-matching", NULL);
+
+    disable_ntlm_reflection_detection = krb5_config_get_bool_default(kcm_context, NULL,
+								     0,
+								     "kcm",
+								     "disable-ntlm-reflection-detection", NULL);
+    
     kcm_openlog();
     if(max_request == 0)
 	max_request = 64 * 1024;

@@ -97,8 +97,7 @@ krb5_mk_req(krb5_context context,
     if (ret)
 	return ret;
 
-    ret = krb5_build_principal (context, &server,
-				strlen(*realms),
+    ret = krb5_make_principal(context, &server,
 				*realms,
 				service,
 				real_hostname,

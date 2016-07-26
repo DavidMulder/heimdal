@@ -80,6 +80,16 @@ der_get_integer (const unsigned char *p, size_t len,
     return 0;
 }
 
+/*
+ * This function is tricky, it return the length in val, but it can
+ * also return ASN1_INDEFINITE in val when we ran into an INDEFINITE
+ * encoded object, so callers of this funcation needs to check for
+ * ASN1_INDEFINITE and make sure to handle that.
+ *
+ * In DER mode the caller should return ASN1_GOT_INDEFINITE if they
+ * get a ASN1_INDEFINITE.
+ */
+
 int
 der_get_length (const unsigned char *p, size_t len,
 		size_t *val, size_t *size)
@@ -143,18 +153,22 @@ der_get_general_string (const unsigned char *p, size_t len,
 	 */
 	while ((size_t)(p1 - p) < len && *p1 == '\0')
 	    p1++;
-       if ((size_t)(p1 - p) != len)
+	if ((size_t)(p1 - p) != len) {
+	    *str = NULL;
 	    return ASN1_BAD_CHARACTER;
     }
-    if (len > len + 1)
+    }
+    if (len > len + 1) {
+	*str = NULL;
 	return ASN1_BAD_LENGTH;
+    }
 
-    s = malloc (len + 1);
+    *str = s = malloc (len + 1);
     if (s == NULL)
 	return ENOMEM;
     memcpy (s, p, len);
     s[len] = '\0';
-    *str = s;
+
     if(size) *size = len;
     return 0;
 }
@@ -166,14 +180,23 @@ der_get_utf8string (const unsigned char *p, size_t len,
     return der_get_general_string(p, len, str, size);
 }
 
+#define GEN_DATA_ZERO(_data) \
+	do { (_data)->length = 0; (_data)->data = NULL; } while(0)
+
 int
 der_get_printable_string(const unsigned char *p, size_t len,
 			 heim_printable_string *str, size_t *size)
 {
+    if (len > len + 1) {
+	GEN_DATA_ZERO(str);
+	return ASN1_BAD_LENGTH;
+    }
     str->length = len;
     str->data = malloc(len + 1);
-    if (str->data == NULL)
+    if (str->data == NULL) {
+	GEN_DATA_ZERO(str);
 	return ENOMEM;
+    }
     memcpy(str->data, p, len);
     ((char *)str->data)[len] = '\0';
     if(size) *size = len;
@@ -193,14 +216,25 @@ der_get_bmp_string (const unsigned char *p, size_t len,
 {
     size_t i;
 
-    if (len & 1)
+    if (len == 0) {
+	GEN_DATA_ZERO(data);
+	return 0;
+    }
+
+    if (len & 1) {
+	GEN_DATA_ZERO(data);
 	return ASN1_BAD_FORMAT;
+    }
     data->length = len / 2;
-    if (data->length > UINT_MAX/sizeof(data->data[0]))
+    if (data->length > UINT_MAX/sizeof(data->data[0])) {
+	GEN_DATA_ZERO(data);
 	return ERANGE;
+    }
     data->data = malloc(data->length * sizeof(data->data[0]));
-    if (data->data == NULL && data->length != 0)
+    if (data->data == NULL && data->length != 0) {
+	GEN_DATA_ZERO(data);
 	return ENOMEM;
+    }
 
     for (i = 0; i < data->length; i++) {
 	data->data[i] = (p[0] << 8) | p[1];
@@ -208,8 +242,7 @@ der_get_bmp_string (const unsigned char *p, size_t len,
 	/* check for NUL in the middle of the string */
 	if (data->data[i] == 0 && i != (data->length - 1)) {
 	    free(data->data);
-	    data->data = NULL;
-	    data->length = 0;
+	    GEN_DATA_ZERO(data);
 	    return ASN1_BAD_CHARACTER;
 	}
     }
@@ -224,14 +257,25 @@ der_get_universal_string (const unsigned char *p, size_t len,
 {
     size_t i;
 
-    if (len & 3)
+    if (len == 0) {
+	GEN_DATA_ZERO(data);
+	return 0;
+    }
+
+    if (len & 3) {
+	GEN_DATA_ZERO(data);
 	return ASN1_BAD_FORMAT;
+    }
     data->length = len / 4;
-    if (data->length > UINT_MAX/sizeof(data->data[0]))
+    if (data->length > UINT_MAX/sizeof(data->data[0])) {
+	GEN_DATA_ZERO(data);
 	return ERANGE;
+    }
     data->data = malloc(data->length * sizeof(data->data[0]));
-    if (data->data == NULL && data->length != 0)
+    if (data->data == NULL) {
+	GEN_DATA_ZERO(data);
 	return ENOMEM;
+    }
 
     for (i = 0; i < data->length; i++) {
 	data->data[i] = (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
@@ -239,8 +283,7 @@ der_get_universal_string (const unsigned char *p, size_t len,
 	/* check for NUL in the middle of the string */
 	if (data->data[i] == 0 && i != (data->length - 1)) {
 	    free(data->data);
-	    data->data = NULL;
-	    data->length = 0;
+	    GEN_DATA_ZERO(data);
 	    return ASN1_BAD_CHARACTER;
 	}
     }
@@ -260,10 +303,14 @@ der_get_octet_string (const unsigned char *p, size_t len,
 		      heim_octet_string *data, size_t *size)
 {
     data->length = len;
+    if (len == 0) {
+	data->data = NULL;
+    } else {
     data->data = malloc(len);
-    if (data->data == NULL && data->length != 0)
+	if (data->data == NULL)
 	return ENOMEM;
     memcpy (data->data, p, len);
+    }
     if(size) *size = len;
     return 0;
 }
@@ -305,6 +352,8 @@ der_get_octet_string_ber (const unsigned char *p, size_t len,
 	p += l;
 	len -= l;
 
+	if (datalen == ASN1_INDEFINITE)
+	    return ASN1_GOT_INDEFINITE;
 	if (datalen > len)
 	    return ASN1_OVERRUN;
 
@@ -385,14 +434,18 @@ der_get_heim_integer (const unsigned char *p, size_t len,
 	    p++;
 	    data->length--;
 	}
+	if (data->length == 0) {
+	    data->data = NULL;
+	} else {
 	data->data = malloc(data->length);
-	if (data->data == NULL && data->length != 0) {
+	    if (data->data == NULL) {
 	    data->length = 0;
 	    if (size)
 		*size = 0;
 	    return ENOMEM;
 	}
 	memcpy(data->data, p, data->length);
+    }
     }
     if (size)
 	*size = len;
@@ -633,14 +686,19 @@ der_get_bit_string (const unsigned char *p, size_t len,
      * any of them will cause a interger overrun */
     if ((len - 1) >> (sizeof(len) * 8 - 3))
 	return ASN1_OVERRUN;
+    /*
+     * If there is data to copy, do that now.
+     */
+    if (len - 1 > 0) {
     data->length = (len - 1) * 8;
     data->data = malloc(len - 1);
-    if (data->data == NULL && (len - 1) != 0)
+	if (data->data == NULL)
 	return ENOMEM;
-    /* copy data is there is data to copy */
-    if (len - 1 != 0) {
       memcpy (data->data, p + 1, len - 1);
       data->length -= p[0];
+    } else {
+	data->data = NULL;
+	data->length = 0;
     }
     if(size) *size = len;
     return 0;

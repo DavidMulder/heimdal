@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 1997 - 2007 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
@@ -173,49 +172,16 @@ find_etypelist(krb5_context context,
 	       EtypeList *etypes)
 {
     krb5_error_code ret;
-    krb5_authdata *ad;
-    krb5_authdata adIfRelevant;
-    unsigned i;
+    krb5_data data;
 
-    memset(&adIfRelevant, 0, sizeof(adIfRelevant));
-
-    etypes->len = 0;
-    etypes->val = NULL;
-
-    ad = auth_context->authenticator->authorization_data;
-    if (ad == NULL)
-	return 0;
-
-    for (i = 0; i < ad->len; i++) {
-	if (ad->val[i].ad_type == KRB5_AUTHDATA_IF_RELEVANT) {
-	    ret = decode_AD_IF_RELEVANT(ad->val[i].ad_data.data,
-					ad->val[i].ad_data.length,
-					&adIfRelevant,
-					NULL);
+    ret = _krb5_get_ad(context, auth_context->authenticator->authorization_data, NULL, KRB5_AUTHDATA_GSS_API_ETYPE_NEGOTIATION, &data);
 	    if (ret)
-		return ret;
-
-	    if (adIfRelevant.len == 1 &&
-		adIfRelevant.val[0].ad_type ==
-			KRB5_AUTHDATA_GSS_API_ETYPE_NEGOTIATION) {
-		break;
-	    }
-	    free_AD_IF_RELEVANT(&adIfRelevant);
-	    adIfRelevant.len = 0;
-	}
-    }
-
-    if (adIfRelevant.len == 0)
 	return 0;
 
-    ret = decode_EtypeList(adIfRelevant.val[0].ad_data.data,
-			   adIfRelevant.val[0].ad_data.length,
-			   etypes,
-			   NULL);
+    ret = decode_EtypeList(data.data, data.length, etypes, NULL);
+    krb5_data_free(&data);
     if (ret)
 	krb5_clear_error_message(context);
-
-    free_AD_IF_RELEVANT(&adIfRelevant);
 
     return ret;
 }
@@ -348,6 +314,8 @@ krb5_verify_ap_req2(krb5_context context,
     krb5_error_code ret;
     EtypeList etypes;
 
+    memset(&etypes, 0, sizeof(etypes));
+
     if (ticket)
 	*ticket = NULL;
 
@@ -441,9 +409,19 @@ krb5_verify_ap_req2(krb5_context context,
 
 	krb5_timeofday (context, &now);
 
-	if (abs(ac->authenticator->ctime - now) > context->max_skew) {
+	if (krb5_time_abs(ac->authenticator->ctime, now) > context->max_skew) {
 	    ret = KRB5KRB_AP_ERR_SKEW;
 	    krb5_clear_error_message (context);
+	    goto out;
+	}
+    }
+
+    /*
+     * Check replay
+     */
+    if (ac->rcache) {
+	ret = krb5_rc_store(context, ac->rcache, ac->authenticator);
+	if (ret) {
 	    goto out;
 	}
     }
@@ -465,7 +443,7 @@ krb5_verify_ap_req2(krb5_context context,
     if (ret)
 	goto out;
 
-    ac->keytype = ETYPE_NULL;
+    ac->keytype = (krb5_keytype)ETYPE_NULL;
 
     if (etypes.val) {
 	size_t i;
@@ -473,6 +451,7 @@ krb5_verify_ap_req2(krb5_context context,
 	for (i = 0; i < etypes.len; i++) {
 	    if (krb5_enctype_valid(context, etypes.val[i]) == 0) {
 		ac->keytype = etypes.val[i];
+		_krb5_debugx(context, 10, "ap_req2: upgrading to enctype: %d", ac->keytype);
 		break;
 	    }
 	}
@@ -504,6 +483,7 @@ krb5_verify_ap_req2(krb5_context context,
     free_EtypeList(&etypes);
     return 0;
  out:
+    free_EtypeList(&etypes);
     if (t)
 	krb5_free_ticket (context, t);
     if (auth_context == NULL || *auth_context == NULL)
@@ -519,13 +499,16 @@ struct krb5_rd_req_in_ctx_data {
     krb5_keytab keytab;
     krb5_keyblock *keyblock;
     krb5_boolean check_pac;
+    krb5_keyblock *as_reply_key;
 };
 
 struct krb5_rd_req_out_ctx_data {
     krb5_keyblock *keyblock;
+    int flags;
     krb5_flags ap_req_options;
     krb5_ticket *ticket;
     krb5_principal server;
+    krb5_pac pac;
 };
 
 /**
@@ -598,6 +581,15 @@ krb5_rd_req_in_set_pac_check(krb5_context context,
     return 0;
 }
 
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_rd_req_in_set_as_reply_key(krb5_context context,
+				krb5_rd_req_in_ctx in,
+				krb5_keyblock *as_reply_key)
+{
+    in->as_reply_key = as_reply_key;
+    return 0;
+}
+
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_rd_req_in_set_keyblock(krb5_context context,
@@ -631,6 +623,18 @@ krb5_rd_req_out_get_keyblock(krb5_context context,
 			    krb5_keyblock **keyblock)
 {
     return krb5_copy_keyblock(context, out->keyblock, keyblock);
+}
+
+KRB5_LIB_FUNCTION int KRB5_LIB_CALL
+krb5_rd_req_out_get_flags(krb5_context context, krb5_rd_req_out_ctx ctx)
+{
+    return ctx->flags;
+}
+
+KRB5_LIB_FUNCTION krb5_pac KRB5_LIB_CALL
+krb5_rd_req_out_copy_pac(krb5_context context, krb5_rd_req_out_ctx ctx)
+{
+    return heim_retain(ctx->pac);
 }
 
 /**
@@ -677,6 +681,8 @@ krb5_rd_req_out_ctx_free(krb5_context context, krb5_rd_req_out_ctx ctx)
 	krb5_free_keyblock(context, ctx->keyblock);
     if (ctx->server)
 	krb5_free_principal(context, ctx->server);
+    if (ctx->pac)
+	krb5_pac_free(context, ctx->pac);
     free(ctx);
 }
 
@@ -982,6 +988,7 @@ krb5_rd_req_ctx(krb5_context context,
 		_krb5_kt_principal_not_found(context, ret, id, o->server,
 					     ap_req.ticket.enc_part.etype,
 					     kvno);
+		krb5_kt_end_seq_get(context, id, &cursor);
 		goto out;
 	    }
 
@@ -999,7 +1006,11 @@ krb5_rd_req_ctx(krb5_context context,
 				      &o->ap_req_options,
 				      &o->ticket,
 				      KRB5_KU_AP_REQ_AUTH);
-	    if (ret) {
+	    if (ret == KRB5_RC_REPLAY) {
+		krb5_kt_end_seq_get(context, id, &cursor);
+		krb5_kt_free_entry(context, &entry);
+		goto out;
+	    } else if (ret) {
 		krb5_kt_free_entry (context, &entry);
 		continue;
 	    }
@@ -1015,12 +1026,14 @@ krb5_rd_req_ctx(krb5_context context,
 				     &o->keyblock);
 	    if (ret) {
 		krb5_kt_free_entry (context, &entry);
+		krb5_kt_end_seq_get(context, id, &cursor);
 		goto out;
 	    }
 
 	    ret = krb5_copy_principal(context, entry.principal, &p);
 	    if (ret) {
 		krb5_kt_free_entry (context, &entry);
+		krb5_kt_end_seq_get(context, id, &cursor);
 		goto out;
 	    }
 	    krb5_free_principal(context, o->ticket->server);
@@ -1033,7 +1046,24 @@ krb5_rd_req_ctx(krb5_context context,
 	krb5_kt_end_seq_get (context, id, &cursor);
     }
 
-    /* If there is a PAC, verify its server signature */
+    /*
+     * Pick up PFS if we have any around
+     */
+
+    ret = _krb5_pfs_rd_req(context, *auth_context);
+    if (ret)
+	goto out;
+
+    /*
+     *
+     */
+
+    _krb5_debugx(context, 15, "krb5_rd_req: used enctype %d from keytab",
+		 o->keyblock->keytype);
+
+    /*
+     * If there is a PAC, verify its server signature
+     */
     if (inctx == NULL || inctx->check_pac) {
 	krb5_pac pac;
 	krb5_data data;
@@ -1054,9 +1084,18 @@ krb5_rd_req_ctx(krb5_context context,
 				  o->ticket->client,
 				  o->keyblock,
 				  NULL);
+	    if (ret == 0) {
+		o->flags |= KRB5_RD_REQ_OUT_PAC_VALID;
+		o->pac = heim_retain(pac);
+	    }
+	    if ((o->flags & KRB5_RD_REQ_OUT_PAC_VALID) && inctx->as_reply_key) {
+		ret = krb5_pac_process_credentials_buffer(context, pac, inctx->as_reply_key);
+		if (ret == 0) {
+		    o->flags |= KRB5_RD_REQ_OUT_PAC_CREDENTIALS;
+		}
+	    }
 	    krb5_pac_free(context, pac);
-	    if (ret)
-		goto out;
+	    ret = 0;
 	} else
 	  ret = 0;
     }

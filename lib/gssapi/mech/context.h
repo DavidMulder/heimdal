@@ -2,6 +2,8 @@
  * Copyright (c) 2005 Doug Rabson
  * All rights reserved.
  *
+ * Portions Copyright (c) 2010 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -32,10 +34,14 @@
 struct _gss_context {
 	gssapi_mech_interface	gc_mech;
 	gss_ctx_id_t		gc_ctx;
+	gss_cred_id_t		gc_replaced_cred;
 };
 
 void
-_gss_mg_error(gssapi_mech_interface, OM_uint32, OM_uint32);
+_gss_mg_error(__nonnull gssapi_mech_interface, OM_uint32);
 
 OM_uint32
-_gss_mg_get_error(const gss_OID, OM_uint32, OM_uint32, gss_buffer_t);
+_gss_mg_get_error(__nonnull const gss_OID, OM_uint32, __nonnull gss_buffer_t);
+
+void
+_gss_load_plugins(void);

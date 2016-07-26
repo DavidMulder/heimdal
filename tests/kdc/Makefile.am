@@ -15,6 +15,7 @@ SCRIPT_TESTS = \
 	check-delegation \
 	check-des \
 	check-digest \
+	check-fast \
 	check-kadmin \
 	check-hdb-mitdb \
 	check-kdc \
@@ -45,6 +46,9 @@ do_subst = sed $(do_dlopen) \
 	-e 's,[@]admport[@],$(admport),g' \
 	-e 's,[@]pwport[@],$(pwport),g' \
 	-e 's,[@]objdir[@],$(top_builddir)/tests/kdc,g' \
+	-e 's,[@]testdir[@],$(top_builddir)/tests/kdc,g' \
+	-e 's,[@]certdir[@],$(top_srcdir)/lib/hx509/data,g' \
+	-e 's,[@]confdir[@],$(top_builddir)/tests/kdc,g' \
 	-e 's,[@]top_builddir[@],$(top_builddir),g' \
 	-e 's,[@]EGREP[@],$(EGREP),g' 
 
@@ -64,6 +68,11 @@ check-des: check-des.in Makefile krb5.conf
 	$(do_subst) < $(srcdir)/check-des.in > check-des.tmp
 	chmod +x check-des.tmp
 	mv check-des.tmp check-des
+
+check-fast: check-fast.in Makefile
+	$(do_subst) < $(srcdir)/check-fast.in > check-fast.tmp
+	chmod +x check-fast.tmp
+	mv check-fast.tmp check-fast
 
 check-hdb-mitdb: check-hdb-mitdb.in Makefile krb5-hdb-mitdb.conf
 	$(do_subst) < $(srcdir)/check-hdb-mitdb.in > check-hdb-mitdb.tmp

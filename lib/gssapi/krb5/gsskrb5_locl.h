@@ -38,14 +38,63 @@
 
 #include <config.h>
 
+#include <gssapi_rewrite.h>
+
 #include <krb5_locl.h>
 #include <gkrb5_err.h>
 #include <gssapi.h>
 #include <gssapi_mech.h>
 #include <gssapi_krb5.h>
+#include <gssapi_spi.h>
 #include <assert.h>
 
+#include <heimbase.h>
+
+#include <pku2u_asn1.h>
+#include <gssapi_asn1.h>
+
+#include <gsskrb5_crypto.h>
+
 #include "cfx.h"
+
+#ifdef __APPLE_PRIVATE__
+#include <CommonCrypto/CommonCryptor.h>
+#ifndef __APPLE_TARGET_EMBEDDED__
+#include <CommonCrypto/CommonCryptorSPI.h>
+#endif
+#endif
+
+typedef struct gsskrb5_ctx *gsskrb5_ctx;
+typedef struct gsskrb5_cred *gsskrb5_cred;
+
+typedef OM_uint32
+(*gsskrb5_acceptor_state)(OM_uint32 *minor_status,
+			  gsskrb5_ctx ctx,
+			  krb5_context context,
+			  const gss_cred_id_t acceptor_cred_handle,
+			  const gss_buffer_t input_token_buffer,
+			  const gss_channel_bindings_t input_chan_bindings,
+			  gss_name_t * src_name,
+			  gss_OID * mech_type,
+			  gss_buffer_t output_token,
+			  OM_uint32 * ret_flags,
+			  OM_uint32 * time_rec,
+			  gss_cred_id_t * delegated_cred_handle);
+
+typedef OM_uint32
+(*gsskrb5_initator_state)(OM_uint32 * minor_status,
+			  gsskrb5_cred cred,
+			  gsskrb5_ctx ctx,
+			  krb5_context context,
+			  gss_name_t name,
+			  const gss_OID mech_type,
+			  OM_uint32 req_flags,
+			  OM_uint32 time_req,
+			  const gss_channel_bindings_t input_chan_bindings,
+			  const gss_buffer_t input_token,
+			  gss_buffer_t output_token,
+			  OM_uint32 * ret_flags,
+			  OM_uint32 * time_rec);
 
 /*
  *
@@ -53,55 +102,68 @@
 
 struct gss_msg_order;
 
-typedef struct gsskrb5_ctx {
+struct gsskrb5_ctx {
+  struct gsskrb5_crypto gk5c;
+  gss_OID mech;
   struct krb5_auth_context_data *auth_context;
   struct krb5_auth_context_data *deleg_auth_context;
   krb5_principal source, target;
 #define IS_DCE_STYLE(ctx) (((ctx)->flags & GSS_C_DCE_STYLE) != 0)
   OM_uint32 flags;
-  enum { LOCAL = 1, OPEN = 2,
-	 COMPAT_OLD_DES3 = 4,
-         COMPAT_OLD_DES3_SELECTED = 8,
-	 ACCEPTOR_SUBKEY = 16,
-	 RETRIED = 32,
-	 CLOSE_CCACHE = 64,
-	 IS_CFX = 128
+    enum { LOCAL			= 0x001,
+	   OPEN				= 0x002,
+	   COMPAT_OLD_DES3		= 0x004,
+	   COMPAT_OLD_DES3_SELECTED	= 0x008,
+	   CLOSE_CCACHE 		= 0x010,
+	   DESTROY_CCACHE		= 0x020,
+	   IS_CFX 			= 0x040,
+	   PAC_VALID		        = 0x080,
+	   RETRIED_SKEW			= 0x100,
+	   RETRIED_NEWTICKET		= 0x200,
   } more_flags;
-  enum gss_ctx_id_t_state {
-      /* initiator states */
-      INITIATOR_START,
-      INITIATOR_RESTART,
-      INITIATOR_WAIT_FOR_MUTAL,
-      INITIATOR_READY,
-      /* acceptor states */
-      ACCEPTOR_START,
-      ACCEPTOR_WAIT_FOR_DCESTYLE,
-      ACCEPTOR_READY
-  } state;
+    gsskrb5_acceptor_state acceptor_state;
+    gsskrb5_initator_state initiator_state;
   krb5_creds *kcred;
   krb5_ccache ccache;
   struct krb5_ticket *ticket;
-  OM_uint32 lifetime;
+    time_t endtime;
   HEIMDAL_MUTEX ctx_id_mutex;
-  struct gss_msg_order *order;
   krb5_keyblock *service_keyblock;
   krb5_data fwd_data;
-  krb5_crypto crypto;
-} *gsskrb5_ctx;
+#ifdef PKINIT
+    hx509_cert cert;
+#endif
+    krb5_storage *messages;
 
-typedef struct {
+    /* IAKERB */
+    krb5_get_init_creds_opt *gic_opt;
+    krb5_init_creds_context asctx;
+    krb5_tkt_creds_context tgsctx;
+    krb5_data *cookie;
+    char *password;
+    krb5_realm iakerbrealm;
+    krb5_data friendlyname;
+    krb5_data lkdchostname;
+
+};
+
+struct gsskrb5_cred {
   krb5_principal principal;
   int cred_flags;
 #define GSS_CF_DESTROY_CRED_ON_RELEASE	1
 #define GSS_CF_NO_CI_FLAGS		2
+#define GSS_CF_IAKERB_RESOLVED		4
   struct krb5_keytab_data *keytab;
-  OM_uint32 lifetime;
+    time_t endtime;
   gss_cred_usage_t usage;
-  gss_OID_set mechanisms;
   struct krb5_ccache_data *ccache;
   HEIMDAL_MUTEX cred_id_mutex;
   krb5_enctype *enctypes;
-} *gsskrb5_cred;
+#ifdef PKINIT
+    hx509_cert cert;
+#endif
+    char *password;
+};
 
 typedef struct Principal *gsskrb5_name;
 
@@ -126,6 +188,25 @@ extern HEIMDAL_MUTEX gssapi_keytab_mutex;
     }								\
 } while (0)
 
+#define GSSAPI_KRB5_INIT_GOTO(ctx,_label) do {			\
+    krb5_error_code kret_gss_init;				\
+    if((kret_gss_init = _gsskrb5_init (ctx)) != 0)		\
+	goto _label;						\
+} while (0)
+
+#define GSSAPI_KRB5_INIT_VOID(ctx) do {				\
+    krb5_error_code kret_gss_init;				\
+    if((kret_gss_init = _gsskrb5_init (ctx)) != 0)		\
+	return;							\
+} while (0)
+
+#define GSSAPI_KRB5_INIT_STATUS(ctx, status) do {		\
+    krb5_error_code kret_gss_init;				\
+    if((kret_gss_init = _gsskrb5_init (ctx)) != 0)		\
+	return GSS_S_FAILURE;					\
+} while (0)
+
+
 /* sec_context flags */
 
 #define SC_LOCAL_ADDRESS  0x01
@@ -136,5 +217,21 @@ extern HEIMDAL_MUTEX gssapi_keytab_mutex;
 
 /* type to signal that that dns canon maybe should be done */
 #define MAGIC_HOSTBASED_NAME_TYPE 4711
+
+extern heim_string_t _gsskrb5_kGSSICPassword;
+extern heim_string_t _gsskrb5_kGSSICKerberosCacheName;
+extern heim_string_t _gsskrb5_kGSSICSiteName;
+extern heim_string_t _gsskrb5_kGSSICCertificate;
+extern heim_string_t _gsskrb5_kGSSICLKDCHostname;
+extern heim_string_t _gsskrb5_kGSSICAppIdentifierACL;
+extern heim_string_t _gsskrb5_kGSSICAppleSourceApp;
+extern heim_string_t _gsskrb5_kGSSICAppleSourceAppAuditToken;
+extern heim_string_t _gsskrb5_kGSSICAppleSourceAppPID;
+extern heim_string_t _gsskrb5_kGSSICAppleSourceAppUUID;
+extern heim_string_t _gsskrb5_kGSSICAppleSourceAppSigningIdentity;
+extern heim_string_t _gsskrb5_kGSSICVerifyCredential;
+extern heim_string_t _gsskrb5_kGSSICVerifyCredentialAcceptorName;
+extern heim_string_t _gsskrb5_kGSSICCreateNewCredential;
+
 
 #endif

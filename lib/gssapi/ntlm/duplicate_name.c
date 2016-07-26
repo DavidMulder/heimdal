@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -33,16 +35,33 @@
 
 #include "ntlm.h"
 
-OM_uint32 GSSAPI_CALLCONV
-_gss_ntlm_duplicate_name (
+OM_uint32 _gss_ntlm_duplicate_name (
             OM_uint32 * minor_status,
             const gss_name_t src_name,
             gss_name_t * dest_name
            )
 {
+    ntlm_name dn = calloc(1, sizeof(*dn));
+    ntlm_name sn = (ntlm_name)src_name;
+
+    if (dn) {
+	dn->user = strdup(sn->user);
+	dn->domain = strdup(sn->domain);
+	dn->flags = sn->flags;
+	memcpy(dn->ds_uuid, sn->ds_uuid, sizeof(dn->ds_uuid));
+	memcpy(dn->uuid, sn->uuid, sizeof(dn->uuid));
+    }
+    if (dn == NULL || dn->user == NULL || dn->domain == NULL) {
+	gss_name_t tempn =  (gss_name_t)dn;
+	_gss_ntlm_release_name(minor_status, &tempn);
+	*minor_status = ENOMEM;
+	return GSS_S_FAILURE;
+    }
+
+    *dest_name = (gss_name_t)dn;
+	
     if (minor_status)
 	*minor_status = 0;
-    if (dest_name)
-	*dest_name = NULL;
+
     return GSS_S_COMPLETE;
 }

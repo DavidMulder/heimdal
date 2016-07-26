@@ -76,7 +76,8 @@ krb5_sendauth(krb5_context context,
 	      krb5_creds **out_creds)
 {
     krb5_error_code ret;
-    uint32_t len, net_len;
+    uint32_t net_len;
+    ssize_t len;
     const char *version = KRB5_SENDAUTH_VERSION;
     u_char repl;
     krb5_data ap_req, error_data;
@@ -175,14 +176,18 @@ krb5_sendauth(krb5_context context,
     ret = krb5_write_message (context,
 			      p_fd,
 			      &ap_req);
-    if (ret)
+    if (ret) {
+	krb5_set_error_message(context, ret, "krb5_sendauth: server closed connection");
 	return ret;
+    }
 
     krb5_data_free (&ap_req);
 
     ret = krb5_read_message (context, p_fd, &error_data);
-    if (ret)
+    if (ret) {
+	krb5_set_error_message(context, ret, "krb5_sendauth: server closed connection");
 	return ret;
+    }
 
     if (error_data.length != 0) {
 	KRB_ERROR error;
@@ -217,8 +222,10 @@ krb5_sendauth(krb5_context context,
 	ret = krb5_read_message (context,
 				 p_fd,
 				 &ap_rep);
-	if (ret)
+	if (ret) {
+	    krb5_set_error_message(context, ret, "krb5_sendauth: server closed connection");
 	    return ret;
+	}
 
 	ret = krb5_rd_rep (context, *auth_context, &ap_rep,
 			   rep_result ? rep_result : &ignore);

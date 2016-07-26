@@ -38,7 +38,7 @@
  */
 
 static krb5_boolean
-match_exact(const void *data, const char *appl_version)
+match_exact(void *data, const char *appl_version)
 {
     return strcmp(data, appl_version) == 0;
 }
@@ -63,9 +63,8 @@ KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_recvauth_match_version(krb5_context context,
 			    krb5_auth_context *auth_context,
 			    krb5_pointer p_fd,
-			    krb5_boolean (*match_appl_version)(const void *,
-							       const char*),
-			    const void *match_data,
+			    krb5_boolean (*match_appl_version)(void *, const char*),
+			    void *match_data,
 			    krb5_principal server,
 			    int32_t flags,
 			    krb5_keytab keytab,
@@ -111,7 +110,7 @@ krb5_recvauth_match_version(krb5_context context,
 	}
 	len = ntohl(len);
 	if (len != sizeof(her_version)
-	    || krb5_net_read (context, p_fd, her_version, len) != len
+	    || krb5_net_read (context, p_fd, her_version, len) != (ssize_t)len
 	    || strncmp (version, her_version, len)) {
 	    repl = 1;
 	    krb5_net_write (context, p_fd, &repl, 1);
@@ -131,6 +130,11 @@ krb5_recvauth_match_version(krb5_context context,
 	return KRB5_SENDAUTH_BADAPPLVERS;
     }
     len = ntohl(len);
+    if (len > UINT_MAX / 16) {
+	krb5_set_error_message(context, ERANGE,
+			       N_("packet to large", ""));
+	return ERANGE;
+    }
     her_appl_version = malloc (len);
     if (her_appl_version == NULL) {
 	repl = 2;
@@ -139,7 +143,7 @@ krb5_recvauth_match_version(krb5_context context,
 			       N_("malloc: out of memory", ""));
 	return ENOMEM;
     }
-    if (krb5_net_read (context, p_fd, her_appl_version, len) != len
+    if (krb5_net_read (context, p_fd, her_appl_version, len) != (ssize_t)len
 	|| !(*match_appl_version)(match_data, her_appl_version)) {
 	repl = 2;
 	krb5_net_write (context, p_fd, &repl, 1);
@@ -160,8 +164,10 @@ krb5_recvauth_match_version(krb5_context context,
 
     krb5_data_zero (&data);
     ret = krb5_read_message (context, p_fd, &data);
-    if (ret)
+    if (ret) {
+	krb5_set_error_message(context, ret, "krb5_recvauth: client closed connection");
 	return ret;
+    }
 
     ret = krb5_rd_req (context,
 		       auth_context,
@@ -210,6 +216,7 @@ krb5_recvauth_match_version(krb5_context context,
 
 	ret = krb5_write_message (context, p_fd, &data);
 	if (ret) {
+	    krb5_set_error_message(context, ret, "krb5_recvauth: server closed connection");
 	    krb5_free_ticket(context, *ticket);
 	    *ticket = NULL;
 	    return ret;

@@ -3,7 +3,7 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
- * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ * Portions Copyright (c) 2009 - 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,6 +45,14 @@ struct heim_icred {
     gid_t gid;
     pid_t pid;
     pid_t session;
+    /* socket based auth */
+    struct sockaddr *client;
+    struct sockaddr_storage __clientss;
+    krb5_socklen_t client_size;
+    struct sockaddr *server;
+    struct sockaddr_storage __serverss;
+    krb5_socklen_t server_size;
+
 };
 
 void
@@ -77,6 +85,19 @@ heim_ipc_cred_get_session(heim_icred cred)
     return cred->session;
 }
 
+struct sockaddr *
+heim_ipc_cred_get_client_address(heim_icred cred, krb5_socklen_t *sa_size)
+{
+    *sa_size = cred->client_size;
+    return cred->client;
+}
+
+struct sockaddr *
+heim_ipc_cred_get_server_address(heim_icred cred, krb5_socklen_t *sa_size)
+{
+    *sa_size = cred->server_size;
+    return cred->server;
+}
 
 int
 _heim_ipc_create_cred(uid_t uid, gid_t gid, pid_t pid, pid_t session, heim_icred *cred)
@@ -88,6 +109,34 @@ _heim_ipc_create_cred(uid_t uid, gid_t gid, pid_t pid, pid_t session, heim_icred
     (*cred)->gid = gid;
     (*cred)->pid = pid;
     (*cred)->session = session;
+    return 0;
+}
+
+int
+_heim_ipc_create_network_cred(struct sockaddr *client, krb5_socklen_t client_size,
+			      struct sockaddr *server, krb5_socklen_t server_size,
+			      heim_icred *cred)
+{
+    *cred = calloc(1, sizeof(**cred));
+    if (*cred == NULL)
+	return ENOMEM;
+    (*cred)->uid = (uid_t)-1;
+    (*cred)->gid = (uid_t)-1;
+    (*cred)->pid = (uid_t)-1;
+    (*cred)->session = (uid_t)-1;
+
+    if (client_size > sizeof((*cred)->__clientss))
+	client_size = sizeof((*cred)->__clientss);
+    memcpy(&(*cred)->__clientss, client, client_size);
+    (*cred)->client_size = client_size;
+    (*cred)->client = (struct sockaddr *)&(*cred)->__clientss;
+
+    if (server_size > sizeof((*cred)->__serverss))
+	server_size = sizeof((*cred)->__serverss);
+    memcpy(&(*cred)->__serverss, server, server_size);
+    (*cred)->server_size = server_size;
+    (*cred)->server = (struct sockaddr *)&(*cred)->__serverss;
+
     return 0;
 }
 

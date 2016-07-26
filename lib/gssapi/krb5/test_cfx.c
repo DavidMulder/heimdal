@@ -52,7 +52,7 @@ test_range(const struct range *r, int integ,
 {
     krb5_error_code ret;
     size_t size, rsize;
-    struct gsskrb5_ctx ctx;
+    struct gsskrb5_crypto ctx;
 
     for (size = r->lower; size < r->upper; size++) {
 	size_t cksumsize;
@@ -77,7 +77,6 @@ test_range(const struct range *r, int integ,
 	ret = _gsskrb5cfx_wrap_length_cfx(context,
 					  crypto,
 					  integ,
-					  0,
 					  max_wrap_size,
 					  &rsize, &cksumsize, &padsize);
 	if (ret)
@@ -99,7 +98,7 @@ test_special(krb5_context context, krb5_crypto crypto,
     OM_uint32 max_wrap_size;
     size_t cksumsize;
     uint16_t padsize;
-    struct gsskrb5_ctx ctx;
+    struct gsskrb5_crypto ctx;
     OM_uint32 minor;
 
     ctx.crypto = crypto;
@@ -119,7 +118,6 @@ test_special(krb5_context context, krb5_crypto crypto,
     ret = _gsskrb5cfx_wrap_length_cfx(context,
 				      crypto,
 				      integ,
-				      0,
 				      max_wrap_size,
 				      &rsize, &cksumsize, &padsize);
     if (ret)

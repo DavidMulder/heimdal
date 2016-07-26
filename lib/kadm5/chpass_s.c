@@ -40,7 +40,9 @@ change(void *server_handle,
        krb5_principal princ,
        int keepold,
        const char *password,
-       int cond)
+       int cond,
+       int n_ks_tuple,
+       krb5_key_salt_tuple *ks_tuple)
 {
     kadm5_server_context *context = server_handle;
     hdb_entry_ex ent;
@@ -48,6 +50,8 @@ change(void *server_handle,
     Key *keys;
     size_t num_keys;
     int existsp = 0;
+    int flags;
+    unsigned int modify_flags;
 
     memset(&ent, 0, sizeof(ent));
     if (!context->keep_open) {
@@ -56,10 +60,16 @@ change(void *server_handle,
 	    return ret;
     }
 
-    ret = context->db->hdb_fetch_kvno(context->context, context->db, princ,
-				      HDB_F_DECRYPT|HDB_F_GET_ANY|HDB_F_ADMIN_DATA, 0, &ent);
+    flags = HDB_F_GET_ANY|HDB_F_ADMIN_DATA;
+    if (cond)
+	flags |= HDB_F_DECRYPT;
+
+    ret = context->db->hdb_fetch_kvno(context->context, context->db, princ, flags, 0, &ent);
     if(ret)
 	goto out;
+
+    modify_flags = KADM5_PRINCIPAL | KADM5_MOD_NAME | KADM5_MOD_TIME |
+	KADM5_KVNO | KADM5_PW_EXPIRATION | KADM5_TL_DATA;
 
     if (keepold || cond) {
 	/*
@@ -73,7 +83,8 @@ change(void *server_handle,
 
     if (context->db->hdb_capability_flags & HDB_CAP_F_HANDLE_PASSWORDS) {
 	ret = context->db->hdb_password(context->context, context->db,
-					&ent, password, cond);
+					&ent, password,
+					cond ? HDB_PWD_CONDITIONAL : 0);
 	if (ret)
 	    goto out2;
     } else {
@@ -84,12 +95,13 @@ change(void *server_handle,
 	ent.entry.keys.len = 0;
 	ent.entry.keys.val = NULL;
 
-	ret = _kadm5_set_keys(context, &ent.entry, password);
+	ret = _kadm5_set_keys(context, &ent.entry, password,
+			      n_ks_tuple, ks_tuple);
 	if(ret) {
-	    _kadm5_free_keys(context->context, num_keys, keys);
+	    _kadm5_free_keys(context->context, (int)num_keys, keys);
 	    goto out2;
 	}
-	_kadm5_free_keys(context->context, num_keys, keys);
+	_kadm5_free_keys(context->context, (int)num_keys, keys);
 
 	if (cond) {
 	    HDB_extension *ext;
@@ -110,6 +122,8 @@ change(void *server_handle,
     }
     ent.entry.kvno++;
 
+    modify_flags |= KADM5_KEY_DATA;
+	
     if (keepold) {
 	ret = hdb_seal_keys(context->context, context->db, &ent.entry);
 	if (ret)
@@ -134,15 +148,11 @@ change(void *server_handle,
 	goto out2;
 
     ret = context->db->hdb_store(context->context, context->db,
-				 HDB_F_REPLACE, &ent);
+				 HDB_F_REPLACE|HDB_F_CHANGE_PASSWORD, &ent);
     if (ret)
 	goto out2;
 
-    kadm5_log_modify (context,
-		      &ent.entry,
-		      KADM5_PRINCIPAL | KADM5_MOD_NAME | KADM5_MOD_TIME |
-		      KADM5_KEY_DATA | KADM5_KVNO | KADM5_PW_EXPIRATION |
-		      KADM5_TL_DATA);
+    kadm5_log_modify(context, &ent.entry, modify_flags);
 
 out2:
     hdb_free_entry(context->context, &ent);
@@ -162,9 +172,11 @@ kadm5_ret_t
 kadm5_s_chpass_principal_cond(void *server_handle,
 			      krb5_principal princ,
 			      int keepold,
-			      const char *password)
+			      const char *password,
+			      int n_ks_tuple,
+			      krb5_key_salt_tuple *ks_tuple)
 {
-    return change (server_handle, princ, keepold, password, 1);
+    return change (server_handle, princ, keepold, password, 1, n_ks_tuple, ks_tuple);
 }
 
 /*
@@ -175,9 +187,11 @@ kadm5_ret_t
 kadm5_s_chpass_principal(void *server_handle,
 			 krb5_principal princ,
 			 int keepold,
-			 const char *password)
+			 const char *password,
+			 int n_ks_tuple,
+			 krb5_key_salt_tuple *ks_tuple)
 {
-    return change (server_handle, princ, keepold, password, 0);
+    return change (server_handle, princ, keepold, password, 0, n_ks_tuple, ks_tuple);
 }
 
 /*

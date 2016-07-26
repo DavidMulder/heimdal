@@ -67,6 +67,7 @@ add_one_principal (const char *name,
 		   int rand_key,
 		   int rand_password,
 		   int use_defaults,
+		   int verbose_flag,
 		   char *password,
 		   char *policy,
 		   krb5_key_data *key_data,
@@ -129,7 +130,7 @@ add_one_principal (const char *name,
 	krb5_unparse_name(context, princ_ent, &princ_name);
 	asprintf (&prompt, "%s's Password: ", princ_name);
 	free (princ_name);
-	ret = UI_UTIL_read_pw_string (pwbuf, sizeof(pwbuf), prompt, 1);
+	ret = UI_UTIL_read_pw_string_stdio(pwbuf, sizeof(pwbuf), prompt, 1);
 	free (prompt);
 	if (ret) {
 	    ret = KRB5_LIBOS_BADPWDMATCH;
@@ -140,6 +141,8 @@ add_one_principal (const char *name,
     }
 
     ret = kadm5_create_principal(kadm_handle, &princ, mask, password);
+    princ.principal = NULL;
+    kadm5_free_principal_ent(kadm_handle, &princ);
     if(ret) {
 	krb5_warn(context, ret, "kadm5_create_principal");
 	goto out;
@@ -157,8 +160,12 @@ add_one_principal (const char *name,
 	    krb5_free_keyblock_contents(context, &new_keys[i]);
 	if (n_keys > 0)
 	    free(new_keys);
-	kadm5_get_principal(kadm_handle, princ_ent, &princ,
+	ret = kadm5_get_principal(kadm_handle, princ_ent, &princ,
 			    KADM5_PRINCIPAL | KADM5_KVNO | KADM5_ATTRIBUTES);
+	if(ret){
+	    krb5_warn(context, ret, "kadm5_get_principal");
+	    goto out;
+	}
 	princ.attributes &= (~KRB5_KDB_DISALLOW_ALL_TIX);
 	/*
 	 * Updating kvno w/o key data and vice-versa gives _kadm5_setup_entry()
@@ -186,6 +193,14 @@ add_one_principal (const char *name,
 	printf ("added %s with password \"%s\"\n", princ_name, password);
 	free (princ_name);
     }
+
+    if (verbose_flag && !rand_password) {
+	char *princ_name;
+	krb5_unparse_name(context, princ_ent, &princ_name);
+	printf ("Principal \"%s\" created.\n", princ_name);
+	free (princ_name);
+    }
+
 out:
     kadm5_free_principal_ent(kadm_handle, &princ); /* frees princ_ent */
     if(default_ent)
@@ -248,6 +263,7 @@ add_new_key(struct add_options *opt, int argc, char **argv)
 				 opt->random_key_flag,
 				 opt->random_password_flag,
 				 opt->use_defaults_flag,
+				 opt->verbose_flag,
 				 opt->password_string,
 				 opt->policy_string,
 				 kdp,

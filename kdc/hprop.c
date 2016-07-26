@@ -73,6 +73,7 @@ open_socket(krb5_context context, const char *hostname, const char *port)
 	s = socket (a->ai_family, a->ai_socktype, a->ai_protocol);
 	if (s < 0)
 	    continue;
+	socket_set_nopipe(s, 1);
 	if (connect (s, a->ai_addr, a->ai_addrlen) < 0) {
 	    warn ("connect(%s)", hostname);
 	    close (s);
@@ -232,7 +233,7 @@ iterate (krb5_context context,
 
     switch(type) {
     case HPROP_MIT_DUMP:
-	ret = mit_prop_dump(pd, database_name);
+	ret = hdb_mit_dump(context, database_name, v5_prop, pd);
 	if (ret)
 	    krb5_warn(context, ret, "mit_prop_dump");
 	break;

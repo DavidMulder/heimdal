@@ -101,7 +101,7 @@ check_config_files(void)
 {
     krb5_context context;
     krb5_error_code ret;
-    int i;
+    size_t i;
 
     ret = krb5_init_context(&context);
     if (ret)
@@ -118,6 +118,68 @@ check_config_files(void)
 
     krb5_free_context(context);
 }
+
+static void
+check_notify(void)
+{
+    krb5_context context, context2;
+    krb5_error_code ret;
+    krb5_boolean reread = 0, reread2 = 0;
+
+    /* check notify */
+
+    ret = krb5_init_context(&context);
+    if (ret)
+	errx(1, "krb5_init_context %d", ret);
+
+    ret = krb5_init_context(&context2);
+    if (ret)
+	errx(1, "krb5_init_context %d", ret);
+
+
+#ifdef HAVE_NOTIFY_H
+    notify_post(KRB5_CONFIGURATION_CHANGE_NOTIFY_NAME);
+#endif
+
+    ret = krb5_reload_config(context, 0, &reread);
+    if (ret)
+	errx(1, "krb5_reload_config failed");
+    
+    ret = krb5_reload_config(context2, 0, &reread2);
+    if (ret)
+	errx(1, "krb5_reload_config failed");
+
+#ifdef HAVE_NOTIFY_H
+    if (!reread)
+	errx(1, "configuration not reread!");
+#endif
+#ifdef HAVE_NOTIFY_H
+    if (!reread2)
+	errx(1, "configuration not reread!");
+#endif
+
+    krb5_free_context(context);
+    krb5_free_context(context2);
+}
+
+static void
+check_alloc_loop(void)
+{
+    krb5_context context;
+    krb5_error_code ret;
+    unsigned int i;
+
+    /*
+     * Check that looping a couple of times doesn't corrupt heap
+     */
+    for (i = 0; i < 10000; i++) {
+	ret = krb5_init_context(&context);
+	if (ret)
+	    errx(1, "krb5_init_context %d", ret);
+	krb5_free_context(context);
+    }
+}
+
 
 const char *config_string_result0[] = {
     "A", "B", "C", "D", NULL
@@ -192,7 +254,7 @@ check_escaped_strings(void)
     krb5_context context;
     krb5_config_section *c = NULL;
     krb5_error_code ret;
-    int i;
+    size_t i;
 
     ret = krb5_init_context(&context);
     if (ret)
@@ -241,6 +303,9 @@ int
 main(int argc, char **argv)
 {
     check_config_files();
+    check_notify();
+    check_alloc_loop();
     check_escaped_strings();
+
     return 0;
 }

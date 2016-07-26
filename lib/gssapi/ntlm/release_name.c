@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -33,15 +35,14 @@
 
 #include "ntlm.h"
 
-OM_uint32 GSSAPI_CALLCONV
-_gss_ntlm_release_name
+OM_uint32 _gss_ntlm_release_name
            (OM_uint32 * minor_status,
             gss_name_t * input_name
            )
 {
     if (minor_status)
 	*minor_status = 0;
-    if (input_name) {
+    if (input_name && *input_name) {
 	ntlm_name n = (ntlm_name)*input_name;
 	*input_name = GSS_C_NO_NAME;
 	free(n->user);

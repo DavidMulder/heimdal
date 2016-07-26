@@ -33,7 +33,7 @@
 
 #include "gsskrb5_locl.h"
 
-#ifdef HEIM_WEAK_CRYPTO
+#ifdef HEIM_KRB5_DES
 
 static OM_uint32
 mic_des
@@ -47,7 +47,7 @@ mic_des
            )
 {
   u_char *p;
-  EVP_MD_CTX *md5;
+  CCDigestRef md5;
   u_char hash[16];
   DES_key_schedule schedule;
   EVP_CIPHER_CTX des_ctx;
@@ -82,18 +82,21 @@ mic_des
   p += 16;
 
   /* checksum */
-  md5 = EVP_MD_CTX_create();
-  EVP_DigestInit_ex(md5, EVP_md5(), NULL);
-  EVP_DigestUpdate(md5, p - 24, 8);
-  EVP_DigestUpdate(md5, message_buffer->value, message_buffer->length);
-  EVP_DigestFinal_ex(md5, hash, NULL);
-  EVP_MD_CTX_destroy(md5);
+  md5 = CCDigestCreate(kCCDigestMD5);
+  CCDigestUpdate(md5, p - 24, 8);
+  CCDigestUpdate(md5, message_buffer->value, message_buffer->length);
+  CCDigestFinal(md5, hash);
+  CCDigestDestroy(md5);
 
   memset (&zero, 0, sizeof(zero));
   memcpy (&deskey, key->keyvalue.data, sizeof(deskey));
+#ifndef __APPLE_PRIVATE__
   DES_set_key_unchecked (&deskey, &schedule);
   DES_cbc_cksum ((void *)hash, (void *)hash, sizeof(hash),
 		 &schedule, &zero);
+#else
+  CCDesCBCCksum(hash, hash, sizeof(hash), deskey, sizeof(deskey), &zero);
+#endif
   memcpy (p - 8, hash, 8);	/* SGN_CKSUM */
 
   HEIMDAL_MUTEX_lock(&ctx->ctx_id_mutex);
@@ -129,6 +132,7 @@ mic_des
 }
 #endif
 
+#ifdef HEIM_KRB5_DES3
 static OM_uint32
 mic_des3
            (OM_uint32 * minor_status,
@@ -272,6 +276,7 @@ mic_des3
   *minor_status = 0;
   return GSS_S_COMPLETE;
 }
+#endif
 
 OM_uint32 GSSAPI_CALLCONV _gsskrb5_get_mic
            (OM_uint32 * minor_status,
@@ -289,7 +294,7 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_get_mic
   GSSAPI_KRB5_INIT (&context);
 
   if (ctx->more_flags & IS_CFX)
-      return _gssapi_mic_cfx (minor_status, ctx, context, qop_req,
+      return _gssapi_mic_cfx (minor_status, &ctx->gk5c, context, qop_req,
 			      message_buffer, message_token);
 
   HEIMDAL_MUTEX_lock(&ctx->ctx_id_mutex);
@@ -301,28 +306,30 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_get_mic
   }
 
   switch (key->keytype) {
+#ifdef HEIM_KRB5_DES
   case KRB5_ENCTYPE_DES_CBC_CRC :
   case KRB5_ENCTYPE_DES_CBC_MD4 :
   case KRB5_ENCTYPE_DES_CBC_MD5 :
-#ifdef HEIM_WEAK_CRYPTO
       ret = mic_des (minor_status, ctx, context, qop_req,
 		     message_buffer, message_token, key);
-#else
-      ret = GSS_S_FAILURE;
-#endif
       break;
+#endif
+#ifdef HEIM_KRB5_DES3
   case KRB5_ENCTYPE_DES3_CBC_MD5 :
   case KRB5_ENCTYPE_DES3_CBC_SHA1 :
       ret = mic_des3 (minor_status, ctx, context, qop_req,
 		      message_buffer, message_token, key);
       break;
+#endif
+#ifdef HEIM_KRB5_ARCFOUR
   case KRB5_ENCTYPE_ARCFOUR_HMAC_MD5:
   case KRB5_ENCTYPE_ARCFOUR_HMAC_MD5_56:
       ret = _gssapi_get_mic_arcfour (minor_status, ctx, context, qop_req,
 				     message_buffer, message_token, key);
       break;
+#endif
   default :
-      abort();
+      ret = GSS_S_FAILURE;
       break;
   }
   krb5_free_keyblock (context, key);

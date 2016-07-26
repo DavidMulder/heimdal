@@ -68,7 +68,7 @@ struct error_code *codes = NULL;
 static int
 generate_c(void)
 {
-    int n;
+    unsigned int n;
     struct error_code *ec;
 
     FILE *c_file = fopen(cfn, "w");
@@ -90,8 +90,7 @@ generate_c(void)
 
     for(ec = codes, n = 0; ec; ec = ec->next, n++) {
 	while(n < ec->number) {
-	    fprintf(c_file, "\t/* %03d */ \"Reserved %s error (%d)\",\n",
-		    n, name, n);
+	    fprintf(c_file, "\t/* %03d */ NULL,\n", n);
 	    n++;
 
 	}

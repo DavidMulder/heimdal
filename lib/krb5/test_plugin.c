@@ -48,6 +48,7 @@ resolve_fini(void *ctx)
 
 static krb5_error_code
 resolve_lookup(void *ctx,
+	       unsigned long flags,
 	       enum locate_service_type service,
 	       const char *realm,
 	       int domain,
@@ -72,12 +73,27 @@ resolve_lookup(void *ctx,
     return 0;
 }
 
+static krb5_error_code
+resolve_lookup_old(void *ctx,
+		   unsigned long flags,
+		   enum locate_service_type service,
+		   const char *realm,
+		   int domain,
+		   int type,
+		   int (*add)(void *,int,struct sockaddr *),
+		   void *addctx)
+{
+    return resolve_lookup(ctx, KRB5_PLF_ALLOW_HOMEDIR, service,
+			  realm, domain, type, add, addctx);
+}
 
 krb5plugin_service_locate_ftable resolve = {
-    0,
+    KRB5_PLUGIN_LOCATE_VERSION_2,
     resolve_init,
     resolve_fini,
+    resolve_lookup_old,
     resolve_lookup
+
 };
 
 

@@ -33,6 +33,8 @@
 
 #include "krb5_locl.h"
 
+#ifdef HEIM_KT_ANY
+
 struct any_data {
     krb5_keytab kt;
     char *name;
@@ -259,3 +261,5 @@ const krb5_kt_ops krb5_any_ops = {
     any_add_entry,
     any_remove_entry
 };
+
+#endif /* HEIM_KT_ANY */

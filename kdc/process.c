@@ -54,22 +54,29 @@ kdc_as_req(krb5_context context,
 	   krb5_data *reply,
 	   const char *from,
 	   struct sockaddr *addr,
-	   int datagram_reply,
+	   size_t max_reply_size,
 	   int *claim)
 {
+    struct kdc_request_desc r;
     krb5_error_code ret;
-    KDC_REQ req;
     size_t len;
 
-    ret = decode_AS_REQ(req_buffer->data, req_buffer->length, &req, &len);
+    memset(&r, 0, sizeof(r));
+
+    ret = decode_AS_REQ(req_buffer->data, req_buffer->length, &r.req, &len);
     if (ret)
 	return ret;
 
+    r.context = context;
+    r.config = config;
+    r.request.data = req_buffer->data;
+    r.request.length = req_buffer->length;
+
     *claim = 1;
 
-    ret = _kdc_as_rep(context, config, &req, req_buffer,
-		      reply, from, addr, datagram_reply);
-    free_AS_REQ(&req);
+    ret = _kdc_as_rep(&r, reply, from, addr, max_reply_size);
+    free_AS_REQ(&r.req);
+
     return ret;
 }
 
@@ -81,22 +88,30 @@ kdc_tgs_req(krb5_context context,
 	    krb5_data *reply,
 	    const char *from,
 	    struct sockaddr *addr,
-	    int datagram_reply,
+	    size_t max_reply_size,
 	    int *claim)
 {
+    struct kdc_request_desc r;
     krb5_error_code ret;
-    KDC_REQ req;
     size_t len;
 
-    ret = decode_TGS_REQ(req_buffer->data, req_buffer->length, &req, &len);
+    memset(&r, 0, sizeof(r));
+
+    ret = decode_TGS_REQ(req_buffer->data, req_buffer->length, &r.req, &len);
     if (ret)
 	return ret;
 
+    r.context = context;
+    r.config = config;
+    r.request.data = req_buffer->data;
+    r.request.length = req_buffer->length;
+
     *claim = 1;
 
-    ret = _kdc_tgs_rep(context, config, &req, reply,
-		       from, addr, datagram_reply);
-    free_TGS_REQ(&req);
+    ret = _kdc_tgs_rep(&r, reply, from, addr, max_reply_size);
+
+    free_TGS_REQ(&r.req);
+
     return ret;
 }
 
@@ -109,7 +124,7 @@ kdc_digest(krb5_context context,
 	   krb5_data *reply,
 	   const char *from,
 	   struct sockaddr *addr,
-	   int datagram_reply,
+	   size_t max_reply_size,
 	   int *claim)
 {
     DigestREQ digestreq;
@@ -139,7 +154,7 @@ kdc_kx509(krb5_context context,
 	  krb5_data *reply,
 	  const char *from,
 	  struct sockaddr *addr,
-	  int datagram_reply,
+	  size_t max_reply_size,
 	  int *claim)
 {
     Kx509Request kx509req;
@@ -159,7 +174,6 @@ kdc_kx509(krb5_context context,
 }
 
 #endif
-
 
 static struct krb5_kdc_service services[] =  {
     { KS_KRB5,		kdc_as_req },
@@ -184,7 +198,6 @@ krb5_kdc_process_request(krb5_context context,
 			 unsigned char *buf,
 			 size_t len,
 			 krb5_data *reply,
-			 krb5_boolean *prependlength,
 			 const char *from,
 			 struct sockaddr *addr,
 			 int datagram_reply)
@@ -193,17 +206,19 @@ krb5_kdc_process_request(krb5_context context,
     unsigned int i;
     krb5_data req_buffer;
     int claim = 0;
+    size_t max_reply_size = 0;
+
+    if (datagram_reply)
+	max_reply_size = config->max_datagram_reply_length;
 
     req_buffer.data = buf;
     req_buffer.length = len;
 
     for (i = 0; services[i].process != NULL; i++) {
 	ret = (*services[i].process)(context, config, &req_buffer,
-				     reply, from, addr, datagram_reply,
+				     reply, from, addr, max_reply_size,
 				     &claim);
 	if (claim) {
-	    if (services[i].flags & KS_NO_LENGTH)
-		*prependlength = 0;
 	    return ret;
 	}
     }
@@ -232,6 +247,10 @@ krb5_kdc_process_krb5_request(krb5_context context,
     unsigned int i;
     krb5_data req_buffer;
     int claim = 0;
+    size_t max_reply_size = 0;
+
+    if (datagram_reply)
+	max_reply_size = config->max_datagram_reply_length;
 
     req_buffer.data = buf;
     req_buffer.length = len;
@@ -240,7 +259,7 @@ krb5_kdc_process_krb5_request(krb5_context context,
 	if ((services[i].flags & KS_KRB5) == 0)
 	    continue;
 	ret = (*services[i].process)(context, config, &req_buffer,
-				     reply, from, addr, datagram_reply,
+				     reply, from, addr, max_reply_size,
 				     &claim);
 	if (claim)
 	    return ret;
@@ -264,7 +283,7 @@ krb5_kdc_save_request(krb5_context context,
     krb5_storage *sp;
     krb5_address a;
     int fd, ret;
-    uint32_t t;
+    time_t t;
     krb5_data d;
 
     memset(&a, 0, sizeof(a));
@@ -292,7 +311,7 @@ krb5_kdc_save_request(krb5_context context,
 	goto out;
 
     krb5_store_uint32(sp, 1);
-    krb5_store_uint32(sp, t);
+    krb5_store_uint32(sp, (uint32_t)t);
     krb5_store_address(sp, a);
     krb5_store_data(sp, d);
     {

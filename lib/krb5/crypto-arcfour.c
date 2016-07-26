@@ -37,6 +37,8 @@
 
 #include "krb5_locl.h"
 
+#ifdef HEIM_KRB5_ARCFOUR
+
 static struct _krb5_key_type keytype_arcfour = {
     KRB5_ENCTYPE_ARCFOUR_HMAC_MD5,
     "arcfour",
@@ -63,7 +65,7 @@ _krb5_HMAC_MD5_checksum(krb5_context context,
 			unsigned usage,
 			Checksum *result)
 {
-    EVP_MD_CTX *m;
+    CCDigestRef m;
     struct _krb5_checksum_type *c = _krb5_find_checksum (CKSUMTYPE_RSA_MD5);
     const char signature[] = "signaturekey";
     Checksum ksign_c;
@@ -74,7 +76,7 @@ _krb5_HMAC_MD5_checksum(krb5_context context,
     unsigned char ksign_c_data[16];
     krb5_error_code ret;
 
-    m = EVP_MD_CTX_create();
+    m = CCDigestCreate(kCCDigestMD5);
     if (m == NULL) {
 	krb5_set_error_message(context, ENOMEM, N_("malloc: out of memory", ""));
 	return ENOMEM;
@@ -84,20 +86,20 @@ _krb5_HMAC_MD5_checksum(krb5_context context,
     ret = _krb5_internal_hmac(context, c, signature, sizeof(signature),
 			      0, key, &ksign_c);
     if (ret) {
-	EVP_MD_CTX_destroy(m);
+	CCDigestDestroy(m);
 	return ret;
     }
     ksign.key = &kb;
     kb.keyvalue = ksign_c.checksum;
-    EVP_DigestInit_ex(m, EVP_md5(), NULL);
+
     t[0] = (usage >>  0) & 0xFF;
     t[1] = (usage >>  8) & 0xFF;
     t[2] = (usage >> 16) & 0xFF;
     t[3] = (usage >> 24) & 0xFF;
-    EVP_DigestUpdate(m, t, 4);
-    EVP_DigestUpdate(m, data, len);
-    EVP_DigestFinal_ex (m, tmp, NULL);
-    EVP_MD_CTX_destroy(m);
+    CCDigestUpdate(m, t, 4);
+    CCDigestUpdate(m, data, len);
+    CCDigestFinal(m, tmp);
+    CCDigestDestroy(m);
 
     ret = _krb5_internal_hmac(context, c, tmp, sizeof(tmp), 0, &ksign, result);
     if (ret)
@@ -323,3 +325,5 @@ struct _krb5_encryption_type _krb5_enctype_arcfour_hmac_md5 = {
     0,
     NULL
 };
+
+#endif /* HEIM_KRB5_ARCFOUR */

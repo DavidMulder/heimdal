@@ -27,11 +27,26 @@
  */
 
 #include "mech_locl.h"
+#include <gssapi_spi.h>
 #include <heim_threads.h>
 
+/**
+ * Destroy a credential 
+ *
+ * gss_release_cred() frees the memory, gss_destroy_cred() removes the credentials from memory/disk and then call gss_release_cred() on the credential.
+ *
+ * @param min_stat minor status code
+ * @param cred_handle credentail to destory
+ *
+ * @returns a gss_error code, see gss_display_status() about printing
+ *          the error code.
+ * 
+ * @ingroup gssapi
+ */
+
 OM_uint32 GSSAPI_LIB_FUNCTION
-gss_destroy_cred(void *status,
-		 gss_cred_id_t *cred_handle)
+gss_destroy_cred(OM_uint32 *__nonnull min_stat,
+		 __nonnull gss_cred_id_t * __nullable cred_handle)
 {
     struct _gss_cred *cred;
     struct _gss_mechanism_cred *mc;
@@ -43,10 +58,12 @@ gss_destroy_cred(void *status,
 	return GSS_S_COMPLETE;
 
     cred = (struct _gss_cred *)*cred_handle;
+    *cred_handle = GSS_C_NO_CREDENTIAL;
 
     while (HEIM_SLIST_FIRST(&cred->gc_mc)) {
 	mc = HEIM_SLIST_FIRST(&cred->gc_mc);
 	HEIM_SLIST_REMOVE_HEAD(&cred->gc_mc, gmc_link);
+
 	if (mc->gmc_mech->gm_destroy_cred)
 	    mc->gmc_mech->gm_destroy_cred(&junk, &mc->gmc_cred);
 	else

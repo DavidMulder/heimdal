@@ -28,6 +28,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_appdefault_time;
 		krb5_append_addresses;
 		krb5_auth_con_addflags;
+		krb5_auth_con_clear;
 		krb5_auth_con_free;
 		krb5_auth_con_genaddrs;
 		krb5_auth_con_generatelocalsubkey;
@@ -122,7 +123,10 @@ HEIMDAL_KRB5_2.0 {
 		krb5_cc_store_cred;
 		krb5_cc_support_switch;
 		krb5_cc_switch;
- 		krb5_cc_set_friendly_name;
+		krb5_cccol_cursor_free;
+		krb5_cccol_cursor_new;
+		krb5_cccol_cursor_next;
+		krb5_cccol_last_change_time;
 		krb5_change_password;
 		krb5_check_transited;
 		krb5_check_transited_realms;
@@ -133,8 +137,8 @@ HEIMDAL_KRB5_2.0 {
 		krb5_checksumsize;
 		krb5_cksumtype_to_enctype;
 		krb5_cksumtype_valid;
-		krb5_clear_error_string;
 		krb5_clear_error_message;
+		krb5_clear_error_string;
 		krb5_closelog;
 		krb5_compare_creds;
 		krb5_config_file_free;
@@ -184,6 +188,8 @@ HEIMDAL_KRB5_2.0 {
 		krb5_crypto_getenctype;
 		krb5_crypto_getpadsize;
 		krb5_crypto_init;
+		krb5_crypto_length;
+		krb5_crypto_length_iov;
 		krb5_crypto_overhead;
 		krb5_crypto_prf;
 		krb5_crypto_prf_length;
@@ -210,6 +216,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_decode_ap_req;
 		krb5_decrypt;
 		krb5_decrypt_EncryptedData;
+		krb5_decrypt_iov_ivec;
 		krb5_decrypt_ivec;
 		krb5_decrypt_ticket;
 		krb5_derive_key;
@@ -256,9 +263,10 @@ HEIMDAL_KRB5_2.0 {
 		krb5_encode_EncTicketPart;
 		krb5_encrypt;
 		krb5_encrypt_EncryptedData;
+		krb5_encrypt_iov_ivec;
 		krb5_encrypt_ivec;
-		krb5_enctype_enable;
 		krb5_enctype_disable;
+		krb5_enctype_enable;
 		krb5_enctype_keybits;
 		krb5_enctype_keysize;
 		krb5_enctype_to_keytype;
@@ -288,8 +296,8 @@ HEIMDAL_KRB5_2.0 {
 		krb5_free_default_realm;
 		krb5_free_error;
 		krb5_free_error_contents;
-		krb5_free_error_string;
 		krb5_free_error_message;
+		krb5_free_error_string;
 		krb5_free_host_realm;
 		krb5_free_kdc_rep;
 		krb5_free_keyblock;
@@ -447,7 +455,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_net_write_block;
 		krb5_ntlm_alloc;
 		krb5_ntlm_free;
-		krb5_ntlm_init_get_challange;
+		krb5_ntlm_init_get_challenge;
 		krb5_ntlm_init_get_flags;
 		krb5_ntlm_init_get_opaque;
 		krb5_ntlm_init_get_targetinfo;
@@ -528,6 +536,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_rd_req_in_set_pac_check;
 		krb5_rd_req_out_ctx_free;
 		krb5_rd_req_out_get_ap_req_options;
+		krb5_rd_req_out_get_flags;
 		krb5_rd_req_out_get_keyblock;
 		krb5_rd_req_out_get_ticket;
 		krb5_rd_req_with_keyblock;
@@ -598,6 +607,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_storage_from_data;
 		krb5_storage_from_fd;
 		krb5_storage_from_mem;
+		krb5_storage_from_mem_copy;
 		krb5_storage_from_readonly_mem;
 		krb5_storage_get_byteorder;
 		krb5_storage_get_eof_code;
@@ -670,6 +680,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_verify_opt_set_keytab;
 		krb5_verify_opt_set_secure;
 		krb5_verify_opt_set_service;
+		krb5_verify_opt_set_server;
 		krb5_verify_user;
 		krb5_verify_user_lrealm;
 		krb5_verify_user_opt;
@@ -688,9 +699,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_write_priv_message;
 		krb5_write_safe_message;
 		krb5_xfree;
-		krb5_cccol_cursor_new;
-		krb5_cccol_cursor_next;
-		krb5_cccol_cursor_free;
+ 		krb5_cc_set_friendly_name;
 
 		# com_err error tables
 		initialize_krb5_error_table_r;
@@ -763,13 +772,27 @@ HEIMDAL_KRB5_2.0 {
 		_krb5_s4u2self_to_checksumdata;
 
 		# kinit helper
-		krb5_get_init_creds_opt_set_pkinit_user_certs;
+		krb5_get_init_creds_opt_set_pkinit_user_cert;
 		krb5_pk_enterprise_cert;
+		krb5_process_last_request;
+		krb5_init_creds_init;
+		krb5_init_creds_set_service;
+		krb5_init_creds_set_fast_ccache;
+		krb5_init_creds_set_keytab;
+		krb5_init_creds_get;
+		krb5_init_creds_set_password;
+		krb5_init_creds_store;
+		krb5_init_creds_free;
 
 		# testing
 		_krb5_aes_cts_encrypt;
 		_krb5_n_fold;
 		_krb5_expand_default_cc_name;
+		
+		# FAST
+		_krb5_fast_cf2;
+		_krb5_fast_armor_key;
+
 	local:
 		*;
 };

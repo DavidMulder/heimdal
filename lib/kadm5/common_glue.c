@@ -42,7 +42,17 @@ kadm5_chpass_principal(void *server_handle,
 		       krb5_principal princ,
 		       const char *password)
 {
-    return __CALL(chpass_principal, (server_handle, princ, 0, password));
+    return kadm5_chpass_principal_3(server_handle, princ, 0, 0, NULL, password);
+}
+
+kadm5_ret_t
+kadm5_chpass_principal2(void *server_handle,
+			krb5_principal princ,
+			const char *password,
+			krb5_enctype *enctypes)
+{
+    return __CALL(chpass_principal, (server_handle, princ, 0, password,
+				     0, NULL));
 }
 
 kadm5_ret_t
@@ -53,14 +63,8 @@ kadm5_chpass_principal_3(void *server_handle,
 		         krb5_key_salt_tuple *ks_tuple,
 		         const char *password)
 {
-    /*
-     * We should get around to implementing this...  This can be useful
-     * for, e.g., x-realm principals.  For now we need the _3() to get
-     * certain applications written to the kadm5 API to build and run.
-     */
-    if (n_ks_tuple > 0)
-	return KADM5_KS_TUPLE_NOSUPP;
-    return __CALL(chpass_principal, (server_handle, princ, keepold, password));
+    return __CALL(chpass_principal, (server_handle, princ, keepold, password,
+				     n_ks_tuple, ks_tuple));
 }
 
 kadm5_ret_t
@@ -90,7 +94,19 @@ kadm5_create_principal(void *server_handle,
 		       uint32_t mask,
 		       const char *password)
 {
-    return __CALL(create_principal, (server_handle, princ, mask, password));
+    return kadm5_create_principal_2(server_handle, princ, mask, 0, NULL, password);
+}
+
+kadm5_ret_t
+kadm5_create_principal_2(void *server_handle,
+			 kadm5_principal_ent_t princ,
+			 uint32_t mask,
+			 int n_ks_tuple,
+			 krb5_key_salt_tuple *ks_tuple,
+			 const char *password)
+{
+    return __CALL(create_principal, (server_handle, princ, mask, password,
+				     n_ks_tuple, ks_tuple));
 }
 
 kadm5_ret_t
@@ -147,7 +163,7 @@ kadm5_decrypt_key(void *server_handle,
     if (kvno < 1 || stype != -1)
 	return KADM5_DECRYPT_USAGE_NOSUPP;
 
-    for (i = 0; i < entry->n_key_data; i++) {
+    for (i = 0; i < (size_t)entry->n_key_data; i++) {
 	if (ktype != entry->key_data[i].key_data_kvno)
 	    continue;
 
@@ -177,6 +193,15 @@ kadm5_randkey_principal(void *server_handle,
 			krb5_principal princ,
 			krb5_keyblock **new_keys,
 			int *n_keys)
+{
+    return kadm5_randkey_principal_3(server_handle, princ, 0, 0, NULL, new_keys, n_keys);
+}
+
+kadm5_ret_t
+kadm5_randkey_principal2(void *server_handle,
+			 krb5_principal princ,
+			 krb5_keyblock **new_keys,
+			 int *n_keys)
 {
     return __CALL(randkey_principal, (server_handle, princ, FALSE, 0, NULL,
 		  new_keys, n_keys));
@@ -280,7 +305,7 @@ kadm5_setkey_principal_3(void *server_handle,
     }
 
     princ_ent.kvno++;
-    for (i = 0; i < n_keys; i++) {
+    for (i = 0; i < (size_t)n_keys; i++) {
 	new_key_data[i].key_data_ver = 2;
 
 	/* Key */
@@ -314,7 +339,7 @@ kadm5_setkey_principal_3(void *server_handle,
 
     /* Free old keys */
     if (!keepold) {
-	for (i = 0; i < princ_ent.n_key_data; i++) {
+	for (i = 0; i < (size_t)princ_ent.n_key_data; i++) {
 	    free(princ_ent.key_data[i].key_data_contents[0]);
 	    free(princ_ent.key_data[i].key_data_contents[1]);
 	}
@@ -329,7 +354,7 @@ kadm5_setkey_principal_3(void *server_handle,
 
 out:
     if (new_key_data != NULL) {
-	for (i = 0; i < n_keys; i++) {
+	for (i = 0; i < (size_t)n_keys; i++) {
 	    free(new_key_data[i].key_data_contents[0]);
 	    free(new_key_data[i].key_data_contents[1]);
 	}

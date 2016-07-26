@@ -247,6 +247,20 @@ hdb_get_entry(krb5_context context,
     (*db->hdb_close)(context, db);
     (*db->hdb_destroy)(context, db);
  out2:
+    if (ret) {
+	krb5_error_code ret2;
+	char *p;
+
+	ret2 = krb5_unparse_name(context, principal, &p);
+	if (ret2 == 0) {
+	    krb5_set_error_message(context, ret, 
+				   "Principal %s (kvno %d) not found "
+				   "in the database %s",
+				   p, kvno, dbname);
+	    krb5_xfree(p);
+	}
+    }
+
     free(fdbname);
     free(fmkey);
     return ret;
@@ -293,7 +307,7 @@ hdb_start_seq_get(krb5_context context,
 	return ret;
     }
 
-    cursor->data = c = malloc (sizeof(*c));
+    c = malloc (sizeof(*c));
     if(c == NULL){
 	(*db->hdb_close)(context, db);
 	(*db->hdb_destroy)(context, db);

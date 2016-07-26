@@ -44,10 +44,9 @@ kcm_ccache_resolve_client(krb5_context context,
 {
     krb5_error_code ret;
 
-    ret = kcm_ccache_resolve(context, name, ccache);
+    ret = kcm_ccache_resolve_by_name(context, name, ccache);
     if (ret) {
-	kcm_log(1, "Failed to resolve cache %s: %s",
-		name, krb5_get_err_text(context, ret));
+	kcm_log(1, "Failed to resolve cache %s", name);
 	return ret;
     }
 
@@ -68,15 +67,13 @@ kcm_ccache_destroy_client(krb5_context context,
     krb5_error_code ret;
     kcm_ccache ccache;
 
-    ret = kcm_ccache_resolve(context, name, &ccache);
+    ret = kcm_ccache_resolve_by_name(context, name, &ccache);
     if (ret) {
-	kcm_log(1, "Failed to resolve cache %s: %s",
-		name, krb5_get_err_text(context, ret));
+	kcm_log(1, "Failed to resolve cache %s", name);
 	return ret;
     }
 
     ret = kcm_access(context, client, KCM_OP_DESTROY, ccache);
-    kcm_cleanup_events(context, ccache);
     kcm_release_ccache(context, ccache);
     if (ret)
 	return ret;
@@ -93,32 +90,9 @@ kcm_ccache_new_client(krb5_context context,
     krb5_error_code ret;
     kcm_ccache ccache;
 
-    /* We insist the ccache name starts with UID or UID: */
-    if (name_constraints != 0) {
-	char prefix[64];
-	size_t prefix_len;
-	int bad = 1;
-
-	snprintf(prefix, sizeof(prefix), "%ld:", (long)client->uid);
-	prefix_len = strlen(prefix);
-
-	if (strncmp(name, prefix, prefix_len) == 0)
-	    bad = 0;
-	else {
-	    prefix[prefix_len - 1] = '\0';
-	    if (strcmp(name, prefix) == 0)
-		bad = 0;
-	}
-
-	/* Allow root to create badly-named ccaches */
-	if (bad && !CLIENT_IS_ROOT(client))
-	    return KRB5_CC_BADNAME;
-    }
-
-    ret = kcm_ccache_resolve(context, name, &ccache);
+    ret = kcm_ccache_resolve_by_name(context, name, &ccache);
     if (ret == 0) {
-	if ((ccache->uid != client->uid ||
-	     ccache->gid != client->gid) && !CLIENT_IS_ROOT(client))
+	if ((ccache->uid != client->uid) && !CLIENT_IS_ROOT(client))
 	    return KRB5_FCC_PERM;
     } else if (ret != KRB5_FCC_NOFILE && !(CLIENT_IS_ROOT(client) && ret == KRB5_FCC_PERM)) {
 		return ret;
@@ -127,24 +101,29 @@ kcm_ccache_new_client(krb5_context context,
     if (ret == KRB5_FCC_NOFILE) {
 	ret = kcm_ccache_new(context, name, &ccache);
 	if (ret) {
-	    kcm_log(1, "Failed to initialize cache %s: %s",
-		    name, krb5_get_err_text(context, ret));
+	    kcm_log(1, "Failed to initialize cache %s", name);
 	    return ret;
 	}
 
 	/* bind to current client */
 	ccache->uid = client->uid;
-	ccache->gid = client->gid;
 	ccache->session = client->session;
+
+	/* 
+	 * add notification when the session goes away, so we can
+	 * remove the credential
+	 */
+	kcm_session_add(client->session);
+
     } else {
 	ret = kcm_zero_ccache_data(context, ccache);
 	if (ret) {
-	    kcm_log(1, "Failed to empty cache %s: %s",
-		    name, krb5_get_err_text(context, ret));
+	    kcm_log(1, "Failed to empty cache %s", name);
 	    kcm_release_ccache(context, ccache);
 	    return ret;
 	}
-	kcm_cleanup_events(context, ccache);
+	heim_ipc_event_cancel(ccache->renew_event);
+	heim_ipc_event_cancel(ccache->expire_event);
     }
 
     ret = kcm_access(context, client, KCM_OP_INITIALIZE, ccache);
@@ -156,8 +135,7 @@ kcm_ccache_new_client(krb5_context context,
 
     /*
      * Finally, if the user is root and the cache was created under
-     * another user's name, chown the cache to that user and their
-     * default gid.
+     * another user's name, chown the cache to that user.
      */
     if (CLIENT_IS_ROOT(client)) {
 	unsigned long uid;
@@ -165,15 +143,31 @@ kcm_ccache_new_client(krb5_context context,
 	if (matches == 0)
 	    matches = sscanf(name,"%ld",&uid);
 	if (matches == 1) {
-	    struct passwd *pwd = getpwuid(uid);
-	    if (pwd != NULL) {
-		gid_t gid = pwd->pw_gid;
-		kcm_chown(context, client, ccache, uid, gid);
-	    }
+	    kcm_chown(context, client, ccache, (uid_t)uid);
 	}
     }
 
     *ccache_p = ccache;
     return 0;
 }
+
+const char *
+kcm_client_get_execpath(kcm_client *client)
+{
+    if (client->execpath[0] == '\0') {
+	int ret = proc_pidpath(client->pid, client->execpath, sizeof(client->execpath));
+	if (ret != -1)
+	    client->execpath[sizeof(client->execpath) - 1] = '\0';
+	else {
+	    /* failed, lets not try again */
+	    client->execpath[0] = 0x01;
+	    client->execpath[1] = 0x0;
+	}
+    }
+    if (client->execpath[0] != '/')
+	return NULL;
+
+    return client->execpath;
+}
+
 

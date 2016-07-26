@@ -128,8 +128,8 @@ add_aliases(krb5_context contextp, kadm5_principal_ent_rec *princ,
 	ext.data.u.aliases.aliases.len = strings->num_strings;
 
 	for (i = 0; i < strings->num_strings; i++) {
-	    ret = krb5_parse_name(contextp, strings->strings[i], &p);
-	    ret = copy_Principal(p, &ext.data.u.aliases.aliases.val[i]);
+	    (void)krb5_parse_name(contextp, strings->strings[i], &p);
+	    (void)copy_Principal(p, &ext.data.u.aliases.aliases.val[i]);
 	    krb5_free_principal(contextp, p);
 	}
     }
@@ -186,7 +186,7 @@ add_pkinit_acl(krb5_context contextp, kadm5_principal_ent_rec *princ,
 }
 
 static void
-add_kvno_diff(krb5_context context, kadm5_principal_ent_rec *princ,
+add_kvno_diff(krb5_context contextp, kadm5_principal_ent_rec *princ,
 	      int is_svc_diff, krb5_kvno kvno_diff)
 {
     krb5_error_code ret;

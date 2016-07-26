@@ -109,6 +109,7 @@ HEIMDAL_ROKEN_1.0 {
 		rk_socket_set_portrange;
 		rk_socket_set_reuseaddr;
 		rk_socket_set_tos;
+		rk_socket_set_nonblocking;
 		rk_socket_sockaddr_size;
 		rk_strcollect;
 		rk_strftime;

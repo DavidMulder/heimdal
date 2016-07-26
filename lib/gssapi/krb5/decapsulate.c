@@ -78,9 +78,9 @@ _gssapi_verify_mech_header(u_char **str,
     if (mech_len < 0)
 	return GSS_S_DEFECTIVE_TOKEN;
 
-    if (mech_len != mech->length)
+    if (mech_len != (ssize_t)mech->length)
 	return GSS_S_BAD_MECH;
-    if (ct_memcmp(p,
+    if (memcmp(p,
 		  mech->elements,
 		  mech->length) != 0)
 	return GSS_S_BAD_MECH;
@@ -108,7 +108,7 @@ _gsskrb5_verify_header(u_char **str,
     if (len < 2)
 	return GSS_S_DEFECTIVE_TOKEN;
 
-    if (ct_memcmp (*str, type, 2) != 0)
+    if (memcmp (*str, type, 2) != 0)
 	return GSS_S_DEFECTIVE_TOKEN;
     *str += 2;
 
@@ -121,15 +121,15 @@ _gsskrb5_verify_header(u_char **str,
  */
 
 OM_uint32
-_gssapi_decapsulate(
-    OM_uint32 *minor_status,
+_gssapi_decapsulate(OM_uint32 *minor_status,
     gss_buffer_t input_token_buffer,
+		    uint8_t type[2],
     krb5_data *out_data,
-    const gss_OID mech
-)
+		    const gss_OID mech)
 {
-    u_char *p;
     OM_uint32 ret;
+    size_t len;
+    u_char *p;
 
     p = input_token_buffer->value;
     ret = _gssapi_verify_mech_header(&p,
@@ -140,9 +140,18 @@ _gssapi_decapsulate(
 	return ret;
     }
 
-    out_data->length = input_token_buffer->length -
+    len = input_token_buffer->length -
 	(p - (u_char *)input_token_buffer->value);
-    out_data->data   = p;
+
+    if (len < 2) {
+	*minor_status = 0;
+	return GSS_S_DEFECTIVE_TOKEN;
+    }
+
+    memcpy(type, p, 2);
+
+    out_data->length = len - 2;
+    out_data->data   = p + 2;
     return GSS_S_COMPLETE;
 }
 
@@ -188,7 +197,7 @@ _gssapi_verify_pad(gss_buffer_t wrapped_token,
 {
     u_char *pad;
     size_t padlength;
-    int i;
+    size_t i;
 
     pad = (u_char *)wrapped_token->value + wrapped_token->length - 1;
     padlength = *pad;

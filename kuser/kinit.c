@@ -39,14 +39,30 @@
 #include <Security/Security.h>
 #endif
 
-#ifndef NO_NTLM
-#include "heimntlm.h"
-#endif
+struct krb5_dh_moduli;
+struct AlgorithmIdentifier;
+struct _krb5_krb_auth_data;
+struct _krb5_key_data;
+struct _krb5_key_type;
+struct _krb5_checksum_type;
+struct _krb5_encryption_type;
+struct _krb5_srv_query_ctx;
+struct krb5_fast_state;
+struct _krb5_srp_group;
+struct _krb5_srp;
+
+#include <heimbase.h>
+#include <hx509.h>
+#include <krb5-private.h>
+
+static void usage (int ret) __attribute__((noreturn));
+
 
 int forwardable_flag	= -1;
 int proxiable_flag	= -1;
 int renewable_flag	= -1;
 int renew_flag		= 0;
+int home_directory_flag	= 1;
 int pac_flag		= -1;
 int validate_flag	= 0;
 int version_flag	= 0;
@@ -59,6 +75,7 @@ char *renew_life	= NULL;
 char *server_str	= NULL;
 char *cred_cache	= NULL;
 char *start_str		= NULL;
+char *kdc_hostname	= NULL;
 static int switch_cache_flags = 1;
 struct getarg_strings etype_str;
 int use_keytab		= 0;
@@ -68,16 +85,20 @@ int fcache_version;
 char *password_file	= NULL;
 char *pk_user_id	= NULL;
 int pk_enterprise_flag = 0;
-struct hx509_certs_data *ent_user_id = NULL;
+struct hx509_cert_data *ent_user_id = NULL;
 char *pk_x509_anchors	= NULL;
 int pk_use_enckey	= 0;
 static int canonicalize_flag = 0;
 static int enterprise_flag = 0;
 static int ok_as_delegate_flag = 0;
+static char *fast_armor_cache_string = NULL;
 static int use_referrals_flag = 0;
+static int verbose_flag = 0;
 static int windows_flag = 0;
-#ifndef NO_NTLM
-static char *ntlm_domain;
+#ifdef __APPLE__
+static int keychain_flag = 0;
+static SecKeychainItemRef passwordItem = NULL;
+struct getarg_strings bundle_acl_strings;
 #endif
 
 
@@ -101,12 +122,15 @@ static struct getargs args[] = {
     { "cache", 		'c', arg_string, &cred_cache,
       NP_("credentials cache", ""), "cachename" },
 
+#if KRB5_FORWARDABLE_DEFAULT
     { "forwardable",	0, arg_negative_flag, &forwardable_flag,
-      NP_("get tickets not forwardable", ""), NULL },
-
+      NP_("don't get forwardable tickets", "")},
     { NULL,		'f', arg_flag, &forwardable_flag,
-      NP_("get forwardable tickets", ""), NULL },
-
+      NP_("get forwardable tickets", "")},
+#else
+    { "forwardable",	'f', arg_flag, &forwardable_flag,
+      NP_("get forwardable tickets", "")},
+#endif
     { "keytab",         't', arg_string, &keytab_str,
       NP_("keytab to use", ""), "keytabname" },
 
@@ -131,6 +155,9 @@ static struct getargs args[] = {
     { "start-time",	's', arg_string, &start_str,
       NP_("when ticket gets valid", ""), "time" },
 
+    { "kdc-hostname",	 0,  arg_string, &kdc_hostname,
+      NP_("redirect the request to specific KDC", ""), "hostname" },
+
     { "use-keytab",     'k', arg_flag, &use_keytab,
       NP_("get key from keytab", ""), NULL },
 
@@ -146,7 +173,10 @@ static struct getargs args[] = {
     { "addresses",	'A',   arg_negative_flag,	&addrs_flag,
       NP_("request a ticket with no addresses", ""), NULL },
 
-    { "extra-addresses",'a', arg_strings,	&extra_addresses,
+    { NULL,		'a',   arg_flag,		&addrs_flag,
+      NP_("request a ticket with addresses", "") },
+
+    { "extra-addresses", 0, arg_strings,	&extra_addresses,
       NP_("include these extra addresses", ""), "addresses" },
 
     { "anonymous",	0,   arg_flag,	&anonymous_flag,
@@ -176,10 +206,6 @@ static struct getargs args[] = {
     { "pk-use-enckey",	0,  arg_flag, &pk_use_enckey,
       NP_("Use RSA encrypted reply (instead of DH)", ""), NULL },
 #endif
-#ifndef NO_NTLM
-    { "ntlm-domain",	0,  arg_string, &ntlm_domain,
-      NP_("NTLM domain", ""), "domain" },
-#endif
 
     { "change-default",  0,  arg_negative_flag, &switch_cache_flags,
       NP_("switch the default cache to the new credentials cache", ""), NULL },
@@ -187,9 +213,24 @@ static struct getargs args[] = {
     { "ok-as-delegate",	0,  arg_flag, &ok_as_delegate_flag,
       NP_("honor ok-as-delegate on tickets", ""), NULL },
 
+    { "fast-armor-cache",	0,  arg_string, &fast_armor_cache_string,
+      NP_("use this credential cache as FAST armor cache", ""), "cache" },
+
     { "use-referrals",	0,  arg_flag, &use_referrals_flag,
       NP_("only use referrals, no dns canalisation", ""), NULL },
 
+    { "verbose",	'V',arg_flag, &verbose_flag,
+      NP_("verbose output", "") },
+
+    { "home-directory",	0,  arg_negative_flag, &home_directory_flag,
+      NP_("don't touch home directory", ""), NULL },
+#ifdef __APPLE__
+    { "keychain",	0,  arg_flag, &keychain_flag,
+      NP_("save password in keychain if successful", ""), NULL },
+
+    { "bundle-acl",	0,  arg_strings, &bundle_acl_strings,
+      NP_("signing id allowed to use this credential", ""), NULL },
+#endif
     { "windows",	0,  arg_flag, &windows_flag,
       NP_("get windows behavior", ""), NULL },
 
@@ -319,31 +360,6 @@ out:
     return ret;
 }
 
-#ifndef NO_NTLM
-
-static krb5_error_code
-store_ntlmkey(krb5_context context, krb5_ccache id,
-	      const char *domain, struct ntlm_buf *buf)
-{
-    krb5_error_code ret;
-    krb5_data data;
-    char *name;
-
-    asprintf(&name, "ntlm-key-%s", domain);
-    if (name == NULL) {
-	krb5_clear_error_message(context);
-	return ENOMEM;
-    }
-
-    data.length = buf->length;
-    data.data = buf->data;
-
-    ret = krb5_cc_set_config(context, id, NULL, name, &data);
-    free(name);
-    return ret;
-}
-#endif
-
 static krb5_error_code
 get_new_tickets(krb5_context context,
 		krb5_principal principal,
@@ -360,10 +376,12 @@ get_new_tickets(krb5_context context,
     const char *renewstr = NULL;
     krb5_enctype *enctype = NULL;
     krb5_ccache tempccache;
-#ifndef NO_NTLM
-    struct ntlm_buf ntlmkey;
-    memset(&ntlmkey, 0, sizeof(ntlmkey));
-#endif
+    krb5_init_creds_context icc;
+    krb5_keytab kt = NULL;
+    int will_use_keytab =  (use_keytab || keytab_str);
+    krb5_prompter_fct prompter = NULL;
+    int need_prompt;
+
     passwd[0] = '\0';
 
     if (password_file) {
@@ -386,8 +404,8 @@ get_new_tickets(krb5_context context,
 	passwd[strcspn(passwd, "\n")] = '\0';
     }
 
-#ifdef __APPLE__
-    if (passwd[0] == '\0') {
+#if defined(__APPLE__) && !defined(__APPLE_TARGET_EMBEDDED__)
+    if (passwd[0] == '\0' && !will_use_keytab && home_directory_flag) {
 	const char *realm;
 	OSStatus osret;
 	UInt32 length;
@@ -401,18 +419,28 @@ get_new_tickets(krb5_context context,
 	if (ret)
 	    goto nopassword;
 
-	osret = SecKeychainFindGenericPassword(NULL, strlen(realm), realm,
-					       strlen(name), name,
-					       &length, &buffer, NULL);
+	osret = SecKeychainFindGenericPassword(NULL, (UInt32)strlen(realm), realm,
+					       (UInt32)strlen(name), name,
+					       &length, &buffer, &passwordItem);
 	free(name);
-	if (osret == noErr && length < sizeof(passwd) - 1) {
+	if (osret != noErr)
+	    goto nopassword;
+
+	if (length < sizeof(passwd) - 1) {
 	    memcpy(passwd, buffer, length);
 	    passwd[length] = '\0';
 	}
+	SecKeychainItemFreeContent(NULL, buffer);
     nopassword:
 	do { } while(0);
     }
 #endif
+
+    need_prompt = !(pk_user_id || ent_user_id || anonymous_flag || will_use_keytab || passwd[0] != '\0') && interactive;
+    if (need_prompt)
+	prompter = krb5_prompter_posix;
+    else
+	prompter = krb5_prompter_print_only;
 
     memset(&cred, 0, sizeof(cred));
 
@@ -425,6 +453,7 @@ get_new_tickets(krb5_context context,
 
     if(forwardable_flag != -1)
 	krb5_get_init_creds_opt_set_forwardable (opt, forwardable_flag);
+
     if(proxiable_flag != -1)
 	krb5_get_init_creds_opt_set_proxiable (opt, proxiable_flag);
     if(anonymous_flag)
@@ -445,13 +474,13 @@ get_new_tickets(krb5_context context,
 						 NULL,
 						 pk_use_enckey ? 2 : 0 |
 						 anonymous_flag ? 4 : 0,
-						 krb5_prompter_posix,
+						 interactive ? krb5_prompter_posix : krb5_prompter_print_only,
 						 NULL,
 						 passwd);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_get_init_creds_opt_set_pkinit");
 	if (ent_user_id)
-	    krb5_get_init_creds_opt_set_pkinit_user_certs(context, opt, ent_user_id);
+	    krb5_get_init_creds_opt_set_pkinit_user_cert(context, opt, ent_user_id);
     }
 
     if (addrs_flag != -1)
@@ -492,74 +521,97 @@ get_new_tickets(krb5_context context,
 					 etype_str.strings[i],
 					 &enctype[i]);
 	    if(ret)
-		errx(1, "unrecognized enctype: %s", etype_str.strings[i]);
+		krb5_err(context, 1, ret, "unrecognized enctype: %s",
+			 etype_str.strings[i]);
 	}
 	krb5_get_init_creds_opt_set_etype_list(opt, enctype,
 					       etype_str.num_strings);
     }
 
-    if(use_keytab || keytab_str) {
-	krb5_keytab kt;
+    ret = krb5_init_creds_init(context, principal,
+			       prompter, NULL,
+			       start_time, opt, &icc);
+    if (ret)
+	krb5_err (context, 1, ret, "krb5_init_creds_init");
+
+    if (server_str) {
+	ret = krb5_init_creds_set_service(context, icc, server_str);
+	if (ret)
+	    krb5_err (context, 1, ret, "krb5_init_creds_set_service");
+    }
+
+    if (kdc_hostname)
+	krb5_init_creds_set_kdc_hostname(context, icc, kdc_hostname);
+
+    if (fast_armor_cache_string) {
+	krb5_ccache fastid;
+	
+	ret = krb5_cc_resolve(context, fast_armor_cache_string, &fastid);
+	if (ret)
+	    krb5_err(context, 1, ret, "krb5_cc_resolve(FAST cache)");
+	
+	ret = krb5_init_creds_set_fast_ccache(context, icc, fastid);
+	if (ret)
+	    krb5_err(context, 1, ret, "krb5_init_creds_set_fast_ccache");
+    }
+
+    if(will_use_keytab) {
 	if(keytab_str)
 	    ret = krb5_kt_resolve(context, keytab_str, &kt);
 	else
 	    ret = krb5_kt_default(context, &kt);
 	if (ret)
 	    krb5_err (context, 1, ret, "resolving keytab");
-	ret = krb5_get_init_creds_keytab (context,
-					  &cred,
-					  principal,
-					  kt,
-					  start_time,
-					  server_str,
-					  opt);
-	krb5_kt_close(context, kt);
-    } else if (pk_user_id || ent_user_id || anonymous_flag) {
-	ret = krb5_get_init_creds_password (context,
-					    &cred,
-					    principal,
-					    passwd,
-					    krb5_prompter_posix,
-					    NULL,
-					    start_time,
-					    server_str,
-					    opt);
-    } else if (!interactive) {
-	krb5_warnx(context, "Not interactive, failed to get initial ticket");
-	krb5_get_init_creds_opt_free(context, opt);
-	return 0;
-    } else {
 
-	if (passwd[0] == '\0') {
+	ret = krb5_init_creds_set_keytab(context, icc, kt);
+	if (ret)
+	    krb5_err (context, 1, ret, "krb5_init_creds_set_keytab");
+    }
+
+    if (passwd[0] == '\0' && need_prompt) {
 	    char *p, *prompt;
 
 	    krb5_unparse_name (context, principal, &p);
-	    asprintf (&prompt, N_("%s's Password: ", ""), p);
+	asprintf (&prompt, N_("%s's password: ", ""), p);
 	    free (p);
 
 	    if (UI_UTIL_read_pw_string(passwd, sizeof(passwd)-1, prompt, 0)){
 		memset(passwd, 0, sizeof(passwd));
-		exit(1);
+	    errx(1, "failed to read password");
 	    }
 	    free (prompt);
 	}
 
-
-	ret = krb5_get_init_creds_password (context,
-					    &cred,
-					    principal,
-					    passwd,
-					    krb5_prompter_posix,
-					    NULL,
-					    start_time,
-					    server_str,
-					    opt);
+    if (passwd[0]) {
+	ret = krb5_init_creds_set_password(context, icc, passwd);
+	if (ret)
+	    krb5_err(context, 1, ret, "krb5_init_creds_set_password");
     }
-    krb5_get_init_creds_opt_free(context, opt);
-#ifndef NO_NTLM
-    if (ntlm_domain && passwd[0])
-	heim_ntlm_nt_key(passwd, &ntlmkey);
+
+    ret = krb5_init_creds_get(context, icc);
+
+#ifdef __APPLE__
+    /*
+     * Save password in Keychain
+     */
+    if (ret == 0 && keychain_flag && passwordItem == NULL) {
+	krb5_error_code ret2;
+	const char *realm;
+	char *name;
+
+	realm = krb5_principal_get_realm(context, principal);
+	ret2 = krb5_unparse_name_flags(context, principal, KRB5_PRINCIPAL_UNPARSE_NO_REALM, &name);
+	if (ret2 == 0) {
+	    (void)SecKeychainAddGenericPassword(NULL,
+						(UInt32)strlen(realm), realm,
+						(UInt32)strlen(name), name,
+						(UInt32)strlen(passwd), passwd,
+						NULL);
+	    free(name);
+	}
+    }
 #endif
+
     memset(passwd, 0, sizeof(passwd));
 
     switch(ret){
@@ -570,60 +622,77 @@ get_new_tickets(krb5_context context,
     case KRB5KRB_AP_ERR_BAD_INTEGRITY:
     case KRB5KRB_AP_ERR_MODIFIED:
     case KRB5KDC_ERR_PREAUTH_FAILED:
+    case KRB5_GET_IN_TKT_LOOP:
+#ifdef __APPLE__
+	if (passwordItem)
+	    SecKeychainItemDelete(passwordItem);
+#endif
 	krb5_errx(context, 1, N_("Password incorrect", ""));
-	break;
     case KRB5KRB_AP_ERR_V4_REPLY:
 	krb5_errx(context, 1, N_("Looks like a Kerberos 4 reply", ""));
-	break;
+    case KRB5KDC_ERR_KEY_EXPIRED:
+	krb5_errx(context, 1, N_("Password expired", ""));
     default:
 	krb5_err(context, 1, ret, "krb5_get_init_creds");
     }
 
-    if(ticket_life != 0) {
-	if(abs(cred.times.endtime - cred.times.starttime - ticket_life) > 30) {
-	    char life[64];
-	    unparse_time_approx(cred.times.endtime - cred.times.starttime,
-				life, sizeof(life));
-	    krb5_warnx(context, N_("NOTICE: ticket lifetime is %s", ""), life);
-	}
-    }
-    if(renew_life) {
-	if(abs(cred.times.renew_till - cred.times.starttime - renew) > 30) {
-	    char life[64];
-	    unparse_time_approx(cred.times.renew_till - cred.times.starttime,
-				life, sizeof(life));
-	    krb5_warnx(context,
-		       N_("NOTICE: ticket renewable lifetime is %s", ""),
-		       life);
-	}
-    }
+    ret = krb5_init_creds_get_creds(context, icc, &cred);
+    if (ret)
+	krb5_err(context, 1, ret, "krb5_init_creds_get_creds");
+
+    krb5_process_last_request(context, opt, icc);
 
     ret = krb5_cc_new_unique(context, krb5_cc_get_type(context, ccache),
 			     NULL, &tempccache);
     if (ret)
 	krb5_err (context, 1, ret, "krb5_cc_new_unique");
 
-    ret = krb5_cc_initialize (context, tempccache, cred.client);
+    ret = krb5_init_creds_store(context, icc, tempccache);
     if (ret)
-	krb5_err (context, 1, ret, "krb5_cc_initialize");
+	krb5_err(context, 1, ret, "krb5_init_creds_store");
 
-    ret = krb5_cc_store_cred (context, tempccache, &cred);
+    ret = krb5_init_creds_store_config(context, icc, tempccache);
     if (ret)
-	krb5_err (context, 1, ret, "krb5_cc_store_cred");
+	krb5_warn(context, ret, "krb5_init_creds_store_config");
 
-    krb5_free_cred_contents (context, &cred);
+    ret = krb5_init_creds_warn_user(context, icc);
+    if (ret)
+	krb5_warn(context, ret, "krb5_init_creds_warn_user");
+
+#ifdef __APPLE__
+    /*
+     * Set for this case, default to * so that all processes can use
+     * this cache.
+     */
+    {
+	heim_array_t bundleacl = heim_array_create();
+	heim_string_t ace;
+
+	if (bundle_acl_strings.num_strings > 0) {
+	    int i;
+	    for (i = 0; i < bundle_acl_strings.num_strings; i++) {
+		ace = heim_string_create(bundle_acl_strings.strings[i]);
+		heim_array_append_value(bundleacl, ace);
+		heim_release(ace);
+	    }
+	} else {
+	    ace = heim_string_create("*");
+	    heim_array_append_value(bundleacl, ace);
+	    heim_release(ace);
+	}
+	krb5_cc_set_acl(context, tempccache, "kHEIMAttrBundleIdentifierACL", bundleacl);
+	heim_release(bundleacl);
+    }
+#endif
 
     ret = krb5_cc_move(context, tempccache, ccache);
-    if (ret)
+    if (ret) {
+	(void)krb5_cc_destroy(context, tempccache);
 	krb5_err (context, 1, ret, "krb5_cc_move");
+    }
 
     if (switch_cache_flags)
 	krb5_cc_switch(context, ccache);
-
-#ifndef NO_NTLM
-    if (ntlm_domain && ntlmkey.data)
-	store_ntlmkey(context, ccache, ntlm_domain, &ntlmkey);
-#endif
 
     if (ok_as_delegate_flag || windows_flag || use_referrals_flag) {
 	unsigned char d = 0;
@@ -640,9 +709,19 @@ get_new_tickets(krb5_context context,
 	krb5_cc_set_config(context, ccache, NULL, "realm-config", &data);
     }
 
-
     if (enctype)
 	free(enctype);
+
+    krb5_init_creds_free(context, icc);
+    krb5_get_init_creds_opt_free(context, opt);
+
+    if (kt)
+	krb5_kt_close(context, kt);
+
+#ifdef __APPLE__
+    if (passwordItem)
+	CFRelease(passwordItem);
+#endif
 
     return 0;
 }
@@ -758,17 +837,22 @@ main (int argc, char **argv)
     argc -= optidx;
     argv += optidx;
 
-    if (canonicalize_flag || enterprise_flag)
+    if (!home_directory_flag)
+	krb5_set_home_dir_access(NULL, FALSE);
+
+    if (enterprise_flag)
 	parseflags |= KRB5_PRINCIPAL_PARSE_ENTERPRISE;
 
     if (pk_enterprise_flag) {
+#ifdef PKINIT
 	ret = krb5_pk_enterprise_cert(context, pk_user_id,
 				      argv[0], &principal,
 				      &ent_user_id);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_pk_enterprise_certs");
-
 	pk_user_id = NULL;
+#endif
+
 
     } else if (anonymous_flag) {
 
@@ -885,6 +969,19 @@ main (int argc, char **argv)
     if(do_afslog && k_hasafs())
 	krb5_afslog(context, ccache, NULL, NULL);
 #endif
+    if (verbose_flag) {
+	char *p;
+
+	ret = krb5_unparse_name(context, principal, &p);
+	if (ret)
+	    krb5_err(context, 1, ret, "krb5_unparse_name");
+
+	printf("Placing tickets for '%s' in cache '%s:%s'\n", p,
+	       krb5_cc_get_type(context, ccache),
+	       krb5_cc_get_name(context, ccache));
+	free(p);
+    }
+
     if(argc > 1) {
 	struct renew_ctx ctx;
 	time_t timeout;

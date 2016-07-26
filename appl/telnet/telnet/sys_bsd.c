@@ -610,7 +610,7 @@ TerminalWindowSize(long *rows, long *cols)
 {
     int irows, icols;
 
-    if (get_window_size(STDIN_FILENO, &irows, &icols) == 0) {
+    if (rk_get_window_size(STDIN_FILENO, &irows, &icols) == 0) {
 	*rows = irows;
 	*cols = icols;
 	return 1;

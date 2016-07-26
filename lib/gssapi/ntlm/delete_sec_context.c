@@ -33,7 +33,7 @@
 
 #include "ntlm.h"
 
-OM_uint32 GSSAPI_CALLCONV _gss_ntlm_delete_sec_context
+OM_uint32 _gss_ntlm_delete_sec_context
            (OM_uint32 * minor_status,
             gss_ctx_id_t * context_handle,
             gss_buffer_t output_token
@@ -42,11 +42,40 @@ OM_uint32 GSSAPI_CALLCONV _gss_ntlm_delete_sec_context
     if (context_handle) {
 	ntlm_ctx ctx = (ntlm_ctx)*context_handle;
 	gss_cred_id_t cred = (gss_cred_id_t)ctx->client;
+	size_t i;
 
 	*context_handle = GSS_C_NO_CONTEXT;
 
-	if (ctx->server)
-	    (*ctx->server->nsi_destroy)(minor_status, ctx->ictx);
+	if (ctx->targetinfo.data != NULL)
+	    free(ctx->targetinfo.data);
+
+	if (ctx->ti.servername)
+	    heim_ntlm_free_targetinfo(&ctx->ti);
+
+	for (i = 0; i < ctx->num_backends; i++) {
+	    if (ctx->backends[i].ctx == NULL)
+		continue;
+	    ctx->backends[i].interface->nsi_destroy(minor_status,
+						    ctx->backends[i].ctx);
+	}
+	if (ctx->backends)
+	    free(ctx->backends);
+
+	if (ctx->srcname)
+	    _gss_ntlm_release_name(NULL, &ctx->srcname);
+	if (ctx->targetname)
+	    _gss_ntlm_release_name(NULL, &ctx->targetname);
+	if (ctx->clientsuppliedtargetname)
+	    free(ctx->clientsuppliedtargetname);
+
+	
+	_gss_ntlm_destroy_crypto(ctx);
+
+	krb5_data_free(&ctx->sessionkey);
+	krb5_data_free(&ctx->type1);
+	krb5_data_free(&ctx->type2);
+	krb5_data_free(&ctx->type3);
+	gss_release_buffer(minor_status, &ctx->pac);
 
 	_gss_ntlm_release_cred(NULL, &cred);
 

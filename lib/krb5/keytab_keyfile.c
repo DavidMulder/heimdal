@@ -33,7 +33,7 @@
 
 #include "krb5_locl.h"
 
-#ifndef HEIMDAL_SMALLER
+#ifdef HEIM_KT_AKF
 
 /* afs keyfile operations --------------------------------------- */
 
@@ -465,4 +465,4 @@ const krb5_kt_ops krb5_akf_ops = {
     NULL /* remove */
 };
 
-#endif /* HEIMDAL_SMALLER */
+#endif /* HEIM_KT_AKF */

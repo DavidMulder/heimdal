@@ -91,6 +91,11 @@ copy_cred_cache(struct copy_cred_cache_options *opt, int argc, char **argv)
 
     memset(&ctx, 0, sizeof(ctx));
 
+    if(opt->version_flag) {
+	print_version(NULL);
+	exit(0);
+    }
+
     if (opt->service_string) {
 	ret = krb5_parse_name(kcc_context, opt->service_string, &ctx.mcreds.server);
 	if (ret)

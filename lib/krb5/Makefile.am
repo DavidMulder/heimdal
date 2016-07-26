@@ -92,6 +92,20 @@ librfc3961_la_LIBADD = \
 	$(LIB_door_create) \
 	$(LIB_dlopen)
 
+librfc3961_la_LIBADD = \
+	$(LIB_pkinit) \
+	$(use_sqlite) \
+	$(LIB_com_err) \
+	$(LIB_hcrypto) \
+	$(top_builddir)/lib/asn1/libasn1.la \
+	../ipc/libheim-ipcc.la \
+	../wind/libwind.la \
+	$(LIB_libintl) \
+	$(LIBADD_roken) \
+	$(PTHREAD_LIBADD) \
+	$(LIB_door_create) \
+	$(LIB_dlopen)
+
 lib_LTLIBRARIES = libkrb5.la
 
 ERR_FILES = krb5_err.c krb_err.c heim_err.c k524_err.c
@@ -147,6 +161,7 @@ dist_libkrb5_la_SOURCES =			\
 	error_string.c				\
 	expand_hostname.c			\
 	expand_path.c				\
+	fast.c					\
 	fcache.c				\
 	free.c					\
 	free_host_realm.c			\
@@ -277,6 +292,40 @@ test_rfc3961_LDADD = 				\
 	$(LIB_hcrypto)				\
 	$(LIB_roken)
 
+nodist_librfc3961_la_SOURCES =			\
+	crc.c					\
+	crypto.c				\
+	crypto.h				\
+	crypto-aes.c				\
+	crypto-algs.c				\
+	crypto-arcfour.c			\
+	crypto-des.c				\
+	crypto-des-common.c			\
+	crypto-des3.c				\
+	crypto-evp.c				\
+	crypto-null.c				\
+	crypto-pk.c				\
+	crypto-rand.c				\
+	crypto-stubs.c				\
+	data.c					\
+	error_string.c				\
+	keyblock.c				\
+	n-fold.c				\
+	salt.c					\
+	salt-aes.c				\
+	salt-arcfour.c				\
+	salt-des.c				\
+	salt-des3.c				\
+	store-int.c				\
+	warn.c
+
+test_rfc3961_LDADD = 				\
+	librfc3961.la 				\
+	$(top_builddir)/lib/asn1/libasn1.la	\
+	$(top_builddir)/lib/wind/libwind.la 	\
+	$(LIB_hcrypto)				\
+	$(LIB_roken)
+
 $(srcdir)/krb5-protos.h:
 	cd $(srcdir) && perl ../../cf/make-proto.pl -E KRB5_LIB -q -P comment -o krb5-protos.h $(dist_libkrb5_la_SOURCES) || rm -f krb5-protos.h
 
@@ -352,7 +401,7 @@ CLEANFILES = \
 	heim_err.c heim_err.h \
 	k524_err.c k524_err.h
 
-$(libkrb5_la_OBJECTS): krb5_err.h krb_err.h heim_err.h k524_err.h
+$(libkrb5_la_OBJECTS): krb5_err.h krb_err.h heim_err.h k524_err.h crypto.h
 
 test_config_strings.out: test_config_strings.cfg
 	$(CP) $(srcdir)/test_config_strings.cfg test_config_strings.out

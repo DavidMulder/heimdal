@@ -360,7 +360,7 @@ parse_extensions(char *str, HDB_extensions **e)
  */
 
 static int
-doit(const char *filename, int mergep)
+doit(const char *filename, int mergep, int new_realm_name)
 {
     krb5_error_code ret;
     FILE *f;
@@ -528,6 +528,35 @@ doit(const char *filename, int mergep)
 	    continue;
 	}
 
+	if (new_realm_name) {
+	    /* fix salt */
+	    unsigned i;
+	    Salt salt;
+	    krb5_salt salt2;
+	    memset(&salt, 0, sizeof(salt));
+	    krb5_get_pw_salt(context, ent.entry.principal, &salt2);
+	    salt.type = hdb_pw_salt;
+	    salt.salt = salt2.saltvalue;
+	    for(i = 0; i < ent.entry.keys.len; i++){
+		if(ent.entry.keys.val[i].salt == NULL){
+		    ent.entry.keys.val[i].salt =
+		    malloc(sizeof(*ent.entry.keys.val[i].salt));
+		    if(ent.entry.keys.val[i].salt == NULL)
+			return ENOMEM;
+		    ret = copy_Salt(&salt, ent.entry.keys.val[i].salt);
+		    if(ret)
+			break;
+		}
+	    }
+	    krb5_free_salt(context, salt2);
+	}
+	if(ret) {
+	    fprintf (stderr, "%s:%d:error fixing salt\n",
+		     filename, line);
+	    hdb_free_entry (context, &ent);
+	    continue;
+	}
+
 	ret = db->hdb_store(context, db, HDB_F_REPLACE, &ent);
 	hdb_free_entry (context, &ent);
 	if (ret) {
@@ -544,24 +573,24 @@ doit(const char *filename, int mergep)
 extern int local_flag;
 
 static int
-loadit(int mergep, const char *name, int argc, char **argv)
+loadit(int mergep, int new_realm_name, const char *name, int argc, char **argv)
 {
     if(!local_flag) {
 	krb5_warnx(context, "%s is only available in local (-l) mode", name);
 	return 0;
     }
 
-    return doit(argv[0], mergep);
+    return doit(argv[0], mergep, new_realm_name);
 }
 
 int
-load(void *opt, int argc, char **argv)
+load(struct load_options *opt, int argc, char **argv)
 {
-    return loadit(0, "load", argc, argv);
+    return loadit(0, opt->fix_salts_flag, "load", argc, argv);
 }
 
 int
-merge(void *opt, int argc, char **argv)
+merge(struct merge_options *opt, int argc, char **argv)
 {
-    return loadit(1, "merge", argc, argv);
+    return loadit(1, opt->fix_salts_flag, "merge", argc, argv);
 }

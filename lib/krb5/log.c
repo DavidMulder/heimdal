@@ -107,6 +107,8 @@ static struct s2i syslogvals[] = {
     { NULL, -1 }
 };
 
+#undef L
+
 static int
 find_value(const char *s, struct s2i *table)
 {
@@ -208,11 +210,86 @@ open_syslog(krb5_context context,
 			    log_syslog, close_syslog, sd);
 }
 
+#ifdef __APPLE__
+
+#include <asl.h>
+
+#define L(X) { #X, ASL_LEVEL_ ## X }
+
+static struct s2i aslvals[] = {
+    L(EMERG),
+    L(ALERT),
+    L(CRIT),
+    L(ERR),
+    L(WARNING),
+    L(NOTICE),
+    L(INFO),
+    L(DEBUG),
+    { NULL, -1 }
+};
+
+#undef L
+
+struct _heimdal_asl_data{
+    aslclient client;
+    aslmsg msg;
+    int level;
+};
+
+static void KRB5_CALLCONV
+log_asl(const char *timestr,
+	const char *msg,
+	void *data)
+{
+    struct _heimdal_asl_data *s = data;
+    asl_log(s->client, s->msg, s->level, "%s", msg);
+}
+
+static void KRB5_CALLCONV
+close_asl(void *data)
+{
+    struct _heimdal_asl_data *s = data;
+    asl_free(s->msg);
+    asl_close(s->client);
+    free(s);
+}
+
+static krb5_error_code
+open_asl(krb5_context context,
+	 krb5_log_facility *facility, int min, int max,
+	 const char *sev, const char *fac)
+{
+    struct _heimdal_asl_data *sd = malloc(sizeof(*sd));
+    int i;
+
+    if(sd == NULL) {
+	krb5_set_error_message(context, ENOMEM,
+			       N_("malloc: out of memory", ""));
+	return ENOMEM;
+    }
+    i = find_value(sev, aslvals);
+    if(i == -1)
+	i = ASL_LEVEL_ERR;
+    sd->level = i;
+
+    sd->client = asl_open(getprogname(), fac, 0);
+
+    sd->msg = asl_new(ASL_TYPE_MSG);
+    asl_set(sd->msg, "org.h5l.asl", "krb5");
+
+    return krb5_addlog_func(context, facility, min, max,
+			    log_asl, close_asl, sd);
+}
+
+#endif /* __APPLE__ */
+
+
 struct file_data{
     const char *filename;
     const char *mode;
     FILE *fd;
     int keep_open;
+    int freefilename;
 };
 
 static void KRB5_CALLCONV
@@ -223,22 +300,22 @@ log_file(const char *timestr,
     struct file_data *f = data;
     char *msgclean;
     size_t len = strlen(msg);
+    FILE *fd = f->fd;
+
     if(f->keep_open == 0)
-	f->fd = fopen(f->filename, f->mode);
-    if(f->fd == NULL)
+	fd = fopen(f->filename, f->mode);
+    if(fd == NULL)
 	return;
     /* make sure the log doesn't contain special chars */
     msgclean = malloc((len + 1) * 4);
     if (msgclean == NULL)
 	goto out;
     strvisx(msgclean, rk_UNCONST(msg), len, VIS_OCTAL);
-    fprintf(f->fd, "%s %s\n", timestr, msgclean);
+    fprintf(fd, "%s %s\n", timestr, msgclean);
     free(msgclean);
  out:
-    if(f->keep_open == 0) {
-	fclose(f->fd);
-	f->fd = NULL;
-    }
+    if(f->keep_open == 0)
+	fclose(fd);
 }
 
 static void KRB5_CALLCONV
@@ -247,23 +324,29 @@ close_file(void *data)
     struct file_data *f = data;
     if(f->keep_open && f->filename)
 	fclose(f->fd);
+    if (f->filename && f->freefilename)
+	free((char *)f->filename);
     free(data);
 }
 
 static krb5_error_code
 open_file(krb5_context context, krb5_log_facility *fac, int min, int max,
-	  const char *filename, const char *mode, FILE *f, int keep_open)
+	  const char *filename, const char *mode, FILE *f, int keep_open,
+	  int freefilename)
 {
     struct file_data *fd = malloc(sizeof(*fd));
     if(fd == NULL) {
 	krb5_set_error_message(context, ENOMEM,
 			       N_("malloc: out of memory", ""));
+	if (freefilename && filename)
+	    free((char *)filename);
 	return ENOMEM;
     }
     fd->filename = filename;
     fd->mode = mode;
     fd->fd = f;
     fd->keep_open = keep_open;
+    fd->freefilename = freefilename;
 
     return krb5_addlog_func(context, fac, min, max, log_file, close_file, fd);
 }
@@ -299,9 +382,9 @@ krb5_addlog_dest(krb5_context context, krb5_log_facility *f, const char *orig)
 	p++;
     }
     if(strcmp(p, "STDERR") == 0){
-	ret = open_file(context, f, min, max, NULL, NULL, stderr, 1);
+	ret = open_file(context, f, min, max, NULL, NULL, stderr, 1, 0);
     }else if(strcmp(p, "CONSOLE") == 0){
-	ret = open_file(context, f, min, max, "/dev/console", "w", NULL, 0);
+	ret = open_file(context, f, min, max, "/dev/console", "w", NULL, 0, 0);
     }else if(strncmp(p, "FILE", 4) == 0 && (p[4] == ':' || p[4] == '=')){
 	char *fn;
 	FILE *file = NULL;
@@ -336,9 +419,9 @@ krb5_addlog_dest(krb5_context context, krb5_log_facility *f, const char *orig)
 	    }
 	    keep_open = 1;
 	}
-	ret = open_file(context, f, min, max, fn, "a", file, keep_open);
+	ret = open_file(context, f, min, max, fn, "a", file, keep_open, 1);
     }else if(strncmp(p, "DEVICE", 6) == 0 && (p[6] == ':' || p[6] == '=')){
-	ret = open_file(context, f, min, max, strdup(p + 7), "w", NULL, 0);
+	ret = open_file(context, f, min, max, strdup(p + 7), "w", NULL, 0, 1);
     }else if(strncmp(p, "SYSLOG", 6) == 0 && (p[6] == '\0' || p[6] == ':')){
 	char severity[128] = "";
 	char facility[128] = "";
@@ -352,6 +435,25 @@ krb5_addlog_dest(krb5_context context, krb5_log_facility *f, const char *orig)
  	if(*facility == '\0')
 	    strlcpy(facility, "AUTH", sizeof(facility));
 	ret = open_syslog(context, f, min, max, severity, facility);
+    }else if(strncmp(p, "ASL", 3) == 0 && (p[3] == '\0' || p[3] == ':')){
+#ifdef __APPLE__
+	char severity[128] = "";
+	char facility[128] = "";
+	p += 3;
+	if(*p != '\0')
+	    p++;
+	if(strsep_copy(&p, ":", severity, sizeof(severity)) != -1)
+	    strsep_copy(&p, ":", facility, sizeof(facility));
+	if(*severity == '\0')
+	    strlcpy(severity, "ERR", sizeof(severity));
+ 	if(*facility == '\0')
+	    strlcpy(facility, "AUTH", sizeof(facility));
+	ret = open_asl(context, f, min, max, severity, facility);
+#else
+	ret = HEIM_ERR_LOG_PARSE;
+	krb5_set_error_message (context, ret,
+				N_("asl is not supported on this platform", ""), p);
+#endif /* __APPLE__ */
     }else{
 	ret = HEIM_ERR_LOG_PARSE; /* XXX */
 	krb5_set_error_message (context, ret,
@@ -411,7 +513,7 @@ krb5_vlog_msg(krb5_context context,
 	      int level,
 	      const char *fmt,
 	      va_list ap)
-     __attribute__((format (printf, 5, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 5, 0))
 {
 
     char *msg = NULL;
@@ -449,7 +551,7 @@ krb5_vlog(krb5_context context,
 	  int level,
 	  const char *fmt,
 	  va_list ap)
-     __attribute__((format (printf, 4, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 0))
 {
     return krb5_vlog_msg(context, fac, NULL, level, fmt, ap);
 }
@@ -461,7 +563,7 @@ krb5_log_msg(krb5_context context,
 	     char **reply,
 	     const char *fmt,
 	     ...)
-     __attribute__((format (printf, 5, 6)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 5, 6))
 {
     va_list ap;
     krb5_error_code ret;
@@ -479,7 +581,7 @@ krb5_log(krb5_context context,
 	 int level,
 	 const char *fmt,
 	 ...)
-     __attribute__((format (printf, 4, 5)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 5))
 {
     va_list ap;
     krb5_error_code ret;
@@ -491,11 +593,11 @@ krb5_log(krb5_context context,
 }
 
 void KRB5_LIB_FUNCTION
-_krb5_debug(krb5_context context,
+_krb5_debugx(krb5_context context,
 	    int level,
 	    const char *fmt,
 	    ...)
-    __attribute__((format (printf, 3, 4)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 4))
 {
     va_list ap;
 
@@ -506,6 +608,33 @@ _krb5_debug(krb5_context context,
     krb5_vlog(context, context->debug_dest, level, fmt, ap);
     va_end(ap);
 }
+
+void KRB5_LIB_FUNCTION
+_krb5_debug(krb5_context context,
+	    int level,
+	    krb5_error_code ret,
+	    const char *fmt,
+	    ...)
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 5))
+{
+    va_list ap;
+    char *str = NULL;
+    const char *e;
+    
+    if (context == NULL || context->debug_dest == NULL)
+	return;
+    
+    va_start(ap, fmt);
+    vasprintf(&str, fmt, ap);
+    va_end(ap);
+    if (str == NULL)
+	return;
+    e = krb5_get_error_message(context, ret);
+    krb5_log(context, context->debug_dest, level, "%s: %s", str, e ? e : "<unknown error>");
+    krb5_free_error_message(context, e);
+    free(str);
+}
+
 
 krb5_boolean KRB5_LIB_FUNCTION
 _krb5_have_debug(krb5_context context, int level)

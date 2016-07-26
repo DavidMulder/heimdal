@@ -286,7 +286,7 @@ _expand_temp_folder(krb5_context context, PTYPE param, const char *postfix, char
 {
     const char *p = NULL;
 
-    if (issuid())
+    if (!issuid())
 	p = getenv("TEMP");
     if (p)
 	*ret = strdup(p);
@@ -306,8 +306,87 @@ _expand_userid(krb5_context context, PTYPE param, const char *postfix, char **st
     return 0;
 }
 
+#ifdef __APPLE__
+#include <bsm/audit_session.h>
+#endif
+
+static int
+_expand_asid(krb5_context context, PTYPE param, const char *postfix, char **str)
+{
+    unsigned long asid = 0;
+#ifdef __APPLE__
+    auditinfo_addr_t aia = { .ai_asid = 0 };
+    int ret;
+
+    if (!getaudit_addr(&aia, sizeof(aia))) {
+	ret = errno;
+	krb5_set_error_message(context, ret, "cant get audit information for the session");
+	return ret;
+    }
+    asid = aia.ai_asid;
+#endif
+    ret = asprintf(str, "%ld", asid);
+    if (ret < 0 || *str == NULL)
+	return krb5_enomem(context);
+    return 0;
+}
 
 #endif /* _WIN32 */
+
+#ifdef __APPLE__
+
+#include <CoreFoundation/CoreFoundation.h>
+
+static int
+_expand_resources(krb5_context context, PTYPE param, const char *postfix, char **str)
+{
+    char path[MAXPATHLEN];
+
+    CFBundleRef appBundle = CFBundleGetMainBundle();
+    if (appBundle == NULL)
+	return KRB5_CONFIG_BADFORMAT;
+
+    /* 
+     * Check if there is an Info.plist, if not, then its is not a real
+     * bundle and skip
+     */
+    CFDictionaryRef infoPlist = CFBundleGetInfoDictionary(appBundle);
+    if (infoPlist == NULL || CFDictionaryGetCount(infoPlist) == 0)
+	return KRB5_CONFIG_BADFORMAT;
+
+    CFURLRef resourcesDir = CFBundleCopyResourcesDirectoryURL(appBundle);
+    if (resourcesDir == NULL)
+	return KRB5_CONFIG_BADFORMAT;
+
+    if (!CFURLGetFileSystemRepresentation(resourcesDir, true, (UInt8 *)path, sizeof(path))) {
+	CFRelease(resourcesDir);
+	return ENOMEM;
+    }
+
+    CFRelease(resourcesDir);
+
+    *str = strdup(path);
+    if (*str == NULL)
+	return ENOMEM;
+
+    return 0;
+}
+
+static int
+_expand_env(krb5_context context, PTYPE param, const char *postfix, char **str)
+{
+    const char *env = getenv(postfix);
+    if (env)
+	*str = strdup(env);
+    else
+	*str = strdup("");
+    if (*str == NULL)
+	return ENOMEM;
+    return 0;
+}
+
+
+#endif
 
 /**
  * Expand a %{null} token
@@ -343,6 +422,10 @@ static const struct token {
 #define SPECIAL(f) SPECIALP(f, NULL)
 
 } tokens[] = {
+#ifdef __APPLE__
+    {"ApplicationResources", SPECIAL(_expand_resources) },
+    {"IPHONE_SIMULATOR_ROOT", SPECIALP(_expand_env, "IPHONE_SIMULATOR_ROOT") },
+#endif
 #ifdef _WIN32
 #define CSIDLP(C,P) FTYPE_CSIDL, C, P, _expand_csidl
 #define CSIDL(C) CSIDLP(C, NULL)
@@ -367,6 +450,7 @@ static const struct token {
     {"TEMP", SPECIAL(_expand_temp_folder)},
     {"USERID", SPECIAL(_expand_userid)},
     {"uid", SPECIAL(_expand_userid)},
+    {"asid", SPECIAL(_expand_asid)},
     {"null", SPECIAL(_expand_null)}
 };
 
@@ -376,6 +460,7 @@ _expand_token(krb5_context context,
 	      const char *token_end,
 	      char **ret)
 {
+    size_t token_len = (token_end - token);
     size_t i;
 
     *ret = NULL;
@@ -383,18 +468,18 @@ _expand_token(krb5_context context,
     if (token[0] != '%' || token[1] != '{' || token_end[0] != '}' ||
 	token_end - token <= 2) {
 	if (context)
-	    krb5_set_error_message(context, EINVAL,"Invalid token.");
+	    krb5_set_error_message(context, EINVAL,"Invalid token: %.*s", (int)token_len, token);
 	return EINVAL;
     }
 
     for (i = 0; i < sizeof(tokens)/sizeof(tokens[0]); i++) {
-	if (!strncmp(token+2, tokens[i].tok, (token_end - token) - 2))
+	if (!strncmp(token+2, tokens[i].tok, token_len - 2))
 	    return tokens[i].exp_func(context, tokens[i].param,
 				      tokens[i].postfix, ret);
     }
 
     if (context)
-	krb5_set_error_message(context, EINVAL, "Invalid token.");
+	krb5_set_error_message(context, EINVAL,"Invalid token: %.*s", (int)token_len, token);
     return EINVAL;
 }
 
@@ -404,6 +489,7 @@ _krb5_expand_path_tokens(krb5_context context,
 			 char **ppath_out)
 {
     char *tok_begin, *tok_end, *append;
+    krb5_error_code ret;
     const char *path_left;
     size_t len = 0;
 
@@ -439,11 +525,12 @@ _krb5_expand_path_tokens(krb5_context context,
 		return EINVAL;
 	    }
 
-	    if (_expand_token(context, tok_begin, tok_end, &append)) {
+	    ret = _expand_token(context, tok_begin, tok_end, &append);
+	    if (ret) {
 		if (*ppath_out)
 		    free(*ppath_out);
 		*ppath_out = NULL;
-		return EINVAL;
+		return ret;
 	    }
 
 	    path_left = tok_end + 1;

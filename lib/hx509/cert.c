@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 - 2010 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -75,8 +77,9 @@ struct _hx509_cert_attrs {
 };
 
 struct hx509_cert_data {
-    unsigned int ref;
+    struct heim_base_uniq base;
     char *friendlyname;
+    heim_octet_string persistent;
     Certificate *data;
     hx509_private_key private_key;
     struct _hx509_cert_attrs attrs;
@@ -89,6 +92,10 @@ typedef struct hx509_name_constraints {
     NameConstraints *val;
     size_t len;
 } hx509_name_constraints;
+
+/*
+ *
+ */
 
 #define GeneralSubtrees_SET(g,var) \
 	(g)->len = (var)->len, (g)->val = (var)->val;
@@ -169,6 +176,7 @@ hx509_context_set_missing_revoke(hx509_context context, int flag)
 void
 hx509_context_free(hx509_context *context)
 {
+    hx509_certs_free(&(*context)->default_trust_anchors);
     hx509_clear_error_string(*context);
     if ((*context)->ks_ops) {
 	free((*context)->ks_ops);
@@ -176,8 +184,6 @@ hx509_context_free(hx509_context *context)
     }
     (*context)->ks_num_ops = 0;
     free_error_table ((*context)->et_list);
-    if ((*context)->querystat)
-	free((*context)->querystat);
     memset(*context, 0, sizeof(**context));
     free(*context);
     *context = NULL;
@@ -203,13 +209,47 @@ _hx509_cert_get_version(const Certificate *t)
     return t->tbsCertificate.version ? *t->tbsCertificate.version + 1 : 1;
 }
 
+/*
+ *
+ */
+
+static void
+cert_free(heim_object_t object)
+{
+    hx509_cert cert = object;
+    size_t i;
+
+    if (cert->release)
+	(cert->release)(cert, cert->ctx);
+
+    if (cert->private_key)
+	hx509_private_key_free(&cert->private_key);
+
+    if (cert->data) {
+	free_Certificate(cert->data);
+	free(cert->data);
+    }
+
+    for (i = 0; i < cert->attrs.len; i++) {
+	der_free_octet_string(&cert->attrs.val[i]->data);
+	der_free_oid(&cert->attrs.val[i]->oid);
+	free(cert->attrs.val[i]);
+    }
+    free(cert->attrs.val);
+    free(cert->friendlyname);
+    if (cert->basename)
+	hx509_name_free(&cert->basename);
+    der_free_octet_string(&cert->persistent);
+}
+
+
 /**
  * Allocate and init an hx509 certificate object from the decoded
  * certificate `c´.
  *
  * @param context A hx509 context.
- * @param c
- * @param cert
+ * @param c certificate to parse
+ * @param cert return certificate, free with heim_release()
  *
  * @return Returns an hx509 error code.
  *
@@ -221,10 +261,9 @@ hx509_cert_init(hx509_context context, const Certificate *c, hx509_cert *cert)
 {
     int ret;
 
-    *cert = malloc(sizeof(**cert));
+    *cert = heim_uniq_alloc(sizeof(**cert), "hx509-cert", cert_free);
     if (*cert == NULL)
 	return ENOMEM;
-    (*cert)->ref = 1;
     (*cert)->friendlyname = NULL;
     (*cert)->attrs.len = 0;
     (*cert)->attrs.val = NULL;
@@ -235,13 +274,13 @@ hx509_cert_init(hx509_context context, const Certificate *c, hx509_cert *cert)
 
     (*cert)->data = calloc(1, sizeof(*(*cert)->data));
     if ((*cert)->data == NULL) {
-	free(*cert);
+	heim_release(*cert);
+	*cert = NULL;
 	return ENOMEM;
     }
     ret = copy_Certificate(c, (*cert)->data);
     if (ret) {
-	free((*cert)->data);
-	free(*cert);
+	heim_release(*cert);
 	*cert = NULL;
     }
     return ret;
@@ -307,7 +346,7 @@ _hx509_cert_set_release(hx509_cert cert,
 /* Doesn't make a copy of `private_key'. */
 
 int
-_hx509_cert_assign_key(hx509_cert cert, hx509_private_key private_key)
+_hx509_cert_set_key(hx509_cert cert, hx509_private_key private_key)
 {
     if (cert->private_key)
 	hx509_private_key_free(&cert->private_key);
@@ -327,36 +366,7 @@ _hx509_cert_assign_key(hx509_cert cert, hx509_private_key private_key)
 void
 hx509_cert_free(hx509_cert cert)
 {
-    size_t i;
-
-    if (cert == NULL)
-	return;
-
-    if (cert->ref <= 0)
-	_hx509_abort("cert refcount <= 0 on free");
-    if (--cert->ref > 0)
-	return;
-
-    if (cert->release)
-	(cert->release)(cert, cert->ctx);
-
-    if (cert->private_key)
-	hx509_private_key_free(&cert->private_key);
-
-    free_Certificate(cert->data);
-    free(cert->data);
-
-    for (i = 0; i < cert->attrs.len; i++) {
-	der_free_octet_string(&cert->attrs.val[i]->data);
-	der_free_oid(&cert->attrs.val[i]->oid);
-	free(cert->attrs.val[i]);
-    }
-    free(cert->attrs.val);
-    free(cert->friendlyname);
-    if (cert->basename)
-	hx509_name_free(&cert->basename);
-    memset(cert, 0, sizeof(*cert));
-    free(cert);
+    heim_release(cert);
 }
 
 /**
@@ -372,14 +382,7 @@ hx509_cert_free(hx509_cert cert)
 hx509_cert
 hx509_cert_ref(hx509_cert cert)
 {
-    if (cert == NULL)
-	return NULL;
-    if (cert->ref <= 0)
-	_hx509_abort("cert refcount <= 0");
-    cert->ref++;
-    if (cert->ref == 0)
-	_hx509_abort("cert refcount == 0");
-    return cert;
+    return heim_retain(cert);
 }
 
 /**
@@ -558,8 +561,6 @@ hx509_verify_set_strict_rfc3280_verification(hx509_verify_ctx ctx, int boolean)
  * @param boolean if non zero, useing the operating systems builtin
  * trust anchors.
  *
- *
- * @return An hx509 error code, see hx509_get_error_string().
  *
  * @ingroup hx509_cert
  */
@@ -970,7 +971,7 @@ _hx509_cert_is_parent_cmp(const Certificate *subject,
 	if (ai.authorityCertIssuer->val[0].element != choice_GeneralName_directoryName)
 	    return -1;
 
-	name.element =
+	name.element = (enum Name_enum)
 	    ai.authorityCertIssuer->val[0].u.directoryName.element;
 	name.u.rdnSequence =
 	    ai.authorityCertIssuer->val[0].u.directoryName.u.rdnSequence;
@@ -1358,7 +1359,7 @@ hx509_cert_cmp(hx509_cert p, hx509_cert q)
 int
 hx509_cert_get_issuer(hx509_cert p, hx509_name *name)
 {
-    return _hx509_name_from_Name(&p->data->tbsCertificate.issuer, name);
+    return hx509_name_from_Name(&p->data->tbsCertificate.issuer, name);
 }
 
 /**
@@ -1376,7 +1377,7 @@ hx509_cert_get_issuer(hx509_cert p, hx509_name *name)
 int
 hx509_cert_get_subject(hx509_cert p, hx509_name *name)
 {
-    return _hx509_name_from_Name(&p->data->tbsCertificate.subject, name);
+    return hx509_name_from_Name(&p->data->tbsCertificate.subject, name);
 }
 
 /**
@@ -1409,7 +1410,7 @@ hx509_cert_get_base_subject(hx509_context context, hx509_cert c,
 			       "canonicalize yet, no base name");
 	return ret;
     }
-    return _hx509_name_from_Name(&c->data->tbsCertificate.subject, name);
+    return hx509_name_from_Name(&c->data->tbsCertificate.subject, name);
 }
 
 /**
@@ -1527,7 +1528,7 @@ get_x_unique_id(hx509_context context, const char *name,
     }
     ret = der_copy_bit_string(cert, subject);
     if (ret) {
-	hx509_set_error_string(context, 0, ret, "malloc out of memory", name);
+	hx509_set_error_string(context, 0, ret, "malloc out of memory");
 	return ret;
     }
     return 0;
@@ -1642,8 +1643,60 @@ _hx509_Time2time_t(const Time *t)
 	return t->u.utcTime;
     case choice_Time_generalTime:
 	return t->u.generalTime;
-    }
+    case invalid_choice_Time:
     return 0;
+}
+}
+
+static void
+evaluate_free(heim_object_t object)
+{
+    hx509_evaluate data = object;
+    heim_release(data->path);
+}
+
+hx509_evaluate
+_hx509_evaluate_alloc(void)
+{
+    hx509_evaluate eval;
+
+    eval = heim_uniq_alloc(sizeof(*eval), "hx509-evaluate", evaluate_free);
+    if (eval == NULL)
+	return NULL;
+
+    eval->path = heim_array_create();
+    if (eval->path == NULL) {
+	heim_release(eval);
+	return NULL;
+    }
+    return eval;
+}
+
+size_t
+hx509_evaluate_get_length(hx509_evaluate data)
+{
+    return heim_array_get_length(data->path);
+}
+
+hx509_cert
+hx509_evaluate_get_cert(hx509_evaluate data, size_t offset)
+{
+    return heim_array_copy_value(data->path, offset);
+}
+
+hx509_cert
+hx509_evaluate_get_ta(hx509_evaluate data)
+{
+    size_t len = heim_array_get_length(data->path);
+    if (len == 0)
+	return NULL;
+    return heim_array_copy_value(data->path, len - 1);
+}
+
+void
+hx509_evaluate_free(hx509_evaluate data)
+{
+    heim_release(data);
 }
 
 /*
@@ -1803,12 +1856,12 @@ match_general_name(const GeneralName *c, const GeneralName *n, int *match)
 
 	c_name._save.data = NULL;
 	c_name._save.length = 0;
-	c_name.element = c->u.directoryName.element;
+	c_name.element = (enum Name_enum)c->u.directoryName.element;
 	c_name.u.rdnSequence = c->u.directoryName.u.rdnSequence;
 
 	n_name._save.data = NULL;
 	n_name._save.length = 0;
-	n_name.element = n->u.directoryName.element;
+	n_name.element = (enum Name_enum)n->u.directoryName.element;
 	n_name.u.rdnSequence = n->u.directoryName.u.rdnSequence;
 
 	ret = match_X501Name(&c_name, &n_name);
@@ -1819,7 +1872,7 @@ match_general_name(const GeneralName *c, const GeneralName *n, int *match)
     case choice_GeneralName_uniformResourceIdentifier:
     case choice_GeneralName_iPAddress:
     case choice_GeneralName_registeredID:
-    default:
+    case invalid_choice_GeneralName:
 	return HX509_NAME_CONSTRAINT_ERROR;
     }
 }
@@ -1844,7 +1897,7 @@ match_alt_name(const GeneralName *n, const Certificate *c,
 	for (j = 0; j < sa.len; j++) {
 	    if (n->element == sa.val[j].element) {
 		*same = 1;
-		ret = match_general_name(n, &sa.val[j], match);
+		(void)match_general_name(n, &sa.val[j], match);
 	    }
 	}
 	free_GeneralNames(&sa);
@@ -1879,11 +1932,11 @@ match_tree(const GeneralSubtrees *t, const Certificate *c, int *match)
 	    memset(&certname, 0, sizeof(certname));
 	    certname.element = choice_GeneralName_directoryName;
 	    certname.u.directoryName.element =
-		c->tbsCertificate.subject.element;
+		(enum GeneralName_directoryName_enum)c->tbsCertificate.subject.element;
 	    certname.u.directoryName.u.rdnSequence =
 		c->tbsCertificate.subject.u.rdnSequence;
 
-	    ret = match_general_name(&t->val[i].base, &certname, &name);
+	    (void)match_general_name(&t->val[i].base, &certname, &name);
 	}
 
 	/* Handle subjectAltNames, this is icky since they
@@ -1969,11 +2022,12 @@ free_name_constraints(hx509_name_constraints *nc)
  * @ingroup hx509_verify
  */
 
-int
-hx509_verify_path(hx509_context context,
+static int
+_hx509_verify_path_internal(hx509_context context,
 		  hx509_verify_ctx ctx,
 		  hx509_cert cert,
-		  hx509_certs pool)
+			    hx509_certs pool,
+			    hx509_evaluate *result)
 {
     hx509_name_constraints nc;
     hx509_path path;
@@ -1984,6 +2038,9 @@ hx509_verify_path(hx509_context context,
     hx509_certs anchors = NULL;
 
     memset(&proxy_issuer, 0, sizeof(proxy_issuer));
+
+    if (result)
+	*result = NULL;
 
     ret = init_name_constraints(&nc);
     if (ret)
@@ -2197,7 +2254,7 @@ hx509_verify_path(hx509_context context,
 		if (cert->basename)
 		    hx509_name_free(&cert->basename);
 
-		ret = _hx509_name_from_Name(&proxy_issuer, &cert->basename);
+		ret = hx509_name_from_Name(&proxy_issuer, &cert->basename);
 		if (ret) {
 		    hx509_clear_error_string(context);
 		    goto out;
@@ -2372,6 +2429,17 @@ hx509_verify_path(hx509_context context,
 	}
     }
 
+    if (result) {
+	*result = _hx509_evaluate_alloc();
+	if (*result == NULL) {
+	    ret = ENOMEM;
+	    goto out;
+	}
+
+	for (i = 0; i < path.len; i++)
+	    heim_array_append_value((*result)->path, path.val[i]);
+    }
+
 out:
     hx509_certs_free(&anchors);
     free_Name(&proxy_issuer);
@@ -2380,6 +2448,185 @@ out:
 
     return ret;
 }
+
+/**
+  * Build and verify the path for the certificate to the trust anchor
+  * specified in the verify context. The path is constructed from the
+  * certificate, the pool and the trust anchors.
+  *
+  * @param context A hx509 context.
+  * @param ctx A hx509 verification context.
+  * @param cert the certificate to build the path from.
+  * @param pool A keyset of certificates to build the chain from.
+  *
+  * @return An hx509 error code, see hx509_get_error_string().
+  *
+  * @ingroup hx509_verify
+  */
+
+int
+hx509_verify_path(hx509_context context,
+		  hx509_verify_ctx ctx,
+		  hx509_cert cert,
+		  hx509_certs pool)
+{
+    return hx509_evaluate_cert(context, ctx, cert, pool, NULL);
+}
+
+#ifdef __APPLE__
+#include <Security/Security.h>
+
+static SecCertificateRef
+HXCreateCertificateFromHX509Certificate(hx509_context context, hx509_cert cert)
+{
+    SecCertificateRef c = NULL;
+    heim_octet_string os;
+    int r;
+
+    r = hx509_cert_binary(context, cert, &os);
+    if (r)
+	return NULL;
+
+    CFDataRef refdata = CFDataCreateWithBytesNoCopy(NULL, os.data, os.length, kCFAllocatorNull);
+    if (refdata) {
+	c = SecCertificateCreateWithData(NULL, refdata);
+	CFRelease(refdata);
+    }
+    hx509_xfree(os.data);
+    return c;
+}
+
+#endif
+
+
+int
+hx509_evaluate_cert(hx509_context context,
+		    hx509_verify_ctx ctx,
+		    hx509_cert cert,
+		    hx509_certs pool,
+		    hx509_evaluate *validate)
+{
+#ifdef __APPLE__
+    __block CFMutableArrayRef certs;
+    __block SecCertificateRef c;
+    int ret;
+
+    if (validate)
+	*validate = NULL;
+
+    certs = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+    heim_assert(certs != NULL, "out of memory");
+    
+    c = HXCreateCertificateFromHX509Certificate(context, cert);
+    CFArrayAppendValue(certs, c);
+    CFRelease(c);
+
+    hx509_certs_iter(context, pool, ^(hx509_cert pc) {
+	    c = HXCreateCertificateFromHX509Certificate(context, pc);
+	    CFArrayAppendValue(certs, c);
+	    CFRelease(c);
+	    return 0;
+	});
+
+    /* XXX pkinit policy */
+    SecPolicyRef policy = SecPolicyCreateBasicX509();
+
+    SecTrustRef trust = NULL;
+
+    OSStatus status = SecTrustCreateWithCertificates(certs, policy, &trust);
+    CFRelease(policy);
+    CFRelease(certs);
+    if (status) {
+	ret = HX509_ISSUER_NOT_FOUND;
+	hx509_set_error_string(context, 0, ret, "Failed to create trust");
+	CFRelease(trust);
+    }
+
+    SecTrustResultType result;
+
+    status = SecTrustEvaluate(trust, &result);
+    if (status) {
+	ret = HX509_ISSUER_NOT_FOUND;
+	hx509_set_error_string(context, 0, ret, "Failed to validate trust: %d", (int)status);
+	CFRelease(trust);
+	return ret;
+    }
+
+    switch (result) {
+    case kSecTrustResultUnspecified:
+    case kSecTrustResultProceed:
+	break;
+    default:
+	ret = HX509_ISSUER_NOT_FOUND;
+	hx509_set_error_string(context, 0, ret, "Failed to validate trust");
+	CFRelease(trust);
+
+#ifndef APPLE_TARGET_EMBEDDED
+	{
+	    static dispatch_once_t setup;
+	    static bool allow_hx509_validation = false;
+	    dispatch_once(&setup, ^{
+		    CFBooleanRef val;
+		    val = CFPreferencesCopyValue(CFSTR("AllowHX509Validation"),
+						 CFSTR("org.h5l.hx509"),
+						 kCFPreferencesCurrentUser,
+						 kCFPreferencesAnyHost);
+		    if (val && CFBooleanGetTypeID() == CFGetTypeID(val))
+			allow_hx509_validation = CFBooleanGetValue(val);
+		    if (val)
+			CFRelease(val);
+		});
+	    if (allow_hx509_validation)
+		ret = _hx509_verify_path_internal(context, ctx, cert, pool, validate);
+	}
+#endif
+	return ret;
+    }
+
+    if (validate) {
+	CFIndex count, n;
+
+	count = SecTrustGetCertificateCount(trust);
+
+	*validate = _hx509_evaluate_alloc();
+	if (*validate == NULL) {
+	    CFRelease(trust);
+	    return ENOMEM;
+	}
+
+	for (n = 0; n < count; n++) {
+	    SecCertificateRef tc = SecTrustGetCertificateAtIndex(trust, n);
+	    heim_assert(tc != NULL, "SecTrustGetCertificateAtIndex didn't return a cert");
+
+	    CFDataRef data = SecCertificateCopyData(tc);
+	    heim_assert(data != NULL, "cert w/o data ?");
+
+	    hx509_cert tcert = NULL;
+
+	    ret = hx509_cert_init_data(context, CFDataGetBytePtr(data), CFDataGetLength(data), &tcert);
+	    CFRelease(data);
+	    if (ret) {
+		CFRelease(trust);
+		hx509_evaluate_free(*validate);
+		*validate = NULL;
+		return ret;
+	    }
+	    heim_array_append_value((*validate)->path, tcert);
+	    hx509_cert_free(tcert);
+	}
+    }
+
+    CFRelease(trust);
+
+    return 0;
+#else /* __APPLE__ */
+    if (validate)
+	*validate = NULL;
+
+    return _hx509_verify_path_internal(context, ctx, cert, pool, validate);
+#endif
+}
+
 
 /**
  * Verify a signature made using the private key of an certificate.
@@ -2488,7 +2735,13 @@ hx509_verify_hostname(hx509_context context,
 		}
 		break;
 	    }
-	    default:
+	    case choice_GeneralName_directoryName:
+	    case choice_GeneralName_otherName:
+	    case choice_GeneralName_rfc822Name:
+	    case choice_GeneralName_uniformResourceIdentifier:
+	    case choice_GeneralName_iPAddress:
+	    case choice_GeneralName_registeredID:
+	    case invalid_choice_GeneralName:
 		break;
 	    }
 	}
@@ -2527,7 +2780,10 @@ hx509_verify_hostname(hx509_context context,
 		case choice_DirectoryString_utf8String:
 		    if (strcasecmp(ds->u.utf8String, hostname) == 0)
 			return 0;
-		default:
+		case choice_DirectoryString_teletexString:
+		case choice_DirectoryString_bmpString:
+		case choice_DirectoryString_universalString:
+		case invalid_choice_DirectoryString:
 		    break;
 		}
 		ret = HX509_NAME_CONSTRAINT_ERROR;
@@ -2683,6 +2939,43 @@ hx509_cert_get_friendly_name(hx509_cert cert)
     return cert->friendlyname;
 }
 
+int
+hx509_cert_set_persistent(hx509_cert cert, heim_octet_string *persistent)
+{
+    der_free_octet_string(&cert->persistent);
+    return der_copy_octet_string(persistent, &cert->persistent);
+}
+
+int
+hx509_cert_get_persistent(hx509_cert cert, heim_octet_string *persistent)
+{
+    heim_octet_string os;
+    Certificate *c;
+    int ret;
+    
+    if (cert->persistent.length)
+	return der_copy_octet_string(&cert->persistent, persistent);
+
+    c = _hx509_get_cert(cert);
+
+    os.data = c->tbsCertificate.subjectPublicKeyInfo.subjectPublicKey.data;
+    os.length =
+	c->tbsCertificate.subjectPublicKeyInfo.subjectPublicKey.length / 8;
+    
+    ret = _hx509_create_signature(NULL,
+				  NULL,
+				  hx509_signature_sha1(),
+				  &os,
+				  NULL,
+				  persistent);
+    if (ret)
+	return ret;
+
+    hx509_cert_set_persistent(cert, persistent);
+
+    return 0;
+}
+
 void
 _hx509_query_clear(hx509_query *q)
 {
@@ -2716,8 +3009,6 @@ hx509_query_alloc(hx509_context context, hx509_query **q)
  * @param q query controller.
  * @param option options to control the query controller.
  *
- * @return An hx509 error code, see hx509_get_error_string().
- *
  * @ingroup hx509_cert
  */
 
@@ -2738,7 +3029,6 @@ hx509_query_match_option(hx509_query *q, hx509_query_option option)
 	q->match |= HX509_QUERY_KU_KEYCERTSIGN;
 	break;
     case HX509_QUERY_OPTION_END:
-    default:
 	break;
     }
 }
@@ -2859,6 +3149,7 @@ hx509_query_match_eku(hx509_query *q, const heim_oid *eku)
     return 0;
 }
 
+#ifdef HEIM_HX_EXPR
 int
 hx509_query_match_expr(hx509_context context, hx509_query *q, const char *expr)
 {
@@ -2877,6 +3168,7 @@ hx509_query_match_expr(hx509_context context, hx509_query *q, const char *expr)
 
     return 0;
 }
+#endif
 
 /**
  * Set the query controller to match using a specific match function.
@@ -2902,6 +3194,21 @@ hx509_query_match_cmp_func(hx509_query *q,
 	q->match &= ~HX509_QUERY_MATCH_FUNCTION;
     q->cmp_func = func;
     q->cmp_func_ctx = ctx;
+    return 0;
+}
+
+/**
+ *
+ */
+
+int
+hx509_query_match_persistent(hx509_query *q, heim_octet_string *ident)
+{
+    if (ident)
+	q->match |= HX509_QUERY_MATCH_PERSISTENT;
+    else
+	q->match &= ~HX509_QUERY_MATCH_PERSISTENT;
+    q->persistent = ident;
     return 0;
 }
 
@@ -2934,8 +3241,10 @@ hx509_query_free(hx509_context context, hx509_query *q)
     }
     if (q->friendlyname)
 	free(q->friendlyname);
+#ifdef HEIM_HX_EXPR
     if (q->expr)
 	_hx509_expr_free(q->expr);
+#endif
 
     memset(q, 0, sizeof(*q));
     free(q);
@@ -2946,8 +3255,6 @@ _hx509_query_match_cert(hx509_context context, const hx509_query *q, hx509_cert 
 {
     Certificate *c = _hx509_get_cert(cert);
     int ret, diff;
-
-    _hx509_query_statistic(context, 1, q);
 
     if ((q->match & HX509_QUERY_FIND_ISSUER_CERT) &&
 	_hx509_cert_is_parent_cmp(q->subject, c, 0) != 0)
@@ -3075,6 +3382,7 @@ _hx509_query_match_cert(hx509_context context, const hx509_query *q, hx509_cert 
 	return 0;
 
     if ((q->match & HX509_QUERY_MATCH_EXPR)) {
+#ifdef HEIM_HX_EXPR
 	hx509_env env = NULL;
 
 	ret = _hx509_cert_to_env(context, cert, &env);
@@ -3085,167 +3393,27 @@ _hx509_query_match_cert(hx509_context context, const hx509_query *q, hx509_cert 
 	hx509_env_free(&env);
 	if (ret == 0)
 	    return 0;
+#else
+	return 0;
+#endif
+    }
+    if ((q->match & HX509_QUERY_MATCH_PERSISTENT)) {
+	heim_octet_string p;
+
+	ret = hx509_cert_get_persistent(cert, &p);
+	if (ret)
+	    return 0;
+
+	ret = der_heim_octet_string_cmp(&p, q->persistent);
+	der_free_octet_string(&p);
+	if (ret != 0)
+	    return 0;
     }
 
     if (q->match & ~HX509_QUERY_MASK)
 	return 0;
 
     return 1;
-}
-
-/**
- * Set a statistic file for the query statistics.
- *
- * @param context A hx509 context.
- * @param fn statistics file name
- *
- * @ingroup hx509_cert
- */
-
-void
-hx509_query_statistic_file(hx509_context context, const char *fn)
-{
-    if (context->querystat)
-	free(context->querystat);
-    context->querystat = strdup(fn);
-}
-
-void
-_hx509_query_statistic(hx509_context context, int type, const hx509_query *q)
-{
-    FILE *f;
-    if (context->querystat == NULL)
-	return;
-    f = fopen(context->querystat, "a");
-    if (f == NULL)
-	return;
-    rk_cloexec_file(f);
-    fprintf(f, "%d %d\n", type, q->match);
-    fclose(f);
-}
-
-static const char *statname[] = {
-    "find issuer cert",
-    "match serialnumber",
-    "match issuer name",
-    "match subject name",
-    "match subject key id",
-    "match issuer id",
-    "private key",
-    "ku encipherment",
-    "ku digitalsignature",
-    "ku keycertsign",
-    "ku crlsign",
-    "ku nonrepudiation",
-    "ku keyagreement",
-    "ku dataencipherment",
-    "anchor",
-    "match certificate",
-    "match local key id",
-    "no match path",
-    "match friendly name",
-    "match function",
-    "match key hash sha1",
-    "match time"
-};
-
-struct stat_el {
-    unsigned long stats;
-    unsigned int index;
-};
-
-
-static int
-stat_sort(const void *a, const void *b)
-{
-    const struct stat_el *ae = a;
-    const struct stat_el *be = b;
-    return be->stats - ae->stats;
-}
-
-/**
- * Unparse the statistics file and print the result on a FILE descriptor.
- *
- * @param context A hx509 context.
- * @param printtype tyep to print
- * @param out the FILE to write the data on.
- *
- * @ingroup hx509_cert
- */
-
-void
-hx509_query_unparse_stats(hx509_context context, int printtype, FILE *out)
-{
-    rtbl_t t;
-    FILE *f;
-    int type, mask, num;
-    size_t i;
-    unsigned long multiqueries = 0, totalqueries = 0;
-    struct stat_el stats[32];
-
-    if (context->querystat == NULL)
-	return;
-    f = fopen(context->querystat, "r");
-    if (f == NULL) {
-	fprintf(out, "No statistic file %s: %s.\n",
-		context->querystat, strerror(errno));
-	return;
-    }
-    rk_cloexec_file(f);
-
-    for (i = 0; i < sizeof(stats)/sizeof(stats[0]); i++) {
-	stats[i].index = i;
-	stats[i].stats = 0;
-    }
-
-    while (fscanf(f, "%d %d\n", &type, &mask) == 2) {
-	if (type != printtype)
-	    continue;
-	num = i = 0;
-	while (mask && i < sizeof(stats)/sizeof(stats[0])) {
-	    if (mask & 1) {
-		stats[i].stats++;
-		num++;
-	    }
-	    mask = mask >>1 ;
-	    i++;
-	}
-	if (num > 1)
-	    multiqueries++;
-	totalqueries++;
-    }
-    fclose(f);
-
-    qsort(stats, sizeof(stats)/sizeof(stats[0]), sizeof(stats[0]), stat_sort);
-
-    t = rtbl_create();
-    if (t == NULL)
-	errx(1, "out of memory");
-
-    rtbl_set_separator (t, "  ");
-
-    rtbl_add_column_by_id (t, 0, "Name", 0);
-    rtbl_add_column_by_id (t, 1, "Counter", 0);
-
-
-    for (i = 0; i < sizeof(stats)/sizeof(stats[0]); i++) {
-	char str[10];
-
-	if (stats[i].index < sizeof(statname)/sizeof(statname[0]))
-	    rtbl_add_column_entry_by_id (t, 0, statname[stats[i].index]);
-	else {
-	    snprintf(str, sizeof(str), "%d", stats[i].index);
-	    rtbl_add_column_entry_by_id (t, 0, str);
-	}
-	snprintf(str, sizeof(str), "%lu", stats[i].stats);
-	rtbl_add_column_entry_by_id (t, 1, str);
-    }
-
-    rtbl_format(t, out);
-    rtbl_destroy(t);
-
-    fprintf(out, "\nQueries: multi %lu total %lu\n",
-	    multiqueries, totalqueries);
 }
 
 /**
@@ -3356,7 +3524,7 @@ _hx509_cert_get_eku(hx509_context context,
 int
 hx509_cert_binary(hx509_context context, hx509_cert c, heim_octet_string *os)
 {
-    size_t size;
+    size_t size = 0;
     int ret;
 
     os->data = NULL;
@@ -3384,15 +3552,13 @@ hx509_cert_binary(hx509_context context, hx509_cert c, heim_octet_string *os)
 
 void
 _hx509_abort(const char *fmt, ...)
-     __attribute__ ((noreturn, format (printf, 1, 2)))
+    HEIMDAL_NORETURN_ATTRIBUTE
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 1, 2))
 {
     va_list ap;
     va_start(ap, fmt);
-    vprintf(fmt, ap);
+    heim_abortv(fmt, ap);
     va_end(ap);
-    printf("\n");
-    fflush(stdout);
-    abort();
 }
 
 /**
@@ -3516,7 +3682,7 @@ _hx509_cert_to_env(hx509_context context, hx509_cert cert, hx509_env *env)
 	if (ret != 0)
 	    goto out;
 
-	ret = hex_encode(sig.data, sig.length, &buf);
+	ret = (int)hex_encode(sig.data, sig.length, &buf);
 	der_free_octet_string(&sig);
 	if (ret < 0) {
 	    ret = ENOMEM;
@@ -3600,13 +3766,71 @@ hx509_print_cert(hx509_context context, hx509_cert cert, FILE *out)
 	free(str);
     }
 
-    printf("    keyusage: ");
+    fprintf(out, "    keyusage: ");
     ret = hx509_cert_keyusage_print(context, cert, &str);
     if (ret == 0) {
 	fprintf(out, "%s\n", str);
 	free(str);
     } else
-	fprintf(out, "no");
+	fprintf(out, "no\n");
+
+    {
+	heim_octet_string os;
+
+	fprintf(out, "    persistent: ");
+	ret = hx509_cert_get_persistent(cert, &os);
+	if (ret == 0) {
+	    ret = (int)hex_encode(os.data, os.length, &str);
+	    if (ret > 0) {
+		fprintf(out, "%s\n", str);
+		free(str);
+	    } else {
+		fprintf(out, "out of memory\n");
+	    }
+	    der_free_octet_string(&os);
+	} else {
+	    fprintf(out, "no\n");
+	}
+    }
+
+    return 0;
+}
+
+/**
+ * Get a fast an loose version of the apple id, can't be used for acl checking
+ *
+ * @ingroup hx509_cert
+ */
+
+int
+hx509_cert_get_appleid(hx509_context context, hx509_cert cert, char **appleid)
+{
+    unsigned oids[] = { 1, 2, 840, 113635, 100, 3, 2, 1 };
+    const heim_oid mobileMe = { sizeof(oids)/sizeof(oids[0]), oids };
+    unsigned count = 0;
+    hx509_name name;
+    char *str;
+    int ret;
+    
+    *appleid = NULL;
+
+    ret = hx509_cert_check_eku(context, cert, &mobileMe, 0);
+    if (ret)
+	return ret;
+
+    ret = hx509_cert_get_subject(cert, &name);
+    if (ret)
+	return ret;
+
+    ret = hx509_name_get_component(name, 3, &asn1_oid_id_at_commonName, &count, &str);
+    hx509_name_free(&name);
+    if (ret)
+	return ret;
+
+    asprintf(appleid, "%s@me.com", str);
+    free(str);
+    if (*appleid == NULL)
+	return ENOMEM;
 
     return 0;
 }

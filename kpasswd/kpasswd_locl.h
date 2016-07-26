@@ -36,9 +36,7 @@
 #ifndef __KPASSWD_LOCL_H__
 #define __KPASSWD_LOCL_H__
 
-#ifdef HAVE_CONFIG_H
 #include <config.h>
-#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -99,6 +97,7 @@
 #include <roken.h>
 #include <getarg.h>
 #include <krb5.h>
+#include <heimbase.h>
 #include "crypto-headers.h" /* for des_read_pw_string */
 
 #endif /* __KPASSWD_LOCL_H__ */

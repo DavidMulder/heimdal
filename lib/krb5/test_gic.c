@@ -1,7 +1,9 @@
 /*
- * Copyright (c) 2009 Kungliga Tekniska Högskolan
+ * Copyright (c) 2000 - 2001, 2009 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
+ *
+ * Portions Copyright (c) 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +36,39 @@
 #include <err.h>
 #include <getarg.h>
 
-static char *password_str;
+static char *password_str = NULL;
+static char *client_str = NULL;
+static char *fuzzer_mode = NULL;
+static int timer_mode = 0;
+static int debug_flag	= 0;
+static int do_lr_flag = 0;
+static int version_flag = 0;
+static int help_flag	= 0;
+
+static void
+tvfix(struct timeval *t1)
+{
+    if (t1->tv_usec < 0) {
+        t1->tv_sec--;
+        t1->tv_usec += 1000000;
+    }
+    if (t1->tv_usec >= 1000000) {
+        t1->tv_sec++;
+        t1->tv_usec -= 1000000;
+    }
+}
+ 
+/*
+ * t1 -= t2
+ */
+
+static void
+tvsub(struct timeval *t1, const struct timeval *t2)
+{
+    t1->tv_sec  -= t2->tv_sec;
+    t1->tv_usec -= t2->tv_usec;
+    tvfix(t1);
+}
 
 static krb5_error_code
 lr_proc(krb5_context context, krb5_last_req_entry **e, void *ctx)
@@ -46,7 +80,7 @@ lr_proc(krb5_context context, krb5_last_req_entry **e, void *ctx)
     return 0;
 }
 
-static void
+static krb5_error_code
 test_get_init_creds(krb5_context context,
 		    krb5_principal client)
 {
@@ -58,7 +92,7 @@ test_get_init_creds(krb5_context context,
     if (ret)
 	krb5_err(context, 1, ret, "krb5_get_init_creds_opt_alloc");
 
-
+    if (do_lr_flag) {
     ret = krb5_get_init_creds_opt_set_process_last_req(context,
 						       opt,
 						       lr_proc,
@@ -66,6 +100,7 @@ test_get_init_creds(krb5_context context,
     if (ret)
 	krb5_err(context, 1, ret,
 		 "krb5_get_init_creds_opt_set_process_last_req");
+    }
 
     ret = krb5_get_init_creds_password(context,
 				       &cred,
@@ -77,23 +112,25 @@ test_get_init_creds(krb5_context context,
 				       NULL,
 				       opt);
     if (ret)
-	krb5_err(context, 1, ret, "krb5_get_init_creds_password");
+	krb5_warn(context, ret, "krb5_get_init_creds_password");
 
     krb5_get_init_creds_opt_free(context, opt);
+    return ret;
 }
-
-static char *client_str = NULL;
-static int debug_flag	= 0;
-static int version_flag = 0;
-static int help_flag	= 0;
 
 static struct getargs args[] = {
     {"client",	0,	arg_string,	&client_str,
      "client principal to use", NULL },
     {"password",0,	arg_string,	&password_str,
      "password", NULL },
+    {"fuzzer",0,	arg_string,	&fuzzer_mode,
+     "turn on asn1 fuzzer, select mode", NULL },
+    {"timer",0,		arg_flag,	&timer_mode,
+     "timer (benchmark) mode", NULL },
     {"debug",	'd',	arg_flag,	&debug_flag,
      "turn on debuggin", NULL },
+    {"last-request",	0, arg_flag,	&do_lr_flag,
+     "print version", NULL },
     {"version",	0,	arg_flag,	&version_flag,
      "print version", NULL },
     {"help",	0,	arg_flag,	&help_flag,
@@ -140,7 +177,54 @@ main(int argc, char **argv)
     if (ret)
 	krb5_err(context, 1, ret, "krb5_parse_name: %d", ret);
 
-    test_get_init_creds(context, client);
+    if (timer_mode) {
+	unsigned long n;
+	struct timeval tv1, tv2;
+
+	if (password_str == NULL)
+	    errx(1, "password-less mode is not support with fuzzer");
+
+	gettimeofday(&tv1, NULL);
+
+	for (n = 0; n < 1000; n++) {
+	    if (test_get_init_creds(context, client))
+		errors++;
+	}
+	
+	gettimeofday(&tv2, NULL);
+
+	tvsub(&tv2, &tv1);
+
+	printf("timing: %ld.%06ld\n", 
+	       (long)tv2.tv_sec, (long)tv2.tv_usec);
+
+    } else if (fuzzer_mode) {
+	unsigned long u = 0;
+
+	if (password_str == NULL)
+	    errx(1, "password-less mode is not support with fuzzer");
+
+	if (asn1_fuzzer_method(fuzzer_mode))
+	    errx(1, "no fuzzer support");
+
+	asn1_fuzzer_reset();
+
+	do {
+	    asn1_fuzzer_next();
+
+	    if (debug_flag)
+		printf("request... %lu\n", u++);
+
+	    /* ignore failure when we run fuzzer */
+	    (void)test_get_init_creds(context, client);
+
+	} while(!asn1_fuzzer_done());
+
+
+    } else {
+	if (test_get_init_creds(context, client))
+	    errors++;
+    }
 
     krb5_free_context(context);
 

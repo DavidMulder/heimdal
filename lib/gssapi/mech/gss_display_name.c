@@ -28,11 +28,28 @@
 
 #include "mech_locl.h"
 
+/**
+ * Create a representstion of a name suitable for display
+ *
+ * A name that is useful to print to user, not suitable for
+ * authorization. For authorization use gss_authorize_localname(), or
+ * gss_userok().
+ *
+ * @param minor_status minor status code returned
+ * @param input_name name to be converted into a name
+ * @param output_name_buffer output buffer with name, must be released with gss_release_buffer() on success.
+ * @param output_name_type type OID of then name
+ *
+ * @returns GSS major status code
+ *
+ * @ingroup gssapi
+ */
+
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_display_name(OM_uint32 *minor_status,
-    const gss_name_t input_name,
-    gss_buffer_t output_name_buffer,
-    gss_OID *output_name_type)
+gss_display_name(OM_uint32 *__nonnull minor_status,
+    __nonnull const gss_name_t input_name,
+    __nonnull gss_buffer_t output_name_buffer,
+    __nullable gss_OID * __nullable output_name_type)
 {
 	OM_uint32 major_status;
 	struct _gss_name *name = (struct _gss_name *) input_name;

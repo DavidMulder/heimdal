@@ -153,6 +153,46 @@ wind_utf8ucs4_length(const char *in, size_t *out_len)
     return wind_utf8ucs4(in, NULL, out_len);
 }
 
+/**
+ * Convert an UTF-8 string to an UCS4 string.
+ *
+ * @param in an UTF-8 string to convert.
+ * @param out the resulting UCS4 strint, must be free with free().
+ * @param out_len will be the length of the out string.
+ *
+ * @return returns 0 on success, an wind error code otherwise
+ * @ingroup wind
+ */
+
+int
+wind_utf8ucs4_copy(const char *in, uint32_t **out, size_t *out_len)
+{
+    int ret;
+
+    ret = wind_utf8ucs4_length(in, out_len);
+    if (ret)
+	return ret;
+    if (*out_len > UINT_MAX / sizeof((*out)[0]))
+	return ERANGE;
+    if (*out_len == 0)
+        return 0;
+
+    *out = malloc(*out_len * sizeof((*out)[0]));
+    if (*out == NULL) {
+	*out_len = 0;
+	return ENOMEM;
+    }
+    
+    ret = wind_utf8ucs4(in, *out, out_len);
+    if (ret) {
+	free(*out);
+	*out = NULL;
+	*out_len = 0;
+    }
+    return ret;
+}
+
+
 static const char first_char[4] =
     { 0x00, 0xC0, 0xE0, 0xF0 };
 
@@ -169,7 +209,7 @@ static const char first_char[4] =
 
  * @param out_len before processing out_len should be the length of
  * the out variable, after processing it will be the length of the out
- * string.
+ * string. NUL not included.
  *
  * @return returns 0 on success, an wind error code otherwise
  * @ingroup wind
@@ -214,11 +254,11 @@ wind_ucs4utf8(const uint32_t *in, size_t in_len, char *out, size_t *out_len)
 	    case 1:
 		out[0] = ch | first_char[len - 1];
 	    }
-	}
 	out += len;
     }
+    }
     if (out) {
-	if (o + 1 >= *out_len)
+	if (o >= *out_len)
 	    return WIND_ERR_OVERRUN;
 	*out = '\0';
     }
@@ -242,6 +282,48 @@ wind_ucs4utf8_length(const uint32_t *in, size_t in_len, size_t *out_len)
 {
     return wind_ucs4utf8(in, in_len, NULL, out_len);
 }
+
+/**
+ * Convert an UCS4 string to a UTF-8 string.
+ *
+ * @param in an UCS4 string to convert.
+ * @param in_len the length input array.
+ * @param out an allocated string, should be released with free().
+ * @param out_len size of out string, NUL not included in count.
+ *
+ * @return returns 0 on success, an wind error code otherwise
+ * @ingroup wind
+ */
+
+int
+wind_ucs4utf8_copy(const uint32_t *in, size_t in_len, char **out, size_t *out_len)
+{
+    size_t size;
+    int ret;
+
+    ret = wind_ucs4utf8_length(in, in_len, &size);
+    if (ret)
+	return ret;
+
+    size += 1;
+
+    *out = malloc(size);
+    if (*out == NULL)
+	return ENOMEM;
+    
+    ret = wind_ucs4utf8(in, in_len, *out, &size);
+    if (ret) {
+	free(*out);
+	*out = NULL;
+	return ret;
+    }
+    
+    if (out_len)
+	*out_len = size;
+
+    return 0;
+}
+
 
 /**
  * Read in an UCS2 from a buffer.

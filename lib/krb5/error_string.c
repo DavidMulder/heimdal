@@ -33,8 +33,8 @@
 
 #include "krb5_locl.h"
 
-#undef __attribute__
-#define __attribute__(x)
+#undef HEIMDAL_PRINTF_ATTRIBUTE
+#define HEIMDAL_PRINTF_ATTRIBUTE(x)
 
 /**
  * Clears the error message from the Kerberos 5 context.
@@ -72,7 +72,7 @@ krb5_clear_error_message(krb5_context context)
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_set_error_message(krb5_context context, krb5_error_code ret,
 		       const char *fmt, ...)
-    __attribute__ ((format (printf, 3, 4)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 4))
 {
     va_list ap;
 
@@ -98,7 +98,7 @@ krb5_set_error_message(krb5_context context, krb5_error_code ret,
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_vset_error_message (krb5_context context, krb5_error_code ret,
 			 const char *fmt, va_list args)
-    __attribute__ ((format (printf, 3, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 0))
 {
     int r;
 
@@ -115,6 +115,8 @@ krb5_vset_error_message (krb5_context context, krb5_error_code ret,
     if (r < 0)
 	context->error_string = NULL;
     HEIMDAL_MUTEX_unlock(context->mutex);
+    if (context->error_string)
+	_krb5_debugx(context, 100, "set-error: %d: %s", (int)ret, context->error_string);
 }
 
 /**
@@ -134,7 +136,7 @@ krb5_vset_error_message (krb5_context context, krb5_error_code ret,
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_prepend_error_message(krb5_context context, krb5_error_code ret,
 			   const char *fmt, ...)
-    __attribute__ ((format (printf, 3, 4)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 4))
 {
     va_list ap;
 
@@ -159,7 +161,7 @@ krb5_prepend_error_message(krb5_context context, krb5_error_code ret,
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_vprepend_error_message(krb5_context context, krb5_error_code ret,
 			    const char *fmt, va_list args)
-    __attribute__ ((format (printf, 3, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 0))
 {
     char *str = NULL, *str2 = NULL;
 
@@ -265,8 +267,8 @@ krb5_get_error_message(krb5_context context, krb5_error_code code)
  * Free the error message returned by krb5_get_error_message().
  *
  * @param context Kerberos context
- * @param msg error message to free, returned byg
- *        krb5_get_error_message().
+ * @param msg error message to free, returned by
+ *        krb5_get_error_message(). NULL is ok (nothing freed).
  *
  * @ingroup krb5_error
  */
@@ -274,6 +276,7 @@ krb5_get_error_message(krb5_context context, krb5_error_code code)
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_free_error_message(krb5_context context, const char *msg)
 {
+    if (msg)
     free(rk_UNCONST(msg));
 }
 
@@ -306,3 +309,85 @@ krb5_get_err_text(krb5_context context, krb5_error_code code)
     return p;
 }
 
+#ifdef __APPLE__
+
+/**
+ * Extracts out the error string from the CFError if there is one and
+ * returns the new error code if the error is a CommonErrorCode error.
+ *
+ * If the error is not a CommonErrorCode error, the error code passed
+ * in is used instead.
+ */
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+_krb5_vset_cf_error_message (krb5_context context,
+			    krb5_error_code ret,
+			    CFErrorRef error,
+			    const char *fmt,
+			    va_list args)
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 0))
+{
+    char *str = NULL, *error_string = NULL;
+    CFStringRef description = NULL;
+    CFDictionaryRef userInfo = NULL;
+    CFBooleanRef commonError = NULL;
+    int r;
+
+    if (error) {
+	description = CFErrorCopyDescription(error);
+	if (description) {
+	    str = rk_cfstring2cstring(description);
+	    CFRelease(description);
+	}
+	userInfo = CFErrorCopyUserInfo(error);
+	if (userInfo) {
+	    commonError = CFDictionaryGetValue(userInfo, CFSTR("CommonErrorCode"));
+	    if (commonError && CFGetTypeID(commonError) == CFBooleanGetTypeID() && CFBooleanGetValue(commonError))
+		ret = (krb5_error_code)CFErrorGetCode(error);
+	    CFRelease(userInfo);
+	}
+    }
+
+    r = vasprintf(&error_string, fmt, args);
+    if (r < 0 || error_string == NULL) {
+	free(str);
+	return ret;
+    }
+
+    if (str) {
+	krb5_set_error_message(context, ret, "%s: %s", error_string, str);
+	free(str);
+    } else {
+	krb5_set_error_message(context, ret, "%s", error_string);
+    }
+    free(error_string);
+
+    return ret;
+}
+
+/**
+ * Extracts out the error string from the CFError if there is one and
+ * returns the new error code if the error is a CommonErrorCode error.
+ *
+ * If the error is not a CommonErrorCode error, the error code passed
+ * in is used instead.
+ */
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+_krb5_set_cf_error_message(krb5_context context,
+			   krb5_error_code ret,
+			   CFErrorRef error,
+			   const char *fmt, ...)
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 5))
+{
+    krb5_error_code ret2;
+    va_list ap;
+
+    va_start(ap, fmt);
+    ret2 = _krb5_vset_cf_error_message(context, ret, error, fmt, ap);
+    va_end(ap);
+
+    return ret2;
+}
+
+#endif /* __APPLE__ */

@@ -32,6 +32,19 @@
  */
 
 #include "kadmin_locl.h"
+#include <gssapi.h>
+#include <gssapi_krb5.h>
+#include <gssapi_spi.h>
+
+
+
+#ifdef __APPLE__
+#include <sandbox.h>
+
+int sandbox_flag = 1;
+#endif
+
+krb5_error_code _gsskrb5_init (krb5_context *);
 
 static char *check_library  = NULL;
 static char *check_function = NULL;
@@ -70,8 +83,13 @@ static struct getargs args[] = {
     },
     {	"ports",	'p',	arg_string, &port_str,
 	"ports to listen to", "port" },
-    {	"help",		'h',	arg_flag,   &help_flag, NULL, NULL },
-    {	"version",	'v',	arg_flag,   &version_flag, NULL, NULL }
+#ifdef __APPLE__
+    {	"sandbox",	0, 	arg_negative_flag, &sandbox_flag,
+	"use sandbox or not"
+    },
+#endif /* __APPLE__ */
+    {	"help",		'h',	arg_flag,   &help_flag },
+    {	"version",	'v',	arg_flag,   &version_flag }
 };
 
 static int num_args = sizeof(args) / sizeof(args[0]);
@@ -85,14 +103,46 @@ usage(int ret)
     exit (ret);
 }
 
+static void
+setup_context(krb5_context ctx)
+{
+    krb5_log_facility *logfacility;
+    krb5_error_code ret;
+    char **files;
+
+    if (config_file == NULL) {
+	asprintf(&config_file, "%s/kdc.conf", hdb_db_dir(ctx));
+	if (config_file == NULL)
+	    errx(1, "out of memory");
+    }
+
+    ret = krb5_prepend_config_files_default(config_file, &files);
+    if (ret)
+	krb5_err(ctx, 1, ret, "getting configuration files");
+
+    ret = krb5_set_config_files(ctx, files);
+    krb5_free_config_files(files);
+    if(ret)
+	krb5_err(ctx, 1, ret, "reading configuration files");
+
+    ret = krb5_openlog(ctx, "kadmind", &logfacility);
+    if (ret)
+	krb5_err(ctx, 1, ret, "krb5_openlog");
+    ret = krb5_set_warn_dest(ctx, logfacility);
+    if (ret)
+	krb5_err(ctx, 1, ret, "krb5_set_warn_dest");
+
+    ret = krb5_kt_register(ctx, &hdb_kt_ops);
+    if(ret)
+	krb5_err(ctx, 1, ret, "krb5_kt_register");
+}
+
 int
 main(int argc, char **argv)
 {
     krb5_error_code ret;
-    char **files;
     int optidx = 0;
     int i;
-    krb5_log_facility *logfacility;
     krb5_keytab keytab;
     krb5_socket_t sfd = rk_INVALID_SOCKET;
 
@@ -115,34 +165,19 @@ main(int argc, char **argv)
 	exit(0);
     }
 
-    argc -= optidx;
-    argv += optidx;
+    setup_context(context);
 
-    if (config_file == NULL) {
-	asprintf(&config_file, "%s/kdc.conf", hdb_db_dir(context));
-	if (config_file == NULL)
-	    errx(1, "out of memory");
+    /*
+     * Now, do the same for the gssapi thread we are going to be running in
+     */
+    {
+	krb5_context gssctx;
+	ret = _gsskrb5_init(&gssctx);
+    if(ret)
+	    errx(1, "failed to setup gssapi context");
+	setup_context(gssctx);
+	krb5_gss_register_acceptor_identity("HDB:");
     }
-
-    ret = krb5_prepend_config_files_default(config_file, &files);
-    if (ret)
-	krb5_err(context, 1, ret, "getting configuration files");
-
-    ret = krb5_set_config_files(context, files);
-    krb5_free_config_files(files);
-    if(ret)
-	krb5_err(context, 1, ret, "reading configuration files");
-
-    ret = krb5_openlog(context, "kadmind", &logfacility);
-    if (ret)
-	krb5_err(context, 1, ret, "krb5_openlog");
-    ret = krb5_set_warn_dest(context, logfacility);
-    if (ret)
-	krb5_err(context, 1, ret, "krb5_set_warn_dest");
-
-    ret = krb5_kt_register(context, &hdb_kt_ops);
-    if(ret)
-	krb5_err(context, 1, ret, "krb5_kt_register");
 
     ret = krb5_kt_resolve(context, keytab_str, &keytab);
     if(ret)
@@ -159,6 +194,15 @@ main(int argc, char **argv)
     ret = kadm5_add_passwd_quality_verifier(context, NULL);
     if (ret)
 	krb5_err(context, 1, ret, "kadm5_add_passwd_quality_verifier");
+
+#ifdef __APPLE__
+    if (sandbox_flag) {
+	char *errorstring;
+	ret = sandbox_init("kadmind", SANDBOX_NAMED, &errorstring);
+	if (ret)
+	    errx(1, "sandbox_init failed: %d: %s", ret, errorstring);
+    }
+#endif
 
     if(debug_flag) {
 	int debug_port;

@@ -44,6 +44,8 @@
 #include <hmac.h>
 #include <err.h>
 
+#if 0
+
 struct tests {
     const EVP_CIPHER *(*cipher)(void);
     const char *name;
@@ -253,8 +255,10 @@ test_cipher(struct tests *t)
     if (memcmp(d, t->indata, t->datasize) != 0)
 	errx(1, "%s: decrypt not the same", t->name);
 
+#if 0
     if (t->outiv)
 	/* XXXX check  */;
+#endif
 
     EVP_CIPHER_CTX_cleanup(&ectx);
     EVP_CIPHER_CTX_cleanup(&dctx);
@@ -305,3 +309,10 @@ hcrypto_validate(void)
 
     check_hmac();
 }
+
+#else
+void
+hcrypto_validate(void)
+{
+}
+#endif

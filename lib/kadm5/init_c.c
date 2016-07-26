@@ -106,16 +106,20 @@ _kadm5_c_init_context(kadm5_client_context **ctx,
     if(params->mask & KADM5_CONFIG_ADMIN_SERVER)
 	(*ctx)->admin_server = strdup(params->admin_server);
     else {
-	char **hostlist;
+	krb5_krbhst_handle handle = NULL;
+	char host[MAXHOSTNAMELEN];
 
-	ret = krb5_get_krb_admin_hst (context, &(*ctx)->realm, &hostlist);
+	ret = krb5_krbhst_init(context, (*ctx)->realm, KRB5_KRBHST_ADMIN, &handle);
+	if (ret == 0)
+	    ret = krb5_krbhst_next_as_string(context, handle, host, sizeof(host));
+	krb5_krbhst_free(context, handle);
 	if (ret) {
 	    free((*ctx)->realm);
 	    free(*ctx);
 	    return ret;
 	}
-	(*ctx)->admin_server = strdup(*hostlist);
-	krb5_free_krbhst (context, hostlist);
+
+	(*ctx)->admin_server = strdup(host);
     }
 
     if ((*ctx)->admin_server == NULL) {
@@ -252,8 +256,8 @@ get_new_cache(krb5_context context,
  * principal.
  */
 
-static krb5_error_code
-get_cache_principal(krb5_context context,
+krb5_error_code
+_kadm5_c_get_cache_principal(krb5_context context,
 		    krb5_ccache *id,
 		    krb5_principal *client)
 {
@@ -360,7 +364,7 @@ _kadm5_c_get_cred_cache(krb5_context context,
     } else {
 	/* get principal from default cache, ok if this doesn't work */
 
-	ret = get_cache_principal(context, &id, &default_client);
+	ret = _kadm5_c_get_cache_principal(context, &id, &default_client);
 	if (ret) {
 	    /*
 	     * No client was specified by the caller and we cannot
@@ -452,6 +456,7 @@ kadm_connect(kadm5_client_context *ctx)
 	s = socket (a->ai_family, a->ai_socktype, a->ai_protocol);
 	if (s < 0)
 	    continue;
+	socket_set_nopipe(s, 1);
 	if (connect (s, a->ai_addr, a->ai_addrlen) < 0) {
 	    krb5_clear_error_message(context);
 	    krb5_warn (context, errno, "connect(%s)", hostname);
@@ -513,7 +518,7 @@ kadm_connect(kadm5_client_context *ctx)
 	    p.mask |= KADM5_CONFIG_REALM;
 	    p.realm = ctx->realm;
 	}
-	ret = _kadm5_marshal_params(context, &p, &params);
+	(void)_kadm5_marshal_params(context, &p, &params);
 
 	ret = krb5_write_priv_message(context, ctx->ac, &s, &params);
 	krb5_data_free(&params);
@@ -533,6 +538,7 @@ kadm_connect(kadm5_client_context *ctx)
 	    krb5_clear_error_message(context);
 	    return errno;
 	}
+	socket_set_nopipe(s, 1);
 	if (connect (s, a->ai_addr, a->ai_addrlen) < 0) {
 	    rk_closesocket (s);
 	    freeaddrinfo (ai);

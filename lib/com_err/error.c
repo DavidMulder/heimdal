@@ -67,6 +67,10 @@ com_right_r(struct et_list *list, long code, char *str, size_t len)
 	    char domain[12 + 20];
 	    snprintf(domain, sizeof(domain), "heim_com_err%d", p->table->base);
 #endif
+	    if (msg == NULL)
+		snprintf(str, len, "Reserved error code %ld in base %ld",  
+			 code - p->table->base, p->table->base);
+	    else
 	    strlcpy(str, dgettext(domain, msg), len);
 	    return str;
 	}

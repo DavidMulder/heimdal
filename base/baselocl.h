@@ -46,6 +46,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <string.h>
 #include <limits.h>
 
 #ifdef HAVE_UNISTD_H
@@ -56,6 +57,7 @@
 #include "heim_threads.h"
 #include "heimbase.h"
 #include "heimbasepriv.h"
+#include "heimbase_impl.h"
 
 #ifdef HAVE_DISPATCH_DISPATCH_H
 #include <dispatch/dispatch.h>

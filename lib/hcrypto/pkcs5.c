@@ -37,6 +37,10 @@
 #include <krb5-types.h>
 #endif
 
+#ifdef HAVE_COMMONCRYPTO_COMMONKEYDERIVATION_H
+#include <CommonCrypto/CommonKeyDerivation.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -67,6 +71,14 @@ PKCS5_PBKDF2_HMAC_SHA1(const void * password, size_t password_len,
 		       unsigned long iter,
 		       size_t keylen, void *key)
 {
+#ifdef HAVE_COMMONCRYPTO_COMMONKEYDERIVATION_H
+    if (CCKeyDerivationPBKDF(kCCPBKDF2, password, password_len,
+			     salt, salt_len,
+			     kCCPRFHmacAlgSHA1, iter,
+			     key, keylen) != 0)
+	return 0;
+    return 1;
+#else
     size_t datalen, leftofkey, checksumsize;
     char *data, *tmpcksum;
     uint32_t keypart;
@@ -125,4 +137,5 @@ PKCS5_PBKDF2_HMAC_SHA1(const void * password, size_t password_len,
     free(tmpcksum);
 
     return 1;
+#endif
 }

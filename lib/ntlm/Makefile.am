@@ -10,6 +10,7 @@ dist_include_HEADERS = heimntlm.h heimntlm-protos.h
 
 nodist_include_HEADERS = ntlm_err.h
 
+
 dist_libheimntlm_la_SOURCES = ntlm.c heimntlm.h
 
 nodist_libheimntlm_la_SOURCES = ntlm_err.c
@@ -27,7 +28,7 @@ libheimntlm_la_LIBADD = \
 	$(LIBADD_roken)
 
 $(srcdir)/heimntlm-protos.h:
-	cd $(srcdir) && perl ../../cf/make-proto.pl -q -P comment -o heimntlm-protos.h $(dist_libheimntlm_la_SOURCES) || rm -f heimntlm-protos.h
+	cd $(srcdir) && perl ../../cf/make-proto.pl -q -P comment -o heimntlm-protos.h $(libheimntlm_la_SOURCES) || rm -f heimntlm-protos.h
 
 $(libheimntlm_la_OBJECTS): $(srcdir)/heimntlm-protos.h ntlm_err.h
 

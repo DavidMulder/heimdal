@@ -31,9 +31,9 @@
  * SUCH DAMAGE.
  */
 
-#ifdef HAVE_CONFIG_H
 #include <config.h>
-#endif
+
+#ifdef HEIM_HC_LTM
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -238,3 +238,4 @@ DH_ltm_method(void)
 {
     return &_hc_dh_ltm_method;
 }
+#endif /* HEIM_HC_LTM */

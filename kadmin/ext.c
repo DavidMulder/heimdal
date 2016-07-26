@@ -47,13 +47,23 @@ do_ext_keytab(krb5_principal principal, void *data)
     krb5_keytab_entry *keys = NULL;
     krb5_keyblock *k = NULL;
     int i, n_k;
+    int have_keys = 0;
 
     ret = kadm5_get_principal(kadm_handle, principal, &princ,
 			      KADM5_PRINCIPAL|KADM5_KVNO|KADM5_KEY_DATA);
     if(ret)
 	return ret;
 
-    if (princ.n_key_data) {
+    /* 
+     * Make sure that we have keys, some backends doesn't support
+     * getting keys, so in that case we fallback to
+     * kadm5_randkey_principal() instead.
+     */
+    for (i = 0; i < princ.n_key_data; i++)
+	if (princ.key_data[i].key_data_length[0] > 0)
+	    have_keys = 1;
+
+    if (princ.n_key_data && have_keys) {
 	keys = malloc(sizeof(*keys) * princ.n_key_data);
 	if (keys == NULL) {
 	    kadm5_free_principal_ent(kadm_handle, &princ);
@@ -68,7 +78,7 @@ do_ext_keytab(krb5_principal principal, void *data)
 	    keys[i].keyblock.keytype = kd->key_data_type[0];
 	    keys[i].keyblock.keyvalue.length = kd->key_data_length[0];
 	    keys[i].keyblock.keyvalue.data = kd->key_data_contents[0];
-	    keys[i].timestamp = time(NULL);
+	    keys[i].timestamp = (uint32_t)time(NULL);
 	}
 
 	n_k = princ.n_key_data;
@@ -88,7 +98,7 @@ do_ext_keytab(krb5_principal principal, void *data)
 	    keys[i].principal = principal;
 	    keys[i].vno = princ.kvno + 1; /* XXX get entry again */
 	    keys[i].keyblock = k[i];
-	    keys[i].timestamp = time(NULL);
+	    keys[i].timestamp = (uint32_t)time(NULL);
 	}
     }
 

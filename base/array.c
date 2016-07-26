@@ -54,7 +54,7 @@ array_dealloc(heim_object_t ptr)
     free(array->val);
 }
 
-struct heim_type_data array_object = {
+static struct heim_type_data array_object = {
     HEIM_TID_ARRAY,
     "dict-object",
     NULL,
@@ -129,11 +129,15 @@ heim_array_append_value(heim_array_t array, heim_object_t object)
  */
 
 void
-heim_array_iterate_f(heim_array_t array, heim_array_iterator_f_t fn, void *ctx)
+heim_array_iterate_f(heim_array_t array,
+		     void *ctx,
+		     heim_array_iterator_f_t fn)
 {
+    int stop = 0;
     size_t n;
-    for (n = 0; n < array->len; n++)
-	fn(array->val[n], ctx);
+
+    for (n = 0; n < array->len && !stop; n++)
+	fn(array->val[n], &stop, ctx);
 }
 
 #ifdef __BLOCKS__
@@ -145,11 +149,13 @@ heim_array_iterate_f(heim_array_t array, heim_array_iterator_f_t fn, void *ctx)
  */
 
 void
-heim_array_iterate(heim_array_t array, void (^fn)(heim_object_t))
+heim_array_iterate(heim_array_t array, heim_array_iterator_t fn)
 {
+    int stop = 0;
     size_t n;
-    for (n = 0; n < array->len; n++)
-	fn(array->val[n]);
+
+    for (n = 0; n < array->len && !stop; n++)
+	fn(array->val[n], &stop);
 }
 #endif
 

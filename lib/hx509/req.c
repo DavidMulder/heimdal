@@ -175,7 +175,7 @@ _hx509_request_to_pkcs10(hx509_context context,
     CertificationRequest r;
     heim_octet_string data, os;
     int ret;
-    size_t size;
+    size_t size = 0;
 
     if (req->name == NULL) {
 	hx509_set_error_string(context, 0, EINVAL,
@@ -287,7 +287,7 @@ _hx509_request_parse(hx509_context context,
 	return ret;
     }
 
-    ret = _hx509_name_from_Name(&rinfo->subject, &subject);
+    ret = hx509_name_from_Name(&rinfo->subject, &subject);
     if (ret) {
 	free_CertificationRequest(&r);
 	hx509_request_free(req);

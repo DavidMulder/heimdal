@@ -39,7 +39,7 @@
 
 struct _krb5_checksum_type *_krb5_checksum_types[] = {
     &_krb5_checksum_none,
-#ifdef HEIM_WEAK_CRYPTO
+#ifdef HEIM_KRB5_DES
     &_krb5_checksum_crc32,
     &_krb5_checksum_rsa_md4,
     &_krb5_checksum_rsa_md4_des,
@@ -66,22 +66,47 @@ int _krb5_num_checksums
 struct _krb5_encryption_type *_krb5_etypes[] = {
     &_krb5_enctype_aes256_cts_hmac_sha1,
     &_krb5_enctype_aes128_cts_hmac_sha1,
+#ifdef HEIM_KRB5_DES3
     &_krb5_enctype_des3_cbc_sha1,
     &_krb5_enctype_des3_cbc_none, /* used by the gss-api mech */
-    &_krb5_enctype_arcfour_hmac_md5,
 #ifdef DES3_OLD_ENCTYPE
     &_krb5_enctype_des3_cbc_md5,
     &_krb5_enctype_old_des3_cbc_sha1,
 #endif
-#ifdef HEIM_WEAK_CRYPTO
+#endif
+#ifdef HEIM_KRB5_ARCFOUR
+    &_krb5_enctype_arcfour_hmac_md5,
+#endif
+#ifdef HEIM_KRB5_DES
     &_krb5_enctype_des_cbc_md5,
     &_krb5_enctype_des_cbc_md4,
     &_krb5_enctype_des_cbc_crc,
     &_krb5_enctype_des_cbc_none,
+#ifndef __APPLE_PRIVATE__
     &_krb5_enctype_des_cfb64_none,
     &_krb5_enctype_des_pcbc_none,
+#endif
 #endif
     &_krb5_enctype_null
 };
 
 int _krb5_num_etypes = sizeof(_krb5_etypes) / sizeof(_krb5_etypes[0]);
+
+struct _krb5_etypes_deprected _krb5_deprecated_etypes[] = {
+#ifndef HEIM_KRB5_DES
+    {
+	ETYPE_DES_CBC_MD5,
+	"des-cbc-md5-deprecated",
+    },
+    {
+	ETYPE_DES_CBC_MD4,
+	"des-cbc-md4-deprecated",
+    },
+    {
+	ETYPE_DES_CBC_CRC,
+	"des-cbc-crc-deprecated",
+    }
+#endif
+};
+
+int _krb5_num_deprecated_etypes = sizeof(_krb5_deprecated_etypes) / sizeof(_krb5_deprecated_etypes[0]);

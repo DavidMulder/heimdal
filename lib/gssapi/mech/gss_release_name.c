@@ -44,8 +44,8 @@
  * @ingroup gssapi
  */
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_release_name(OM_uint32 *minor_status,
-    gss_name_t *input_name)
+gss_release_name(OM_uint32 *__nonnull minor_status,
+		 __nonnull gss_name_t *__nullable input_name)
 {
 	struct _gss_name *name;
 
@@ -55,20 +55,8 @@ gss_release_name(OM_uint32 *minor_status,
 	    return GSS_S_COMPLETE;
 
 	name = (struct _gss_name *) *input_name;
-
-	if (name->gn_type.elements)
-		free(name->gn_type.elements);
-	while (HEIM_SLIST_FIRST(&name->gn_mn)) {
-		struct _gss_mechanism_name *mn;
-		mn = HEIM_SLIST_FIRST(&name->gn_mn);
-		HEIM_SLIST_REMOVE_HEAD(&name->gn_mn, gmn_link);
-		mn->gmn_mech->gm_release_name(minor_status,
-					      &mn->gmn_name);
-		free(mn);
-	}
-	gss_release_buffer(minor_status, &name->gn_value);
-	free(name);
 	*input_name = GSS_C_NO_NAME;
 
+	_gss_mg_release_name(name);
 	return (GSS_S_COMPLETE);
 }

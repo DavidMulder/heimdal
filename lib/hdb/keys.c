@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 1997 - 2011 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
@@ -39,7 +38,7 @@
  */
 
 void
-hdb_free_keys(krb5_context context, int len, Key *keys)
+hdb_free_keys(krb5_context context, size_t len, Key *keys)
 {
     size_t i;
 
@@ -168,9 +167,11 @@ parse_key_set(krb5_context context, const char *key,
 
     /* if no salt was specified make up default salt */
     if(salt->saltvalue.data == NULL) {
-	if(salt->salttype == KRB5_PW_SALT)
+	if(salt->salttype == KRB5_PW_SALT) {
 	    ret = krb5_get_pw_salt(context, principal, salt);
-	else if(salt->salttype == KRB5_AFS3_SALT) {
+	    if (ret)
+		return ret;
+	} else if(salt->salttype == KRB5_AFS3_SALT) {
 	    krb5_const_realm realm = krb5_principal_get_realm(context, principal);
 	    salt->saltvalue.data = strdup(realm);
 	    if(salt->saltvalue.data == NULL) {
@@ -330,7 +331,7 @@ hdb_change_kvno(krb5_context context, krb5_kvno new_kvno, hdb_entry *entry)
     HDB_extension *extp;
     hdb_keyset keyset;
     HDB_Ext_KeySet *hist_keys;
-    size_t i;
+    unsigned int i;
     int found = 0;
     krb5_error_code ret;
 
@@ -429,10 +430,10 @@ krb5_error_code
 ks_tuple2str(krb5_context context, int n_ks_tuple,
 	     krb5_key_salt_tuple *ks_tuple, char ***ks_tuple_strs)
 {
-	size_t i;
-	char **ksnames;
-	char *ename, *sname;
 	krb5_error_code rc = KRB5_PROG_ETYPE_NOSUPP;
+	char *ename, *sname;
+	char **ksnames;
+	int i;
 
 	*ks_tuple_strs = NULL;
 	if (n_ks_tuple < 1)
@@ -487,10 +488,13 @@ hdb_generate_key_set(krb5_context context, krb5_principal principal,
     char **ks_tuple_strs;
     static const char *default_keytypes[] = {
 	"aes256-cts-hmac-sha1-96:pw-salt",
+	"aes128-cts-hmac-sha1-96:pw-salt",
 	"des3-cbc-sha1:pw-salt",
-	"arcfour-hmac-md5:pw-salt",
 	NULL
     };
+
+    *ret_key_set = key_set = NULL;
+    *nkeyset = 0;
 
     if ((ret = ks_tuple2str(context, n_ks_tuple, ks_tuple, &ks_tuple_strs)))
 	    return ret;
@@ -498,17 +502,18 @@ hdb_generate_key_set(krb5_context context, krb5_principal principal,
     if (ks_tuple_strs == NULL)
 	ktypes = krb5_config_get_strings(context, NULL, "kadmin",
 					 "default_keys", NULL);
+
     if (ktypes == NULL)
 	ktypes = (char **)(intptr_t)default_keytypes;
 
-    *ret_key_set = key_set = NULL;
-    *nkeyset = 0;
+
+    ret = 0;
 
     for(kp = ktypes; kp && *kp; kp++) {
 	const char *p;
 	krb5_salt salt;
-	krb5_enctype *enctypes;
-	size_t num_enctypes;
+	krb5_enctype *etypes;
+	size_t num_etypes;
 
 	p = *kp;
 	/* check alias */
@@ -524,20 +529,20 @@ hdb_generate_key_set(krb5_context context, krb5_principal principal,
 	memset(&salt, 0, sizeof(salt));
 
 	ret = parse_key_set(context, p,
-			    &enctypes, &num_enctypes, &salt, principal);
+			    &etypes, &num_etypes, &salt, principal);
 	if (ret) {
 	    krb5_warn(context, ret, "bad value for default_keys `%s'", *kp);
 	    ret = 0;
 	    continue;
 	}
 
-	for (i = 0; i < num_enctypes; i++) {
+	for (i = 0; i < num_etypes; i++) {
 	    /* find duplicates */
 	    for (j = 0; j < *nkeyset; j++) {
 
 		k = &key_set[j];
 
-		if (k->key.keytype == enctypes[i]) {
+		if (k->key.keytype == etypes[i]) {
 		    if (no_salt)
 			break;
 		    if (k->salt == NULL && salt.salttype == KRB5_PW_SALT)
@@ -551,16 +556,16 @@ hdb_generate_key_set(krb5_context context, krb5_principal principal,
 	    }
 	    /* not a duplicate, lets add it */
 	    if (j == *nkeyset) {
-		ret = add_enctype_to_key_set(&key_set, nkeyset, enctypes[i],
+		ret = add_enctype_to_key_set(&key_set, nkeyset, etypes[i],
 					     no_salt ? NULL : &salt);
 		if (ret) {
-		    free(enctypes);
+		    free(etypes);
 		    krb5_free_salt(context, salt);
 		    goto out;
 		}
 	    }
 	}
-	free(enctypes);
+	free(etypes);
 	krb5_free_salt(context, salt);
     }
 
@@ -591,12 +596,16 @@ krb5_error_code
 hdb_generate_key_set_password(krb5_context context,
 			      krb5_principal principal,
 			      const char *password,
+			      int n_ks_tuple, krb5_key_salt_tuple *ks_tuple,
 			      Key **keys, size_t *num_keys)
 {
     krb5_error_code ret;
     size_t i;
 
-    ret = hdb_generate_key_set(context, principal, 0, NULL,
+    *keys = NULL;
+    *num_keys = 0;
+
+    ret = hdb_generate_key_set(context, principal, n_ks_tuple, ks_tuple,
 				keys, num_keys, 0);
     if (ret)
 	return ret;
@@ -604,9 +613,13 @@ hdb_generate_key_set_password(krb5_context context,
     for (i = 0; i < (*num_keys); i++) {
 	krb5_salt salt;
 
+	if ((*keys)[i].salt) {
 	salt.salttype = (*keys)[i].salt->type;
 	salt.saltvalue.length = (*keys)[i].salt->salt.length;
 	salt.saltvalue.data = (*keys)[i].salt->salt.data;
+	} else {
+	    memset(&salt, 0, sizeof(salt));
+	}
 
 	ret = krb5_string_to_key_salt (context,
 				       (*keys)[i].key.keytype,
@@ -622,5 +635,93 @@ hdb_generate_key_set_password(krb5_context context,
 	hdb_free_keys (context, *num_keys, *keys);
 	return ret;
     }
+    return ret;
+}
+
+#include <corecrypto/ccsrp.h>
+
+krb5_error_code
+hdb_set_srp_verifier(krb5_context context,
+		     KRB5_SRP_GROUP group,
+		     krb5_const_principal principal,
+		     const char *password,
+		     uint32_t iterations,
+		     hdb_srp *srp)
+{
+    krb5_error_code ret;
+    const struct _krb5_srp_group *grp;
+
+    grp = _krb5_srp_validate_group(group);
+    if (grp == NULL)
+	return ENOENT;
+
+    /*
+     * Set up param
+     */
+
+    srp->param.group = group;
+    ret = krb5_data_alloc(&srp->param.salt, 16);
+    if (ret) {
+	return ret;
+    }
+
+    krb5_generate_random_block(srp->param.salt.data, srp->param.salt.length);
+
+    if (iterations == 0)
+	iterations = 4000;
+    srp->param.iterations = iterations;
+
+    /*
+     * Now build verifier
+     */
+
+    ret = _krb5_srp_create_pa(context, 
+			      grp,
+			      principal,
+			      password,
+			      &srp->param,
+			      &srp->verifier);
+    if (ret) {
+	free_hdb_srp(srp);
+	return ret;
+    }
+
+    return 0;
+}
+
+krb5_error_code
+hdb_entry_set_srp_verifiers(krb5_context context,
+			    hdb_entry *entry,
+			    const char *password,
+			    uint32_t iterations)
+{
+    HDB_extension ext;
+    int ret;
+
+    memset(&ext, 0, sizeof(ext));
+
+    ext.mandatory = FALSE;
+    ext.data.element = choice_HDB_extension_data_srp;
+
+    ext.data.u.srp.len = 1;
+    ext.data.u.srp.val = calloc(1, sizeof(ext.data.u.srp.val[0]));
+    if (ext.data.u.srp.val == NULL)
+	return ENOMEM;
+
+    ret = hdb_set_srp_verifier(context,
+			       KRB5_SRP_GROUP_RFC5054_4096_PBKDF2_SHA512,
+			       entry->principal,
+			       password,
+			       0,
+			       &ext.data.u.srp.val[0]);
+    if (ret) {
+	free_HDB_extension(&ext);
+	return ret;
+    }
+
+    ret = hdb_replace_extension(context, entry, &ext);
+
+    free_HDB_extension(&ext);
+
     return ret;
 }

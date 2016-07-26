@@ -54,7 +54,8 @@ enum {
     HEIM_TID_DICT = 130,
     HEIM_TID_STRING = 131,
     HEIM_TID_AUTORELEASE = 132,
-    HEIM_TID_ERROR = 133,
+    HEIM_TID_DATA = 133,
+    HEIM_TID_ERROR = 134,
     HEIM_TID_USER = 255
 
 };
@@ -90,3 +91,7 @@ extern struct heim_type_data _heim_null_object;
 extern struct heim_type_data _heim_bool_object;
 extern struct heim_type_data _heim_number_object;
 extern struct heim_type_data _heim_string_object;
+
+#ifdef __APPLE__
+#define __heim_string_constant(x) ((heim_object_t)CFSTR(x))
+#endif

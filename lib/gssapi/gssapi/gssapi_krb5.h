@@ -53,15 +53,19 @@ GSSAPI_CPP_START
  * This is for kerberos5 names.
  */
 
+/* do not use this entry */
+extern gss_OID_desc GSSAPI_LIB_VARIABLE __gss_krb5_nt_principal_oid_desc;
+#define GSS_KRB5_NT_PRINCIPAL (&__gss_krb5_nt_principal_oid_desc)
+
 extern gss_OID_desc GSSAPI_LIB_VARIABLE __gss_krb5_nt_principal_name_oid_desc;
 #define GSS_KRB5_NT_PRINCIPAL_NAME (&__gss_krb5_nt_principal_name_oid_desc)
+
+extern gss_OID_desc GSSAPI_LIB_VARIABLE __gss_krb5_nt_principal_name_referral_oid_desc;
+#define GSS_KRB5_NT_PRINCIPAL_NAME_REFERRAL (&__gss_krb5_nt_principal_name_referral_oid_desc)
 
 #define GSS_KRB5_NT_USER_NAME (&__gss_c_nt_user_name_oid_desc)
 #define GSS_KRB5_NT_MACHINE_UID_NAME (&__gss_c_nt_machine_uid_name_oid_desc)
 #define GSS_KRB5_NT_STRING_UID_NAME (&__gss_c_nt_string_uid_name_oid_desc)
-
-extern gss_OID_desc GSSAPI_LIB_VARIABLE __gss_krb5_mechanism_oid_desc;
-#define GSS_KRB5_MECHANISM (&__gss_krb5_mechanism_oid_desc)
 
 /* for compatibility with MIT api */
 
@@ -72,94 +76,6 @@ extern gss_OID_desc GSSAPI_LIB_VARIABLE __gss_krb5_mechanism_oid_desc;
  * kerberos mechanism specific functions
  */
 
-struct krb5_keytab_data;
-struct krb5_ccache_data;
-struct Principal;
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_krb5_ccache_name(OM_uint32 * /*minor_status*/,
-		     const char * /*name */,
-		     const char ** /*out_name */);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL gsskrb5_register_acceptor_identity
-        (const char * /*identity*/);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL krb5_gss_register_acceptor_identity
-	(const char * /*identity*/);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL gss_krb5_copy_ccache
-	(OM_uint32 * /*minor*/,
-	 gss_cred_id_t /*cred*/,
-	 struct krb5_ccache_data * /*out*/);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_krb5_import_cred(OM_uint32 * /*minor*/,
-		     struct krb5_ccache_data * /*in*/,
-		     struct Principal * /*keytab_principal*/,
-		     struct krb5_keytab_data * /*keytab*/,
-		     gss_cred_id_t * /*out*/);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL gss_krb5_get_tkt_flags
-	(OM_uint32 * /*minor*/,
-	 gss_ctx_id_t /*context_handle*/,
-	 OM_uint32 * /*tkt_flags*/);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_extract_authz_data_from_sec_context
-	(OM_uint32 * /*minor_status*/,
-	 gss_ctx_id_t /*context_handle*/,
-	 int /*ad_type*/,
-	 gss_buffer_t /*ad_data*/);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_set_dns_canonicalize(int);
-
-struct gsskrb5_send_to_kdc {
-    void *func;
-    void *ptr;
-};
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_set_send_to_kdc(struct gsskrb5_send_to_kdc *)
-    GSSKRB5_FUNCTION_DEPRECATED;
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_set_default_realm(const char *);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_extract_authtime_from_sec_context(OM_uint32 *, gss_ctx_id_t, time_t *);
-
-struct EncryptionKey;
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_extract_service_keyblock(OM_uint32 *minor_status,
-				 gss_ctx_id_t context_handle,
-				 struct EncryptionKey **out);
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_get_initiator_subkey(OM_uint32 *minor_status,
-				 gss_ctx_id_t context_handle,
-				 struct EncryptionKey **out);
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_get_subkey(OM_uint32 *minor_status,
-		   gss_ctx_id_t context_handle,
-		   struct EncryptionKey **out);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_set_time_offset(int);
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_get_time_offset(int *);
-
-struct gsskrb5_krb5_plugin {
-    int type;
-    char *name;
-    void *symbol;
-};
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gsskrb5_plugin_register(struct gsskrb5_krb5_plugin *);
-
-
 /*
  * Lucid - NFSv4 interface to GSS-API KRB5 to expose key material to
  * do GSS content token handling in-kernel.
@@ -168,7 +84,7 @@ gsskrb5_plugin_register(struct gsskrb5_krb5_plugin *);
 typedef struct gss_krb5_lucid_key {
 	OM_uint32	type;
 	OM_uint32	length;
-	void *		data;
+	void * __nullable	data;
 } gss_krb5_lucid_key_t;
 
 typedef struct gss_krb5_rfc1964_keydata {
@@ -197,28 +113,6 @@ typedef struct gss_krb5_lucid_context_v1 {
 typedef struct gss_krb5_lucid_context_version {
 	OM_uint32	version;	/* Structure version number */
 } gss_krb5_lucid_context_version_t;
-
-/*
- * Function declarations
- */
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_krb5_export_lucid_sec_context(OM_uint32 *minor_status,
-				  gss_ctx_id_t *context_handle,
-				  OM_uint32 version,
-				  void **kctx);
-
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_krb5_free_lucid_sec_context(OM_uint32 *minor_status,
-				void *kctx);
-
-
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_krb5_set_allowable_enctypes(OM_uint32 *minor_status,
-				gss_cred_id_t cred,
-				OM_uint32 num_enctypes,
-				int32_t *enctypes);
 
 GSSAPI_CPP_END
 

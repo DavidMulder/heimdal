@@ -66,7 +66,6 @@ socket_set_any (struct sockaddr *sa, int af)
 #endif
     default :
 	errx (1, "unknown address family %d", sa->sa_family);
-	break;
     }
 }
 
@@ -100,7 +99,6 @@ socket_set_address_and_port (struct sockaddr *sa, const void *ptr, int port)
 #endif
     default :
 	errx (1, "unknown address family %d", sa->sa_family);
-	break;
     }
 }
 
@@ -127,7 +125,7 @@ socket_addr_size (const struct sockaddr *sa)
  * Return the size of a `struct sockaddr' in `sa'.
  */
 
-ROKEN_LIB_FUNCTION size_t ROKEN_LIB_CALL
+ROKEN_LIB_FUNCTION socklen_t ROKEN_LIB_CALL
 socket_sockaddr_size (const struct sockaddr *sa)
 {
     switch (sa->sa_family) {
@@ -210,7 +208,6 @@ socket_set_port (struct sockaddr *sa, int port)
 #endif
     default :
 	errx (1, "unknown address family %d", sa->sa_family);
-	break;
     }
 }
 
@@ -258,6 +255,43 @@ socket_set_tos (rk_socket_t sock, int tos)
     setsockopt (sock, IPPROTO_IP, IP_TOS, (void *) &tos, sizeof(int));
 #endif
 }
+
+/*
+ * Set the non-blocking-ness of the socket.
+ */
+
+ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL
+socket_set_nonblocking(rk_socket_t sock, int nonblock)
+{
+    int flags;
+#if defined(O_NONBLOCK)
+    flags = fcntl(sock, F_GETFL, 0);
+    if (flags == -1)
+	return;
+    if (nonblock)
+	flags |= O_NONBLOCK;
+    else
+	flags &= ~O_NONBLOCK;
+    fcntl(sock, F_SETFL, flags);
+#elif defined(FIOBIO)
+    flags = !!nonblock;
+    return ioctl(sock, FIOBIO, &flags);
+#endif
+}
+
+/*
+ * Set the non-blocking-ness of the socket.
+ */
+
+ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL
+socket_set_nopipe(rk_socket_t sock, int nopipe)
+{
+#if defined(SOL_SOCKET) && defined(SO_NOSIGPIPE)
+    setsockopt (sock, SOL_SOCKET, SO_NOSIGPIPE, (void *) &nopipe, sizeof(int));
+#endif
+}
+
+
 
 /*
  * set the reuse of addresses on `sock' to `val'.

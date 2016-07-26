@@ -267,7 +267,8 @@ der_put_heim_integer (unsigned char *p, size_t len,
     len -= data->length;
 
     if (data->negative) {
-	int i, carry;
+	ssize_t i;
+	int carry;
 	for (i = data->length - 1, carry = 1; i >= 0; i--) {
 	    *p = buf[i] ^ 0xff;
 	    if (carry)
@@ -343,7 +344,7 @@ der_put_oid (unsigned char *p, size_t len,
 	     const heim_oid *data, size_t *size)
 {
     unsigned char *base = p;
-    int n;
+    size_t n;
 
     for (n = data->length - 1; n >= 2; --n) {
 	unsigned u = data->components[n];
@@ -433,8 +434,12 @@ _heim_time2generalizedtime (time_t t, heim_octet_string *s, int gtimep)
      if (s->data == NULL)
 	 return ENOMEM;
      s->length = len;
-     if (_der_gmtime(t, &tm) == NULL)
+     if (_der_gmtime(t, &tm) == NULL) {
+	 free(s->data);
+	 s->data = NULL;
+	 s->length = 0;
 	 return ASN1_BAD_TIMEFORMAT;
+     }
      if (gtimep)
 	 snprintf (s->data, len + 1, "%04d%02d%02d%02d%02d%02dZ",
 		   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
@@ -468,12 +473,12 @@ der_put_bit_string (unsigned char *p, size_t len,
 int
 _heim_der_set_sort(const void *a1, const void *a2)
 {
-    const struct heim_octet_string *s1 = a1, *s2 = a2;
+    const heim_octet_string *s1 = a1, *s2 = a2;
     int ret;
 
     ret = memcmp(s1->data, s2->data,
 		 s1->length < s2->length ? s1->length : s2->length);
     if(ret)
 	return ret;
-    return s1->length - s2->length;
+    return (int)(s1->length - s2->length);
 }

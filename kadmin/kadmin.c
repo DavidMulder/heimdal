@@ -35,10 +35,14 @@
 #include "kadmin-commands.h"
 #include <sl.h>
 
+static void usage(int ret) __attribute__((__noreturn__));
+
+
 static char *config_file;
 static char *keyfile;
 int local_flag;
 static int ad_flag;
+static int mit_flag = 1;
 static int help_flag;
 static int version_flag;
 static char *realm;
@@ -75,8 +79,8 @@ static struct getargs args[] = {
 	"server-port",	's',	arg_integer,   &server_port,
 	"port to use", "port number"
     },
-    {	"ad", 		0, arg_flag, &ad_flag, "active directory admin mode",
-	NULL },
+    {	"ad", 		0, arg_flag, &ad_flag, "active directory admin mode" },
+    {	"mit", 		0, arg_negative_flag, &mit_flag, "mit admin mode" },
 #ifdef HAVE_DLOPEN
     { "check-library", 0, arg_string, &check_library,
       "library to load password check function from", "library" },
@@ -240,6 +244,12 @@ main(int argc, char **argv)
 					     KADM5_ADMIN_SERVICE,
 					     &conf, 0, 0,
 					     &kadm_handle);
+    } else if (mit_flag) {
+	ret = kadm5_mit_init_with_password_ctx(context,
+					       client_name,
+					       NULL,
+					       &conf, 0, 0,
+					       &kadm_handle);
     } else if (ad_flag) {
 	if (client_name == NULL)
 	    krb5_errx(context, 1, "keytab mode require principal name");

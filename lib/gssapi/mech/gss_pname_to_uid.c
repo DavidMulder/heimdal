@@ -49,7 +49,7 @@ mech_pname_to_uid(OM_uint32 *minor_status,
                                                  mn->gmn_mech_oid,
                                                  uidp);
     if (GSS_ERROR(major_status))
-        _gss_mg_error(mn->gmn_mech, major_status, *minor_status);
+        _gss_mg_error(mn->gmn_mech, *minor_status);
 
     return major_status;
 }
@@ -92,7 +92,7 @@ attr_pname_to_uid(OM_uint32 *minor_status,
                                                            &display_value,
                                                            &more);
         if (GSS_ERROR(major_status)) {
-            _gss_mg_error(mn->gmn_mech, major_status, *minor_status);
+            _gss_mg_error(mn->gmn_mech, *minor_status);
             break;
         }
 
@@ -131,10 +131,10 @@ attr_pname_to_uid(OM_uint32 *minor_status,
 }
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_pname_to_uid(OM_uint32 *minor_status,
-                 const gss_name_t pname,
-                 const gss_OID mech_type,
-                 uid_t *uidp)
+gss_pname_to_uid(OM_uint32 *__nonnull minor_status,
+                 __nonnull const gss_name_t pname,
+                 __nonnull const gss_OID mech_type,
+                 uid_t *__nonnull uidp)
 {
     OM_uint32 major_status = GSS_S_UNAVAILABLE;
     struct _gss_name *name = (struct _gss_name *) pname;
@@ -161,7 +161,7 @@ gss_pname_to_uid(OM_uint32 *minor_status,
     }
 
     if (major_status != GSS_S_COMPLETE && mn != NULL)
-        _gss_mg_error(mn->gmn_mech, major_status, *minor_status);
+        _gss_mg_error(mn->gmn_mech, *minor_status);
 
     return major_status;
 }

@@ -187,10 +187,12 @@ wait_for_connection(krb5_context contextp,
 	max_fd = max(max_fd, socks[i]);
     }
 
+#if 0 /* launchd takes care of our children */
     pgrp = getpid();
 
     if(setpgid(0, pgrp) < 0)
 	err(1, "setpgid");
+#endif
 
     signal(SIGTERM, terminate);
     signal(SIGINT, terminate);

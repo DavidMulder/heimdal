@@ -332,8 +332,11 @@ but just modifies the database with the entries in the dump file.
 .Fl Fl key-file= Ns Ar keyfile
 .Xc
 .Oc
-.Op Fl Fl convert-file
-.Op Fl Fl master-key-fd= Ns Ar fd
+.Op Fl -convert-file
+.Op Fl -master-key-fd= Ns Ar fd
+.Op Fl -random-password
+.Op Fl -no-print-password
+.Pp
 .Bd -ragged -offset indent
 Writes the Kerberos master key to a file used by the KDC.
 .Ed

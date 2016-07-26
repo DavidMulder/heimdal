@@ -138,6 +138,28 @@ fetch_acl (kadm5_server_context *context,
 	}
     }
     fclose(f);
+
+    if (*ret_flags == 0 && princ == NULL) {
+
+	ret = context->db->hdb_open(context->context, context->db, O_RDWR, 0);
+	if (ret == 0) {
+	    hdb_entry_ex ent;
+
+	    memset(&ent, 0, sizeof(ent));
+
+	    ret = context->db->hdb_fetch_kvno(context->context, context->db, 
+					      context->caller,
+					      HDB_F_DECRYPT|HDB_F_GET_ANY|HDB_F_ADMIN_DATA,
+					      0,
+					      &ent);
+	    if (ret == 0 && ent.entry.acl_rights)
+		*ret_flags = *ent.entry.acl_rights;
+	    hdb_free_entry(context->context, &ent);
+	}
+
+	context->db->hdb_close(context->context, context->db);
+    }
+
     return ret;
 }
 

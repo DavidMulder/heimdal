@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -66,17 +68,19 @@ static const struct {
     const heim_oid *o;
     wind_profile_flags flags;
 } no[] = {
-    { "C", &asn1_oid_id_at_countryName, 0 },
-    { "CN", &asn1_oid_id_at_commonName, 0 },
-    { "DC", &asn1_oid_id_domainComponent, 0 },
-    { "L", &asn1_oid_id_at_localityName, 0 },
-    { "O", &asn1_oid_id_at_organizationName, 0 },
-    { "OU", &asn1_oid_id_at_organizationalUnitName, 0 },
-    { "S", &asn1_oid_id_at_stateOrProvinceName, 0 },
-    { "STREET", &asn1_oid_id_at_streetAddress, 0 },
-    { "UID", &asn1_oid_id_Userid, 0 },
-    { "emailAddress", &asn1_oid_id_pkcs9_emailAddress, 0 },
-    { "serialNumber", &asn1_oid_id_at_serialNumber, 0 }
+    { "C", &asn1_oid_id_at_countryName },
+    { "CN", &asn1_oid_id_at_commonName },
+    { "DC", &asn1_oid_id_domainComponent },
+    { "L", &asn1_oid_id_at_localityName },
+    { "O", &asn1_oid_id_at_organizationName },
+    { "OU", &asn1_oid_id_at_organizationalUnitName },
+    { "S", &asn1_oid_id_at_stateOrProvinceName },
+    { "STREET", &asn1_oid_id_at_streetAddress },
+    { "UID", &asn1_oid_id_Userid },
+    { "emailAddress", &asn1_oid_id_pkcs9_emailAddress },
+    { "serialNumber", &asn1_oid_id_at_serialNumber },
+    { "title", &asn1_oid_id_at_title },
+    { "description", &asn1_oid_id_at_description }
 };
 
 static char *
@@ -244,7 +248,7 @@ _hx509_Name_to_string(const Name *n, char **str)
 		ss = malloc(k + 1);
 		if (ss == NULL)
 		    _hx509_abort("allocation failure"); /* XXX */
-		ret = wind_ucs2utf8(bmp, bmplen, ss, NULL);
+		ret = wind_ucs2utf8(bmp, bmplen, ss, &k);
 		if (ret) {
 		    free(ss);
 		    return ret;
@@ -266,10 +270,11 @@ _hx509_Name_to_string(const Name *n, char **str)
 		if (ret)
 		    return ret;
 
-		ss = malloc(k + 1);
+		k += 1;
+		ss = malloc(k);
 		if (ss == NULL)
 		    _hx509_abort("allocation failure"); /* XXX */
-		ret = wind_ucs4utf8(uni, unilen, ss, NULL);
+		ret = wind_ucs4utf8(uni, unilen, ss, &k);
 		if (ret) {
 		    free(ss);
 		    return ret;
@@ -278,9 +283,8 @@ _hx509_Name_to_string(const Name *n, char **str)
 		len = k;
 		break;
 	    }
-	    default:
+	    case invalid_choice_DirectoryString:
 		_hx509_abort("unknown directory type: %d", ds->element);
-		exit(1);
 	    }
 	    append_string(str, &total_len, oidname, strlen(oidname), 0);
 	    free(oidname);
@@ -331,7 +335,7 @@ _hx509_Name_to_string(const Name *n, char **str)
 static int
 dsstringprep(const DirectoryString *ds, uint32_t **rname, size_t *rlen)
 {
-    wind_profile_flags flags;
+    wind_profile_flags flags __attribute__((__unused__));
     size_t i, len;
     int ret;
     uint32_t *name;
@@ -375,17 +379,18 @@ dsstringprep(const DirectoryString *ds, uint32_t **rname, size_t *rlen)
 	    return ret;
 	}
 	break;
-    default:
+    case invalid_choice_DirectoryString:
 	_hx509_abort("unknown directory type: %d", ds->element);
     }
 
     *rlen = len;
+#ifdef HAVE_WIND
     /* try a couple of times to get the length right, XXX gross */
     for (i = 0; i < 4; i++) {
 	*rlen = *rlen * 2;
 	*rname = malloc(*rlen * sizeof((*rname)[0]));
-
-	ret = wind_stringprep(name, len, *rname, rlen, flags);
+	ret = wind_stringprep(name, len, *rname, rlen,
+			      WIND_PROFILE_LDAP|flags);
 	if (ret == WIND_ERR_OVERRUN) {
 	    free(*rname);
 	    *rname = NULL;
@@ -393,6 +398,18 @@ dsstringprep(const DirectoryString *ds, uint32_t **rname, size_t *rlen)
 	} else
 	    break;
     }
+#else
+    {
+	ret = 0;
+	*rname = malloc(*rlen * sizeof((*rname)[0]));
+	if (*rname) {
+	    memcpy(*rname, name, len * sizeof(name[0]));
+	    *rlen = len;
+	} else {
+	    ret = ENOMEM;
+	}
+    }
+#endif
     free(name);
     if (ret) {
 	if (*rname)
@@ -424,7 +441,7 @@ _hx509_name_ds_cmp(const DirectoryString *ds1,
     }
 
     if (ds1len != ds2len)
-	*diff = ds1len - ds2len;
+	*diff = (int)(ds1len - ds2len);
     else {
 	for (i = 0; i < ds1len; i++) {
 	    *diff = ds1lp[i] - ds2lp[i];
@@ -494,9 +511,63 @@ hx509_name_cmp(hx509_name n1, hx509_name n2)
     return diff;
 }
 
+int
+hx509_name_get_component(hx509_name name, unsigned int rdn, const heim_oid *type, unsigned *count, char **str)
+{
+    Name *n = &name->der_name;
+    size_t len, ulen;
+    uint32_t *ds;
+    unsigned i;
+    int ret;
+
+    if (str)
+	*str = NULL;
+
+    if (rdn >= n->u.rdnSequence.len)
+	return ERANGE;
+    
+    for (i = *count; i < n->u.rdnSequence.val[rdn].len; i++) {
+	if (der_heim_oid_cmp(&n->u.rdnSequence.val[rdn].val[i].type, type) == 0) {
+
+	    *count = i + 1;
+
+	    if (str == NULL)
+		return HX509_NAME_MALFORMED;
+
+	    ret = dsstringprep(&n->u.rdnSequence.val[rdn].val[i].value, &ds, &len);
+	    if (ret)
+		return ret;
+
+	    ret = wind_ucs4utf8_length(ds, len, &ulen);
+	    if (ret) {
+		free(ds);
+		return ret;
+	    }
+
+	    ulen += 1;
+
+	    *str = malloc(ulen);
+	    if (str == NULL) {
+		free(ds);
+		return ENOMEM;
+	    }
+	    ret = wind_ucs4utf8(ds, len, *str, &ulen);
+	    free(ds);
+	    if (ret) {
+		free(*str);
+		*str = NULL;
+		return ret;
+	    }
+	    return 0;
+	}
+    }
+    if (str == NULL)
+	return 0;
+    return HX509_NAME_MALFORMED;
+}
 
 int
-_hx509_name_from_Name(const Name *n, hx509_name *name)
+hx509_name_from_Name(const Name *n, hx509_name *name)
 {
     int ret;
     *name = calloc(1, sizeof(**name));
@@ -571,7 +642,7 @@ _hx509_name_modify(hx509_context context,
 int
 hx509_parse_name(hx509_context context, const char *str, hx509_name *name)
 {
-    const char *p, *q;
+    char *p, *p0, *q, *endp;
     size_t len;
     hx509_name n;
     int ret;
@@ -586,14 +657,28 @@ hx509_parse_name(hx509_context context, const char *str, hx509_name *name)
 
     n->der_name.element = choice_Name_rdnSequence;
 
-    p = str;
+    p0 = p = strdup(str);
+    if (p == NULL) {
+	free(n);
+	hx509_set_error_string(context, 0, ENOMEM, "out of memory");
+	return ENOMEM;
+    }
+    endp = p + strlen(p);
 
     while (p != NULL && *p != '\0') {
 	heim_oid oid;
 	int last;
 
-	q = strchr(p, ',');
-	if (q) {
+	/* unquote the string */
+	for (q = p; *q != '\0'; q++) {
+	    if (q[0] == '\\' && q[1] != '\0') {
+		memmove(q, q + 1, endp - q - 1);
+		endp--;
+		endp[0] = '\0';
+	    } else if (*q == ',')
+		break;
+	}
+	if (*q != '\0') {
 	    len = (q - p);
 	    last = 1;
 	} else {
@@ -651,11 +736,12 @@ hx509_parse_name(hx509_context context, const char *str, hx509_name *name)
 	}
 	p += len + last;
     }
-
+    free(p0);
     *name = n;
 
     return 0;
 out:
+    free(p0);
     hx509_name_free(&n);
     return HX509_NAME_MALFORMED;
 }
@@ -880,7 +966,7 @@ hx509_unparse_der_name(const void *data, size_t length, char **str)
 int
 hx509_name_binary(const hx509_name name, heim_octet_string *os)
 {
-    size_t size;
+    size_t size = 0;
     int ret;
 
     ASN1_MALLOC_ENCODE(Name, os->data, os->length, &name->der_name, &size, ret);
@@ -898,7 +984,7 @@ _hx509_unparse_Name(const Name *aname, char **str)
     hx509_name name;
     int ret;
 
-    ret = _hx509_name_from_Name(aname, &name);
+    ret = hx509_name_from_Name(aname, &name);
     if (ret)
 	return ret;
 
@@ -966,7 +1052,7 @@ hx509_general_name_unparse(GeneralName *name, char **str)
 	char *s;
 	int ret;
 	memset(&dir, 0, sizeof(dir));
-	dir.element = name->u.directoryName.element;
+	dir.element = (enum Name_enum)name->u.directoryName.element;
 	dir.u.rdnSequence = name->u.directoryName.u.rdnSequence;
 	ret = _hx509_unparse_Name(&dir, &s);
 	if (ret)
@@ -1014,7 +1100,7 @@ hx509_general_name_unparse(GeneralName *name, char **str)
 	free(oid);
 	break;
     }
-    default:
+    case invalid_choice_GeneralName:
 	return EINVAL;
     }
     if (strpool == NULL)

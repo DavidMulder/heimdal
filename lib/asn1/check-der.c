@@ -97,6 +97,22 @@ test_integer (void)
 }
 
 static int
+test_length (void)
+{
+    const unsigned char data[1] = "\x80";
+    size_t val, size;
+    int ret;
+    
+    ret = der_get_length(data, sizeof(data), &val, &size);
+    if (ret == 0) {
+	if (val != ASN1_INDEFINITE)
+	    ret = 1;
+    }
+
+    return ret;
+}
+
+static int
 test_one_int(int val)
 {
     int ret, dval;
@@ -153,7 +169,8 @@ test_one_int(int val)
 static int
 test_integer_more (void)
 {
-    int i, n1, n2, n3, n4, n5, n6;
+    int n1, n2, n3, n4, n5, n6;
+    size_t i;
 
     n2 = 0;
     for (i = 0; i < (sizeof(int) * 8); i++) {
@@ -222,13 +239,7 @@ test_unsigned (void)
 static int
 cmp_octet_string (void *a, void *b)
 {
-    heim_octet_string *oa = (heim_octet_string *)a;
-    heim_octet_string *ob = (heim_octet_string *)b;
-
-    if (oa->length != ob->length)
-	return ob->length - oa->length;
-
-    return (memcmp (oa->data, ob->data, oa->length));
+    return der_heim_octet_string_cmp(a, b);
 }
 
 static int
@@ -397,7 +408,7 @@ cmp_generalized_time (void *a, void *b)
     time_t *ta = (time_t *)a;
     time_t *tb = (time_t *)b;
 
-    return *tb - *ta;
+    return (int)(*tb - *ta);
 }
 
 static int
@@ -925,7 +936,8 @@ test_heim_oid_format(void)
 static int
 check_trailing_nul(void)
 {
-    int i, ret;
+    int ret;
+    size_t i;
     struct {
 	int fail;
 	const unsigned char *p;
@@ -949,15 +961,15 @@ check_trailing_nul(void)
 	ret = der_get_general_string(foo[i].p, foo[i].len, &s, &size);
 	if (foo[i].fail) {
 	    if (ret == 0)
-		errx(1, "check %d NULL didn't fail", i);
+		errx(1, "check %d NULL didn't fail", (int)i);
 	    continue;
 	}
 	if (ret)
-	    errx(1, "NULL check %d der_get_general_string failed", i);
+	    errx(1, "NULL check %d der_get_general_string failed", (int)i);
 	if (foo[i].size != size)
-	    errx(1, "NUL check i = %d size failed", i);
+	    errx(1, "NUL check i = %d size failed", (int)i);
 	if (strcmp(foo[i].s, s) != 0)
-	    errx(1, "NUL check i = %d content failed", i);
+	    errx(1, "NUL check i = %d content failed", (int)i);
 	free(s);
     }
     return 0;
@@ -1055,11 +1067,11 @@ corner_tag(void)
 	{ 0, "\xff", 1 },
 	{ 0, "\xff\xff\xff\xff\xff\xff\xff\xff", 8 }
     };
-    int i, ret;
+    int ret;
     Der_class cl;
     Der_type ty;
     unsigned int tag;
-    size_t size;
+    size_t size, i;
 
     for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
 	ret = der_get_tag((const unsigned char*)tests[i].ptr,
@@ -1075,6 +1087,104 @@ corner_tag(void)
     return 0;
 }
 
+struct randomcheck {
+    asn1_type_decode decoder;
+    asn1_type_release release;
+    size_t typesize;
+    size_t inputsize;
+} randomcheck[] = {
+#define el(name, type, maxlen) {			\
+	(asn1_type_decode)der_get_##name,		\
+	(asn1_type_release)der_free_##name,		\
+	sizeof(type), 					\
+	maxlen						\
+    }
+    el(integer, int, 6),
+    el(heim_integer, heim_integer, 12),
+    el(integer, int, 6),
+    el(unsigned, unsigned, 6),
+    el(general_string, heim_general_string, 12),
+    el(octet_string, heim_octet_string, 12),
+    { (asn1_type_decode)der_get_octet_string_ber,
+      (asn1_type_release)der_free_octet_string,
+      sizeof(heim_octet_string), 20 },
+    el(generalized_time, time_t, 20),
+    el(utctime, time_t, 20),
+    el(bit_string, heim_bit_string, 10),
+    el(oid, heim_oid, 10),
+    { NULL }
+#undef el
+};
+
+static void
+asn1rand(uint8_t *rand, size_t len)
+{
+    while (len) {
+	*rand++ = arc4random();
+	len--;
+    }
+}
+
+static int
+check_random(void)
+{
+    struct randomcheck *r = randomcheck;
+    uint8_t *input;
+    void *type;
+    size_t size, insize;
+    int ret;
+
+    while (r->decoder) {
+	type = emalloc(r->typesize);
+	memset(type, 0, r->typesize);
+
+	input = emalloc(r->inputsize);
+
+	/* try all zero first */
+	memset(input, 0, r->inputsize);
+
+	ret = r->decoder(input, r->inputsize, type, &size);
+	if (ret)
+	    r->release(type);
+	
+	/* try all one first */
+	memset(input, 0xff, r->inputsize);
+	ret = r->decoder(input, r->inputsize, type, &size);
+	if (ret)
+	    r->release(type);
+
+	/* try 0x41 too */
+	memset(input, 0x41, r->inputsize);
+	ret = r->decoder(input, r->inputsize, type, &size);
+	if (ret)
+	    r->release(type);
+
+	/* random */
+	asn1rand(input, r->inputsize);
+	ret = r->decoder(input, r->inputsize, type, &size);
+	if (ret)
+	    r->release(type);
+
+	/* let make buffer smaller */
+	insize = r->inputsize;
+	do {
+	    insize--;
+	    asn1rand(input, insize);
+
+	    ret = r->decoder(input, insize, type, &size);
+	    if (ret == 0)
+		r->release(type);
+	} while(insize > 0);
+
+	free(type);
+
+	r++;
+    }
+    return 0;
+}
+
+
+
 int
 main(int argc, char **argv)
 {
@@ -1082,6 +1192,7 @@ main(int argc, char **argv)
 
     ret += test_integer ();
     ret += test_integer_more();
+    ret += test_length();
     ret += test_unsigned ();
     ret += test_octet_string ();
     ret += test_bmp_string ();
@@ -1110,6 +1221,7 @@ main(int argc, char **argv)
     ret += test_misc_cmp();
     ret += corner_generalized_time();
     ret += corner_tag();
+    ret += check_random();
 
     return ret;
 }

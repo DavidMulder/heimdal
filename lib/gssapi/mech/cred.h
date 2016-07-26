@@ -27,6 +27,8 @@
  *	$Id$
  */
 
+
+
 struct _gss_mechanism_cred {
 	HEIM_SLIST_ENTRY(_gss_mechanism_cred) gmc_link;
 	gssapi_mech_interface	gmc_mech;	/* mechanism ops for MC */
@@ -39,6 +41,12 @@ struct _gss_cred {
 	struct _gss_mechanism_cred_list gc_mc;
 };
 
+struct _gss_cred *
+_gss_mg_alloc_cred(void);
+
+void
+_gss_mg_release_cred(struct _gss_cred *cred);
+
 struct _gss_mechanism_cred *
 _gss_copy_cred(struct _gss_mechanism_cred *mc);
 
@@ -46,7 +54,7 @@ struct _gss_mechanism_name;
 
 OM_uint32
 _gss_acquire_mech_cred(OM_uint32 *minor_status,
-		       gssapi_mech_interface m,
+		       struct gssapi_mech_interface_desc *m,
 		       const struct _gss_mechanism_name *mn,
 		       gss_const_OID credential_type,
 		       const void *credential_data,

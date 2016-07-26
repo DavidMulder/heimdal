@@ -2,6 +2,8 @@
  * Copyright (c) 2005 Doug Rabson
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -29,16 +31,16 @@
 #include "mech_locl.h"
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_acquire_cred(OM_uint32 *minor_status,
-    const gss_name_t desired_name,
+gss_acquire_cred(OM_uint32 *__nonnull minor_status,
+    __nullable const gss_name_t desired_name,
     OM_uint32 time_req,
-    const gss_OID_set desired_mechs,
+    __nullable const gss_OID_set desired_mechs,
     gss_cred_usage_t cred_usage,
-    gss_cred_id_t *output_cred_handle,
-    gss_OID_set *actual_mechs,
-    OM_uint32 *time_rec)
+    __nonnull gss_cred_id_t * __nullable output_cred_handle,
+    __nullable gss_OID_set * __nullable actual_mechs,
+    OM_uint32 * __nullable time_rec)
 {
-	OM_uint32 major_status;
+	OM_uint32 major_status, junk;
 	gss_OID_set mechs = desired_mechs;
 	gss_OID_set_desc set;
 	struct _gss_name *name = (struct _gss_name *) desired_name;
@@ -83,14 +85,13 @@ gss_acquire_cred(OM_uint32 *minor_status,
 			return (major_status);
 	}
 
-	cred = malloc(sizeof(struct _gss_cred));
+	cred = _gss_mg_alloc_cred();
 	if (!cred) {
 		if (actual_mechs)
 			gss_release_oid_set(minor_status, actual_mechs);
 		*minor_status = ENOMEM;
 		return (GSS_S_FAILURE);
 	}
-	HEIM_SLIST_INIT(&cred->gc_mc);
 
 	if (mechs == GSS_C_NO_OID_SET)
 		mechs = _gss_mech_oids;
@@ -101,7 +102,7 @@ gss_acquire_cred(OM_uint32 *minor_status,
 		struct _gss_mechanism_name *mn = NULL;
 
 		m = __gss_get_mechanism(&mechs->elements[i]);
-		if (!m)
+		if (m == NULL || (m->gm_flags & GM_USE_MG_CRED) != 0)
 			continue;
 
 		if (desired_name != GSS_C_NO_NAME) {
@@ -123,10 +124,15 @@ gss_acquire_cred(OM_uint32 *minor_status,
 		 */
 		set.elements = &mechs->elements[i];
 		major_status = m->gm_acquire_cred(minor_status,
-		    (desired_name != GSS_C_NO_NAME
-			? mn->gmn_name : GSS_C_NO_NAME),
+		    (mn ? mn->gmn_name : GSS_C_NO_NAME),
 		    time_req, &set, cred_usage,
 		    &mc->gmc_cred, NULL, &cred_time);
+
+		_gss_mg_log_name(10, name, &mechs->elements[i],
+				 "gss_acquire_cred %s name: %ld/%ld",
+				 m->gm_name,
+				 (long)major_status, (long)*minor_status);
+
 		if (major_status) {
 			free(mc);
 			continue;
@@ -153,12 +159,15 @@ gss_acquire_cred(OM_uint32 *minor_status,
 	 * an error.
 	 */
 	if (!HEIM_SLIST_FIRST(&cred->gc_mc)) {
-		free(cred);
+		*output_cred_handle = (gss_cred_id_t)cred;
+		gss_release_cred(&junk, output_cred_handle);
 		if (actual_mechs)
-			gss_release_oid_set(minor_status, actual_mechs);
+			gss_release_oid_set(&junk, actual_mechs);
 		*minor_status = 0;
 		return (GSS_S_NO_CRED);
 	}
+
+	_gss_mg_log_cred(10, cred, "gss_acquire_cred");
 
 	if (time_rec)
 		*time_rec = min_time;

@@ -17,6 +17,7 @@ hcryptoincludedir = $(includedir)/hcrypto
 buildhcryptoinclude = $(buildinclude)/hcrypto
 
 hcryptoinclude_HEADERS =	\
+	CCDGlue.h		\
 	aes.h			\
 	bn.h			\
 	des.h			\

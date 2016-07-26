@@ -60,6 +60,8 @@ krb5_auth_con_init(krb5_context context,
     p->remote_port    = 0;
     p->keytype        = KRB5_ENCTYPE_NULL;
     p->cksumtype      = CKSUMTYPE_NONE;
+    p->auth_data      = NULL;
+    p->pfs	      = NULL;
     *auth_context     = p;
     return 0;
 }
@@ -81,6 +83,13 @@ krb5_auth_con_free(krb5_context context,
 	krb5_free_keyblock(context, auth_context->keyblock);
 	krb5_free_keyblock(context, auth_context->remote_subkey);
 	krb5_free_keyblock(context, auth_context->local_subkey);
+	if (auth_context->auth_data) {
+	    free_AuthorizationData(auth_context->auth_data);
+	    free(auth_context->auth_data);
+	}
+	if (auth_context->pfs)
+	    _krb5_auth_con_free_pfs(context, auth_context);
+	memset(auth_context, 0, sizeof(*auth_context));
 	free (auth_context);
     }
     return 0;
@@ -127,6 +136,23 @@ krb5_auth_con_removeflags(krb5_context context,
 	*flags = auth_context->flags;
     auth_context->flags &= ~removeflags;
     return 0;
+}
+
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
+krb5_auth_con_clear(krb5_context context,
+		    krb5_auth_context auth_context,
+		    unsigned int flags)
+{
+    if ((flags & KRB5_AUTH_CONTEXT_CLEAR_LOCAL_ADDR) && auth_context->local_address) {
+	krb5_free_address(context, auth_context->local_address);
+	free(auth_context->local_address);
+	auth_context->local_address = NULL;
+    }
+    if ((flags & KRB5_AUTH_CONTEXT_CLEAR_REMOTE_ADDR) && auth_context->remote_address) {
+	krb5_free_address(context, auth_context->remote_address);
+	free(auth_context->remote_address);
+	auth_context->remote_address = NULL;
+    }
 }
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
@@ -328,7 +354,7 @@ krb5_auth_con_generatelocalsubkey(krb5_context context,
     krb5_keyblock *subkey;
 
     ret = krb5_generate_subkey_extended (context, key,
-					 auth_context->keytype,
+					 (krb5_enctype)auth_context->keytype,
 					 &subkey);
     if(ret)
 	return ret;
@@ -457,9 +483,8 @@ krb5_auth_con_getauthenticator(krb5_context context,
 	return ENOMEM;
     }
 
-    copy_Authenticator(auth_context->authenticator,
+    return copy_Authenticator(auth_context->authenticator,
 		       *authenticator);
-    return 0;
 }
 
 
@@ -467,9 +492,12 @@ KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_free_authenticator(krb5_context context,
 			krb5_authenticator *authenticator)
 {
+    if (authenticator) {
     free_Authenticator (*authenticator);
+	memset(*authenticator, 0, sizeof(**authenticator));
     free (*authenticator);
     *authenticator = NULL;
+}
 }
 
 
@@ -500,6 +528,27 @@ krb5_auth_con_setrcache(krb5_context context,
     auth_context->rcache = rcache;
     return 0;
 }
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_auth_con_add_AuthorizationData(krb5_context context,
+				    krb5_auth_context auth_context,
+				    int type,
+				    krb5_data *data)
+{
+    AuthorizationDataElement el;
+
+    if (auth_context->auth_data == NULL) {
+	auth_context->auth_data = calloc(1, sizeof(*auth_context->auth_data));
+	if (auth_context->auth_data == NULL)
+	    return krb5_enomem(context);
+    }
+    el.ad_type = type;
+    el.ad_data.data = data->data;
+    el.ad_data.length = data->length;
+
+    return add_AuthorizationData(auth_context->auth_data, &el);
+}
+
 
 #if 0 /* not implemented */
 

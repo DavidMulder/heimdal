@@ -35,6 +35,8 @@
 
 #include <config.h>
 
+#ifdef ENABLE_NTLM
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -44,8 +46,11 @@
 #include <limits.h>
 
 #include <roken.h>
+
+#include <wind.h>
 #include <parse_units.h>
 #include <krb5.h>
+
 
 #define HC_DEPRECATED_CRYPTO
 
@@ -103,6 +108,8 @@ struct sec_buffer {
 
 static const unsigned char ntlmsigature[8] = "NTLMSSP\x00";
 
+time_t heim_ntlm_time_skew = 300;
+
 /*
  *
  */
@@ -115,6 +122,25 @@ static const unsigned char ntlmsigature[8] = "NTLMSSP\x00";
 	    goto out;							\
 	}								\
     } while(/*CONSTCOND*/0)
+
+#define CHECK_SIZE(f, e)						\
+    do {								\
+	ssize_t sret = f;						\
+	if (sret != (ssize_t)(e)) {					\
+	    ret = HNTLM_ERR_DECODE;					\
+	    goto out;							\
+	}								\
+    } while(/*CONSTCOND*/0)
+
+#define CHECK_OFFSET(f, e)						\
+    do {								\
+	off_t sret = f;							\
+	if (sret != (e)) {						\
+	    ret = HNTLM_ERR_DECODE;					\
+	    goto out;							\
+	}								\
+    } while(/*CONSTCOND*/0)
+
 
 static struct units ntlm_flag_units[] = {
 #define ntlm_flag(x) { #x, NTLM_##x }
@@ -182,34 +208,66 @@ heim_ntlm_free_buf(struct ntlm_buf *p)
 static int
 ascii2ucs2le(const char *string, int up, struct ntlm_buf *buf)
 {
-    unsigned char *p;
-    size_t len, i;
+    uint16_t *data;
+    size_t len, n;
+    uint8_t *p;
+    int ret;
 
-    len = strlen(string);
-    if (len / 2 > UINT_MAX)
+    ret = wind_utf8ucs2_length(string, &len);
+    if (ret)
+	return ret;
+    if (len > UINT_MAX / sizeof(data[0]))
 	return ERANGE;
 
+    data = malloc(len * sizeof(data[0]));
+    if (data == NULL)
+	return ENOMEM;
+
+    ret = wind_utf8ucs2(string, data, &len);
+    if (ret) {
+	free(data);
+	return ret;
+    }
+    
+    if (len == 0) {
+	free(data);
+	buf->data = NULL;
+	buf->length = 0;
+	return 0;
+    }
+
+    /* uppercase string, only handle ascii right now */
+    if (up) {
+	for (n = 0; n < len ; n++) {
+	    if (data[n] < 128)
+		data[n] = toupper((int)data[n]);
+	}
+    }
+
     buf->length = len * 2;
-    buf->data = malloc(buf->length);
+    p = buf->data = malloc(buf->length);
     if (buf->data == NULL && len != 0) {
+	free(data);
 	heim_ntlm_free_buf(buf);
 	return ENOMEM;
     }
 
-    p = buf->data;
-    for (i = 0; i < len; i++) {
-	unsigned char t = (unsigned char)string[i];
-	if (t & 0x80) {
-	    heim_ntlm_free_buf(buf);
-	    return EINVAL;
-	}
-	if (up)
-	    t = toupper(t);
-	p[(i * 2) + 0] = t;
-	p[(i * 2) + 1] = 0;
+    for (n = 0; n < len ; n++) {
+	p[(n * 2) + 0] = (data[n]     ) & 0xff;
+	p[(n * 2) + 1] = (data[n] >> 8) & 0xff;
     }
+    memset(data, 0, sizeof(data[0]) * len);
+    free(data);
+
     return 0;
 }
+
+/*
+ * Sizes in bytes
+ */
+
+#define SIZE_SEC_BUFFER		(2+2+4)
+#define SIZE_OS_VERSION		(8)
 
 /*
  *
@@ -242,13 +300,20 @@ out:
  * wire, but using utf8 in memory.
  */
 
-static krb5_error_code
+static size_t
 len_string(int ucs2, const char *s)
 {
-    size_t len = strlen(s);
-    if (ucs2)
-	len *= 2;
-    return len;
+    if (ucs2) {
+	size_t len;
+	int ret;
+
+	ret = wind_utf8ucs2_length(s, &len);
+	if (ret == 0)
+	    return len * 2;
+	return strlen(s) * 5 * 2;
+    } else {
+	return strlen(s);
+    }
 }
 
 /*
@@ -259,28 +324,50 @@ static krb5_error_code
 ret_string(krb5_storage *sp, int ucs2, size_t len, char **s)
 {
     krb5_error_code ret;
+    uint16_t *data = NULL;
 
     *s = malloc(len + 1);
     if (*s == NULL)
 	return ENOMEM;
-    CHECK(krb5_storage_read(sp, *s, len), len);
+    CHECK_SIZE(krb5_storage_read(sp, *s, len), len);
 
     (*s)[len] = '\0';
 
     if (ucs2) {
-	size_t i;
-	for (i = 0; i < len / 2; i++) {
-	    (*s)[i] = (*s)[i * 2];
-	    if ((*s)[i * 2 + 1]) {
-		free(*s);
-		*s = NULL;
-		return EINVAL;
-	    }
+	unsigned int flags = WIND_RW_LE;
+	size_t utf16len = len / 2;
+	size_t utf8len;
+
+	data = malloc(utf16len * sizeof(data[0])); 
+	if (data == NULL) {
+	    free(*s); *s = NULL;
+	    ret = ENOMEM;
+	    goto out;
 	}
-	(*s)[i] = '\0';
+
+	ret = wind_ucs2read(*s, len, &flags, data, &utf16len);
+	free(*s); *s = NULL;
+	if (ret) {
+	    goto out;
+	    }
+
+	CHECK(wind_ucs2utf8_length(data, utf16len, &utf8len), 0);
+
+	utf8len += 1;
+	
+	*s = malloc(utf8len);
+	if (s == NULL) {
+	    ret = ENOMEM;
+	    goto out;
+	}
+
+	CHECK(wind_ucs2utf8(data, utf16len, *s, &utf8len), 0);
     }
     ret = 0;
  out:
+    if (data)
+	free(data);
+
     return ret;
 }
 
@@ -290,7 +377,7 @@ static krb5_error_code
 ret_sec_string(krb5_storage *sp, int ucs2, struct sec_buffer *desc, char **s)
 {
     krb5_error_code ret = 0;
-    CHECK(krb5_storage_seek(sp, desc->offset, SEEK_SET), desc->offset);
+    CHECK_OFFSET(krb5_storage_seek(sp, desc->offset, SEEK_SET), desc->offset);
     CHECK(ret_string(sp, ucs2, desc->length, s), 0);
  out:
     return ret;
@@ -311,7 +398,7 @@ put_string(krb5_storage *sp, int ucs2, const char *s)
 	buf.length = strlen(s);
     }
 
-    CHECK(krb5_storage_write(sp, buf.data, buf.length), buf.length);
+    CHECK_SIZE(krb5_storage_write(sp, buf.data, buf.length), buf.length);
     if (ucs2)
 	heim_ntlm_free_buf(&buf);
     ret = 0;
@@ -330,8 +417,8 @@ ret_buf(krb5_storage *sp, struct sec_buffer *desc, struct ntlm_buf *buf)
 
     buf->data = malloc(desc->length);
     buf->length = desc->length;
-    CHECK(krb5_storage_seek(sp, desc->offset, SEEK_SET), desc->offset);
-    CHECK(krb5_storage_read(sp, buf->data, buf->length), buf->length);
+    CHECK_OFFSET(krb5_storage_seek(sp, desc->offset, SEEK_SET), desc->offset);
+    CHECK_SIZE(krb5_storage_read(sp, buf->data, buf->length), buf->length);
     ret = 0;
 out:
     return ret;
@@ -341,7 +428,7 @@ static krb5_error_code
 put_buf(krb5_storage *sp, const struct ntlm_buf *buf)
 {
     krb5_error_code ret;
-    CHECK(krb5_storage_write(sp, buf->data, buf->length), buf->length);
+    CHECK_SIZE(krb5_storage_write(sp, buf->data, buf->length), buf->length);
     ret = 0;
 out:
     return ret;
@@ -363,6 +450,8 @@ heim_ntlm_free_targetinfo(struct ntlm_targetinfo *ti)
     free(ti->dnsdomainname);
     free(ti->dnsservername);
     free(ti->dnstreename);
+    free(ti->targetname);
+    heim_ntlm_free_buf(&ti->channel_bindings);
     memset(ti, 0, sizeof(*ti));
 }
 
@@ -422,6 +511,20 @@ heim_ntlm_encode_targetinfo(const struct ntlm_targetinfo *ti,
 	CHECK(krb5_store_uint16(out, 6), 0);
 	CHECK(krb5_store_uint16(out, 4), 0);
 	CHECK(krb5_store_uint32(out, ti->avflags), 0);
+    }
+    if (ti->timestamp) {
+	CHECK(krb5_store_uint16(out, 7), 0);
+	CHECK(krb5_store_uint16(out, 8), 0);
+	CHECK(krb5_store_uint32(out, ti->timestamp & 0xffffffff), 0);
+	CHECK(krb5_store_uint32(out, (ti->timestamp >> 32) & 0xffffffff), 0);
+    }	
+    if (ti->targetname) {
+	CHECK(encode_ti_string(out, 9, ucs2, ti->targetname), 0);
+    }
+    if (ti->channel_bindings.length) {
+	CHECK(krb5_store_uint16(out, 10), 0);
+	CHECK(krb5_store_uint16(out, ti->channel_bindings.length), 0);
+	CHECK_SIZE(krb5_storage_write(out, ti->channel_bindings.data, ti->channel_bindings.length), ti->channel_bindings.length);
     }
 
     /* end tag */
@@ -497,6 +600,26 @@ heim_ntlm_decode_targetinfo(const struct ntlm_buf *data,
 	case 6:
 	    CHECK(krb5_ret_uint32(in, &ti->avflags), 0);
 	    break;
+	case 7: {
+	    uint32_t tmp;
+	    CHECK(krb5_ret_uint32(in, &tmp), 0);
+	    ti->timestamp = tmp;
+	    CHECK(krb5_ret_uint32(in, &tmp), 0);
+	    ti->timestamp |= ((uint64_t)tmp) << 32;
+	    break;
+	}	
+	case 9:
+	    CHECK(ret_string(in, 1, len, &ti->targetname), 0);
+	    break;
+	case 10:
+	    ti->channel_bindings.data = malloc(len);
+	    if (ti->channel_bindings.data == NULL) {
+		ret = ENOMEM;
+		goto out;
+	    }
+	    ti->channel_bindings.length = len;
+	    CHECK_SIZE(krb5_storage_read(in, ti->channel_bindings.data, len), len);
+	    break;
 	default:
 	    krb5_storage_seek(in, len, SEEK_CUR);
 	    break;
@@ -505,6 +628,21 @@ heim_ntlm_decode_targetinfo(const struct ntlm_buf *data,
  out:
     if (in)
 	krb5_storage_free(in);
+    return ret;
+}
+
+static krb5_error_code
+encode_os_version(krb5_storage *out)
+{
+    krb5_error_code ret;
+    CHECK(krb5_store_uint8(out, 0x06), 0);
+    CHECK(krb5_store_uint8(out, 0x01), 0);
+    CHECK(krb5_store_uint16(out, 0x1db0), 0);
+    CHECK(krb5_store_uint8(out, 0x0f), 0); /* ntlm version 15 */
+    CHECK(krb5_store_uint8(out, 0x00), 0);
+    CHECK(krb5_store_uint8(out, 0x00), 0);
+    CHECK(krb5_store_uint8(out, 0x00), 0);
+ out:
     return ret;
 }
 
@@ -534,6 +672,7 @@ heim_ntlm_decode_type1(const struct ntlm_buf *buf, struct ntlm_type1 *data)
     uint32_t type;
     struct sec_buffer domain, hostname;
     krb5_storage *in;
+    int ucs2;
 
     memset(data, 0, sizeof(*data));
 
@@ -544,25 +683,30 @@ heim_ntlm_decode_type1(const struct ntlm_buf *buf, struct ntlm_type1 *data)
     }
     krb5_storage_set_byteorder(in, KRB5_STORAGE_BYTEORDER_LE);
 
-    CHECK(krb5_storage_read(in, sig, sizeof(sig)), sizeof(sig));
+    CHECK_SIZE(krb5_storage_read(in, sig, sizeof(sig)), sizeof(sig));
     CHECK(memcmp(ntlmsigature, sig, sizeof(ntlmsigature)), 0);
     CHECK(krb5_ret_uint32(in, &type), 0);
     CHECK(type, 1);
     CHECK(krb5_ret_uint32(in, &data->flags), 0);
-    if (data->flags & NTLM_OEM_SUPPLIED_DOMAIN)
+
+    ucs2 = !!(data->flags & NTLM_NEG_UNICODE);
+
+    /*
+     * domain and hostname are unconditionally encoded regardless of
+     * NTLMSSP_NEGOTIATE_OEM_{HOSTNAME,WORKSTATION}_SUPPLIED flag
+     */
 	CHECK(ret_sec_buffer(in, &domain), 0);
-    if (data->flags & NTLM_OEM_SUPPLIED_WORKSTATION)
 	CHECK(ret_sec_buffer(in, &hostname), 0);
-#if 0
-    if (domain.offset > 32) {
+
+    if (data->flags & NTLM_NEG_VERSION) {
 	CHECK(krb5_ret_uint32(in, &data->os[0]), 0);
 	CHECK(krb5_ret_uint32(in, &data->os[1]), 0);
     }
-#endif
+
     if (data->flags & NTLM_OEM_SUPPLIED_DOMAIN)
-	CHECK(ret_sec_string(in, 0, &domain, &data->domain), 0);
+	CHECK(ret_sec_string(in, ucs2, &domain, &data->domain), 0);
     if (data->flags & NTLM_OEM_SUPPLIED_WORKSTATION)
-	CHECK(ret_sec_string(in, 0, &hostname, &data->hostname), 0);
+	CHECK(ret_sec_string(in, ucs2, &hostname, &data->hostname), 0);
 
 out:
     if (in)
@@ -593,35 +737,41 @@ heim_ntlm_encode_type1(const struct ntlm_type1 *type1, struct ntlm_buf *data)
     struct sec_buffer domain, hostname;
     krb5_storage *out;
     uint32_t base, flags;
+    int ucs2 = 0;
 
     flags = type1->flags;
     base = 16;
 
+    if (flags & NTLM_NEG_UNICODE)
+	ucs2 = 1;
+
     if (type1->domain) {
-	base += 8;
+	base += SIZE_SEC_BUFFER;
 	flags |= NTLM_OEM_SUPPLIED_DOMAIN;
     }
     if (type1->hostname) {
-	base += 8;
+	base += SIZE_SEC_BUFFER;
 	flags |= NTLM_OEM_SUPPLIED_WORKSTATION;
     }
-    if (type1->os[0])
-	base += 8;
+    if (flags & NTLM_NEG_VERSION)
+	base += SIZE_OS_VERSION; /* os */
 
-    domain.offset = base;
     if (type1->domain) {
-	domain.length = len_string(0, type1->domain);
+	domain.offset = base;
+	domain.length = len_string(ucs2, type1->domain);
 	domain.allocated = domain.length;
     } else {
+	domain.offset = 0;
 	domain.length = 0;
 	domain.allocated = 0;
     }
 
-    hostname.offset = domain.allocated + domain.offset;
     if (type1->hostname) {
-	hostname.length = len_string(0, type1->hostname);
+	hostname.offset = domain.allocated + domain.offset;
+	hostname.length = len_string(ucs2, type1->hostname);
 	hostname.allocated = hostname.length;
     } else {
+	hostname.offset = 0;
 	hostname.length = 0;
 	hostname.allocated = 0;
     }
@@ -631,21 +781,21 @@ heim_ntlm_encode_type1(const struct ntlm_type1 *type1, struct ntlm_buf *data)
 	return ENOMEM;
 
     krb5_storage_set_byteorder(out, KRB5_STORAGE_BYTEORDER_LE);
-    CHECK(krb5_storage_write(out, ntlmsigature, sizeof(ntlmsigature)),
+    CHECK_SIZE(krb5_storage_write(out, ntlmsigature, sizeof(ntlmsigature)),
 	  sizeof(ntlmsigature));
     CHECK(krb5_store_uint32(out, 1), 0);
     CHECK(krb5_store_uint32(out, flags), 0);
 
     CHECK(store_sec_buffer(out, &domain), 0);
     CHECK(store_sec_buffer(out, &hostname), 0);
-#if 0
-	CHECK(krb5_store_uint32(out, type1->os[0]), 0);
-	CHECK(krb5_store_uint32(out, type1->os[1]), 0);
-#endif
+
+    if (flags & NTLM_NEG_VERSION) {
+	CHECK(encode_os_version(out), 0);
+    }
     if (type1->domain)
-	CHECK(put_string(out, 0, type1->domain), 0);
+	CHECK(put_string(out, ucs2, type1->domain), 0);
     if (type1->hostname)
-	CHECK(put_string(out, 0, type1->hostname), 0);
+	CHECK(put_string(out, ucs2, type1->hostname), 0);
 
     {
 	krb5_data d;
@@ -695,7 +845,7 @@ heim_ntlm_decode_type2(const struct ntlm_buf *buf, struct ntlm_type2 *type2)
     }
     krb5_storage_set_byteorder(in, KRB5_STORAGE_BYTEORDER_LE);
 
-    CHECK(krb5_storage_read(in, sig, sizeof(sig)), sizeof(sig));
+    CHECK_SIZE(krb5_storage_read(in, sig, sizeof(sig)), sizeof(sig));
     CHECK(memcmp(ntlmsigature, sig, sizeof(ntlmsigature)), 0);
     CHECK(krb5_ret_uint32(in, &type), 0);
     CHECK(type, 2);
@@ -704,7 +854,7 @@ heim_ntlm_decode_type2(const struct ntlm_buf *buf, struct ntlm_type2 *type2)
     CHECK(krb5_ret_uint32(in, &type2->flags), 0);
     if (type2->flags & NTLM_NEG_UNICODE)
 	ucs2 = 1;
-    CHECK(krb5_storage_read(in, type2->challenge, sizeof(type2->challenge)),
+    CHECK_SIZE(krb5_storage_read(in, type2->challenge, sizeof(type2->challenge)),
 	  sizeof(type2->challenge));
     CHECK(krb5_ret_uint32(in, &ctx[0]), 0); /* context */
     CHECK(krb5_ret_uint32(in, &ctx[1]), 0);
@@ -753,7 +903,7 @@ heim_ntlm_encode_type2(const struct ntlm_type2 *type2, struct ntlm_buf *data)
     base = 48;
 
     if (type2->flags & NTLM_NEG_VERSION)
-	base += 8;
+	base += SIZE_OS_VERSION;
 
     if (type2->flags & NTLM_NEG_UNICODE)
 	ucs2 = 1;
@@ -771,23 +921,22 @@ heim_ntlm_encode_type2(const struct ntlm_type2 *type2, struct ntlm_buf *data)
 	return ENOMEM;
 
     krb5_storage_set_byteorder(out, KRB5_STORAGE_BYTEORDER_LE);
-    CHECK(krb5_storage_write(out, ntlmsigature, sizeof(ntlmsigature)),
+    CHECK_SIZE(krb5_storage_write(out, ntlmsigature, sizeof(ntlmsigature)),
 	  sizeof(ntlmsigature));
     CHECK(krb5_store_uint32(out, 2), 0);
     CHECK(store_sec_buffer(out, &targetname), 0);
     CHECK(krb5_store_uint32(out, type2->flags), 0);
-    CHECK(krb5_storage_write(out, type2->challenge, sizeof(type2->challenge)),
+    CHECK_SIZE(krb5_storage_write(out, type2->challenge, sizeof(type2->challenge)),
 	  sizeof(type2->challenge));
     CHECK(krb5_store_uint32(out, 0), 0); /* context */
     CHECK(krb5_store_uint32(out, 0), 0);
     CHECK(store_sec_buffer(out, &targetinfo), 0);
     /* os version */
     if (type2->flags & NTLM_NEG_VERSION) {
-	CHECK(krb5_store_uint32(out, type2->os[0]), 0);
-	CHECK(krb5_store_uint32(out, type2->os[1]), 0);
+	CHECK(encode_os_version(out), 0);
     }
     CHECK(put_string(out, ucs2, type2->targetname), 0);
-    CHECK(krb5_storage_write(out, type2->targetinfo.data,
+    CHECK_SIZE(krb5_storage_write(out, type2->targetinfo.data,
 			     type2->targetinfo.length),
 	  type2->targetinfo.length);
 
@@ -841,7 +990,7 @@ heim_ntlm_decode_type3(const struct ntlm_buf *buf,
     uint32_t type;
     krb5_storage *in;
     struct sec_buffer lm, ntlm, target, username, sessionkey, ws;
-    uint32_t min_offset = 72;
+    uint32_t min_offset = 0xffffffff;
 
     memset(type3, 0, sizeof(*type3));
     memset(&sessionkey, 0, sizeof(sessionkey));
@@ -853,35 +1002,38 @@ heim_ntlm_decode_type3(const struct ntlm_buf *buf,
     }
     krb5_storage_set_byteorder(in, KRB5_STORAGE_BYTEORDER_LE);
 
-    CHECK(krb5_storage_read(in, sig, sizeof(sig)), sizeof(sig));
+    CHECK_SIZE(krb5_storage_read(in, sig, sizeof(sig)), sizeof(sig));
     CHECK(memcmp(ntlmsigature, sig, sizeof(ntlmsigature)), 0);
     CHECK(krb5_ret_uint32(in, &type), 0);
     CHECK(type, 3);
     CHECK(ret_sec_buffer(in, &lm), 0);
     if (lm.allocated)
-	min_offset = min(min_offset, lm.offset);
+	min_offset = MIN(min_offset, lm.offset);
     CHECK(ret_sec_buffer(in, &ntlm), 0);
     if (ntlm.allocated)
-	min_offset = min(min_offset, ntlm.offset);
+	min_offset = MIN(min_offset, ntlm.offset);
     CHECK(ret_sec_buffer(in, &target), 0);
-    if (target.allocated)
-	min_offset = min(min_offset, target.offset);
+    min_offset = MIN(min_offset, target.offset);
     CHECK(ret_sec_buffer(in, &username), 0);
-    if (username.allocated)
-	min_offset = min(min_offset, username.offset);
+    min_offset = MIN(min_offset, username.offset);
     CHECK(ret_sec_buffer(in, &ws), 0);
     if (ws.allocated)
-	min_offset = min(min_offset, ws.offset);
+	min_offset = MIN(min_offset, ws.offset);
 
-    if (min_offset > 52) {
+    if (min_offset >= 52) {
 	CHECK(ret_sec_buffer(in, &sessionkey), 0);
-	min_offset = max(min_offset, sessionkey.offset);
+	min_offset = MIN(min_offset, sessionkey.offset);
 	CHECK(krb5_ret_uint32(in, &type3->flags), 0);
     }
-    if (min_offset > 52 + 8 + 4 + 8) {
+    if (min_offset >= 52 + SIZE_SEC_BUFFER + 4 + SIZE_OS_VERSION) {
 	CHECK(krb5_ret_uint32(in, &type3->os[0]), 0);
 	CHECK(krb5_ret_uint32(in, &type3->os[1]), 0);
     }
+    if (min_offset >= 52 + SIZE_SEC_BUFFER + 4 + SIZE_OS_VERSION + 16) {
+	type3->mic_offset = 52 + SIZE_SEC_BUFFER + 4 + SIZE_OS_VERSION;
+	CHECK_SIZE(krb5_storage_read(in, type3->mic, sizeof(type3->mic)), sizeof(type3->mic));
+    } else
+	type3->mic_offset = 0;
     CHECK(ret_buf(in, &lm, &type3->lm), 0);
     CHECK(ret_buf(in, &ntlm, &type3->ntlm), 0);
     CHECK(ret_sec_string(in, ucs2, &target, &type3->targetname), 0);
@@ -913,7 +1065,7 @@ out:
  */
 
 int
-heim_ntlm_encode_type3(const struct ntlm_type3 *type3, struct ntlm_buf *data)
+heim_ntlm_encode_type3(const struct ntlm_type3 *type3, struct ntlm_buf *data, size_t *mic_offset)
 {
     struct sec_buffer lm, ntlm, target, username, sessionkey, ws;
     krb5_error_code ret;
@@ -932,9 +1084,12 @@ heim_ntlm_encode_type3(const struct ntlm_type3 *type3, struct ntlm_buf *data)
 
     base += 8; /* sessionkey sec buf */
     base += 4; /* flags */
+    if (type3->flags & NTLM_NEG_VERSION)
+	base += SIZE_OS_VERSION; /* os flags */
 
-    if (type3->os[0]) {
-	base += 8;
+    if (mic_offset) {
+	*mic_offset = base;
+	base += 16;
     }
 
     if (type3->flags & NTLM_NEG_UNICODE)
@@ -969,7 +1124,7 @@ heim_ntlm_encode_type3(const struct ntlm_type3 *type3, struct ntlm_buf *data)
 	return ENOMEM;
 
     krb5_storage_set_byteorder(out, KRB5_STORAGE_BYTEORDER_LE);
-    CHECK(krb5_storage_write(out, ntlmsigature, sizeof(ntlmsigature)),
+    CHECK_SIZE(krb5_storage_write(out, ntlmsigature, sizeof(ntlmsigature)),
 	  sizeof(ntlmsigature));
     CHECK(krb5_store_uint32(out, 3), 0);
 
@@ -981,10 +1136,15 @@ heim_ntlm_encode_type3(const struct ntlm_type3 *type3, struct ntlm_buf *data)
     CHECK(store_sec_buffer(out, &sessionkey), 0);
     CHECK(krb5_store_uint32(out, type3->flags), 0);
 
-#if 0
-    CHECK(krb5_store_uint32(out, 0), 0); /* os0 */
-    CHECK(krb5_store_uint32(out, 0), 0); /* os1 */
-#endif
+    /* os version */
+    if (type3->flags & NTLM_NEG_VERSION) {
+	CHECK(encode_os_version(out), 0);
+    }
+
+    if (mic_offset) {
+	static const uint8_t buf[16] = { 0 };
+	CHECK_SIZE(krb5_storage_write(out, buf, sizeof(buf)), sizeof(buf));
+    }
 
     CHECK(put_string(out, ucs2, type3->targetname), 0);
     CHECK(put_string(out, ucs2, type3->username), 0);
@@ -1052,13 +1212,13 @@ int
 heim_ntlm_nt_key(const char *password, struct ntlm_buf *key)
 {
     struct ntlm_buf buf;
-    EVP_MD_CTX *m;
+    CCDigestRef m;
     int ret;
 
-    key->data = malloc(MD5_DIGEST_LENGTH);
+    key->data = malloc(CC_MD4_DIGEST_LENGTH);
     if (key->data == NULL)
 	return ENOMEM;
-    key->length = MD5_DIGEST_LENGTH;
+    key->length = CC_MD4_DIGEST_LENGTH;
 
     ret = ascii2ucs2le(password, 0, &buf);
     if (ret) {
@@ -1066,17 +1226,16 @@ heim_ntlm_nt_key(const char *password, struct ntlm_buf *key)
 	return ret;
     }
 
-    m = EVP_MD_CTX_create();
+    m = CCDigestCreate(kCCDigestMD4);
     if (m == NULL) {
 	heim_ntlm_free_buf(key);
 	heim_ntlm_free_buf(&buf);
 	return ENOMEM;
     }
 
-    EVP_DigestInit_ex(m, EVP_md4(), NULL);
-    EVP_DigestUpdate(m, buf.data, buf.length);
-    EVP_DigestFinal_ex(m, key->data, NULL);
-    EVP_MD_CTX_destroy(m);
+    CCDigestUpdate(m, buf.data, buf.length);
+    CCDigestFinal(m, key->data);
+    CCDigestDestroy(m);
 
     heim_ntlm_free_buf(&buf);
     return 0;
@@ -1103,11 +1262,11 @@ heim_ntlm_calculate_ntlm1(void *key, size_t len,
 {
     unsigned char res[21];
 
-    if (len != MD4_DIGEST_LENGTH)
+    if (len != CC_MD4_DIGEST_LENGTH)
 	return HNTLM_ERR_INVALID_LENGTH;
 
     memcpy(res, key, len);
-    memset(&res[MD4_DIGEST_LENGTH], 0, sizeof(res) - MD4_DIGEST_LENGTH);
+    memset(&res[CC_MD4_DIGEST_LENGTH], 0, sizeof(res) - CC_MD4_DIGEST_LENGTH);
 
     answer->data = malloc(24);
     if (answer->data == NULL)
@@ -1125,24 +1284,23 @@ int
 heim_ntlm_v1_base_session(void *key, size_t len,
 			  struct ntlm_buf *session)
 {
-    EVP_MD_CTX *m;
+    CCDigestRef m;
 
-    session->length = MD4_DIGEST_LENGTH;
+    session->length = CC_MD4_DIGEST_LENGTH;
     session->data = malloc(session->length);
     if (session->data == NULL) {
 	session->length = 0;
 	return ENOMEM;
     }
 
-    m = EVP_MD_CTX_create();
+    m = CCDigestCreate(kCCDigestMD4);
     if (m == NULL) {
 	heim_ntlm_free_buf(session);
 	return ENOMEM;
     }
-    EVP_DigestInit_ex(m, EVP_md4(), NULL);
-    EVP_DigestUpdate(m, key, len);
-    EVP_DigestFinal_ex(m, session->data, NULL);
-    EVP_MD_CTX_destroy(m);
+    CCDigestUpdate(m, key, len);
+    CCDigestFinal(m, session->data);
+    CCDigestDestroy(m);
 
     return 0;
 }
@@ -1152,9 +1310,6 @@ heim_ntlm_v2_base_session(void *key, size_t len,
 			  struct ntlm_buf *ntlmResponse,
 			  struct ntlm_buf *session)
 {
-    unsigned int hmaclen;
-    HMAC_CTX c;
-
     if (ntlmResponse->length <= 16)
         return HNTLM_ERR_INVALID_LENGTH;
 
@@ -1164,11 +1319,7 @@ heim_ntlm_v2_base_session(void *key, size_t len,
     session->length = 16;
 
     /* Note: key is the NTLMv2 key */
-    HMAC_CTX_init(&c);
-    HMAC_Init_ex(&c, key, len, EVP_md5(), NULL);
-    HMAC_Update(&c, ntlmResponse->data, 16);
-    HMAC_Final(&c, session->data, &hmaclen);
-    HMAC_CTX_cleanup(&c);
+    CCHmac(kCCHmacAlgMD5, key, len, ntlmResponse->data, 16, session->data);
 
     return 0;
 }
@@ -1182,13 +1333,16 @@ heim_ntlm_keyex_wrap(struct ntlm_buf *base_session,
     EVP_CIPHER_CTX c;
     int ret;
 
-    session->length = MD4_DIGEST_LENGTH;
+    if (base_session->length != CC_MD4_DIGEST_LENGTH)
+	return HNTLM_ERR_INVALID_LENGTH;
+
+    session->length = CC_MD4_DIGEST_LENGTH;
     session->data = malloc(session->length);
     if (session->data == NULL) {
 	session->length = 0;
 	return ENOMEM;
     }
-    encryptedSession->length = MD4_DIGEST_LENGTH;
+    encryptedSession->length = CC_MD4_DIGEST_LENGTH;
     encryptedSession->data = malloc(encryptedSession->length);
     if (encryptedSession->data == NULL) {
 	heim_ntlm_free_buf(session);
@@ -1206,7 +1360,7 @@ heim_ntlm_keyex_wrap(struct ntlm_buf *base_session,
 	return HNTLM_ERR_CRYPTO;
     }
 
-    if (RAND_bytes(session->data, session->length) != 1) {
+    if (CCRandomCopyBytes(kCCRandomDefault, session->data, session->length)) {
 	EVP_CIPHER_CTX_cleanup(&c);
 	heim_ntlm_free_buf(encryptedSession);
 	heim_ntlm_free_buf(session);
@@ -1221,8 +1375,6 @@ heim_ntlm_keyex_wrap(struct ntlm_buf *base_session,
 
 
 }
-
-
 
 /**
  * Generates an NTLMv1 session random with assosited session master key.
@@ -1313,10 +1465,12 @@ heim_ntlm_keyex_unwrap(struct ntlm_buf *baseKey,
 
     memset(session, 0, sizeof(*session));
 
-    if (baseKey->length != MD4_DIGEST_LENGTH)
+    if (encryptedSession->length != CC_MD4_DIGEST_LENGTH)
+	return HNTLM_ERR_INVALID_LENGTH;
+    if (baseKey->length != CC_MD4_DIGEST_LENGTH)
 	return HNTLM_ERR_INVALID_LENGTH;
 
-    session->length = MD4_DIGEST_LENGTH;
+    session->length = CC_MD4_DIGEST_LENGTH;
     session->data = malloc(session->length);
     if (session->data == NULL) {
 	session->length = 0;
@@ -1344,6 +1498,7 @@ heim_ntlm_keyex_unwrap(struct ntlm_buf *baseKey,
  * @param len length of key
  * @param username name of the user, as sent in the message, assumed to be in UTF8.
  * @param target the name of the target, assumed to be in UTF8.
+ * @param upper_case_target upper case the target, should not be used only for legacy systems
  * @param ntlmv2 the ntlmv2 session key
  *
  * @return 0 on success, or an error code on failure.
@@ -1355,32 +1510,31 @@ int
 heim_ntlm_ntlmv2_key(const void *key, size_t len,
 		     const char *username,
 		     const char *target,
+		     int upper_case_target,
 		     unsigned char ntlmv2[16])
 {
     int ret;
-    unsigned int hmaclen;
-    HMAC_CTX c;
+    CCHmacContext c;
 
-    HMAC_CTX_init(&c);
-    HMAC_Init_ex(&c, key, len, EVP_md5(), NULL);
+    CCHmacInit(&c, kCCHmacAlgMD5, key, len);
     {
 	struct ntlm_buf buf;
 	/* uppercase username and turn it into ucs2-le */
 	ret = ascii2ucs2le(username, 1, &buf);
 	if (ret)
 	    goto out;
-	HMAC_Update(&c, buf.data, buf.length);
+	CCHmacUpdate(&c, buf.data, buf.length);
 	free(buf.data);
-	/* uppercase target and turn into ucs2-le */
-	ret = ascii2ucs2le(target, 1, &buf);
+	/* turn target into ucs2-le */
+	ret = ascii2ucs2le(target, upper_case_target, &buf);
 	if (ret)
 	    goto out;
-	HMAC_Update(&c, buf.data, buf.length);
+	CCHmacUpdate(&c, buf.data, buf.length);
 	free(buf.data);
     }
-    HMAC_Final(&c, ntlmv2, &hmaclen);
+    CCHmacFinal(&c, ntlmv2);
  out:
-    HMAC_CTX_cleanup(&c);
+    memset(&c, 0, sizeof(c));
 
     return ret;
 }
@@ -1391,16 +1545,16 @@ heim_ntlm_ntlmv2_key(const void *key, size_t len,
 
 #define NTTIME_EPOCH 0x019DB1DED53E8000LL
 
-static uint64_t
-unix2nttime(time_t unix_time)
+uint64_t
+heim_ntlm_unix2ts_time(time_t unix_time)
 {
     long long wt;
     wt = unix_time * (uint64_t)10000000 + (uint64_t)NTTIME_EPOCH;
     return wt;
 }
 
-static time_t
-nt2unixtime(uint64_t t)
+time_t
+heim_ntlm_ts2unixtime(uint64_t t)
 {
     t = ((t - (uint64_t)NTTIME_EPOCH) / (uint64_t)10000000);
     if (t > (((uint64_t)(time_t)(~(uint64_t)0)) >> 1))
@@ -1435,12 +1589,12 @@ heim_ntlm_calculate_lm2(const void *key, size_t len,
 {
     unsigned char clientchallenge[8];
 
-    if (RAND_bytes(clientchallenge, sizeof(clientchallenge)) != 1)
+    if (CCRandomCopyBytes(kCCRandomDefault, clientchallenge, sizeof(clientchallenge)))
 	return HNTLM_ERR_RAND;
 
     /* calculate ntlmv2 key */
 
-    heim_ntlm_ntlmv2_key(key, len, username, target, ntlmv2);
+    heim_ntlm_ntlmv2_key(key, len, username, target, 0, ntlmv2);
 
     answer->data = malloc(24);
     if (answer->data == NULL)
@@ -1450,7 +1604,7 @@ heim_ntlm_calculate_lm2(const void *key, size_t len,
     heim_ntlm_derive_ntlm2_sess(ntlmv2, clientchallenge, 8,
 				serverchallenge, answer->data);
 
-    memcpy(((uint8_t *)answer->data) + 16, clientchallenge, 8);
+    memcpy((uint8_t *)answer->data + 16, clientchallenge, 8);
 
     return 0;
 }
@@ -1490,14 +1644,14 @@ heim_ntlm_calculate_ntlm2(const void *key, size_t len,
     unsigned char clientchallenge[8];
     uint64_t t;
 
-    t = unix2nttime(time(NULL));
+    t = heim_ntlm_unix2ts_time(time(NULL));
 
-    if (RAND_bytes(clientchallenge, sizeof(clientchallenge)) != 1)
+    if (CCRandomCopyBytes(kCCRandomDefault, clientchallenge, sizeof(clientchallenge)))
 	return HNTLM_ERR_RAND;
 
     /* calculate ntlmv2 key */
 
-    heim_ntlm_ntlmv2_key(key, len, username, target, ntlmv2);
+    heim_ntlm_ntlmv2_key(key, len, username, target, 0, ntlmv2);
 
     /* calculate and build ntlmv2 answer */
 
@@ -1512,12 +1666,19 @@ heim_ntlm_calculate_ntlm2(const void *key, size_t len,
     CHECK(krb5_store_uint32(sp, t & 0xffffffff), 0);
     CHECK(krb5_store_uint32(sp, t >> 32), 0);
 
-    CHECK(krb5_storage_write(sp, clientchallenge, 8), 8);
+    CHECK_SIZE(krb5_storage_write(sp, clientchallenge, 8), 8);
 
-    CHECK(krb5_store_uint32(sp, 0), 0);  /* unknown but zero will work */
-    CHECK(krb5_storage_write(sp, infotarget->data, infotarget->length),
+    CHECK(krb5_store_uint32(sp, 0), 0);  /* Z(4) */
+    CHECK_SIZE(krb5_storage_write(sp, infotarget->data, infotarget->length),
 	  infotarget->length);
-    CHECK(krb5_store_uint32(sp, 0), 0); /* unknown but zero will work */
+
+    /*
+     * These last 4 bytes(Z(4)) are not documented by MicroSoft and
+     * SnowLeopard doesn't send them, Lion expected them to be there,
+     * so we have to continue to send them. That is ok, since everyone
+     * else (except Snow) seems to do that too.
+     */
+    CHECK(krb5_store_uint32(sp, 0), 0); /* Z(4) */
 
     CHECK(krb5_storage_to_data(sp, &data), 0);
     krb5_storage_free(sp);
@@ -1531,8 +1692,8 @@ heim_ntlm_calculate_ntlm2(const void *key, size_t len,
 	return ENOMEM;
     }
 
-    CHECK(krb5_storage_write(sp, ntlmv2answer, 16), 16);
-    CHECK(krb5_storage_write(sp, data.data, data.length), data.length);
+    CHECK_SIZE(krb5_storage_write(sp, ntlmv2answer, 16), 16);
+    CHECK_SIZE(krb5_storage_write(sp, data.data, data.length), data.length);
     krb5_data_free(&data);
 
     CHECK(krb5_storage_to_data(sp, &data), 0);
@@ -1550,6 +1711,110 @@ out:
 }
 
 static const int authtimediff = 3600 * 2; /* 2 hours */
+
+static int
+verify_ntlm2(const void *key, size_t len,
+		       const char *username,
+		       const char *target,
+	     int upper_case_target,
+		       time_t now,
+		       const unsigned char serverchallenge[8],
+		       const struct ntlm_buf *answer,
+		       struct ntlm_buf *infotarget,
+		       unsigned char ntlmv2[16])
+{
+    krb5_error_code ret;
+    unsigned char clientanswer[16];
+    unsigned char clientnonce[8];
+    unsigned char serveranswer[16];
+    krb5_storage *sp;
+    uint64_t t;
+    time_t authtime;
+    uint32_t temp;
+
+    infotarget->length = 0;
+    infotarget->data = NULL;
+
+    if (answer->length < 16)
+	return HNTLM_ERR_INVALID_LENGTH;
+
+    if (now == 0)
+	now = time(NULL);
+
+    /* calculate ntlmv2 key */
+
+    heim_ntlm_ntlmv2_key(key, len, username, target, upper_case_target, ntlmv2);
+
+    /* calculate and build ntlmv2 answer */
+
+    sp = krb5_storage_from_readonly_mem(answer->data, answer->length);
+    if (sp == NULL)
+	return ENOMEM;
+    krb5_storage_set_flags(sp, KRB5_STORAGE_BYTEORDER_LE);
+
+    CHECK_SIZE(krb5_storage_read(sp, clientanswer, 16), 16);
+
+    CHECK(krb5_ret_uint32(sp, &temp), 0);
+    CHECK(temp, 0x00000101);
+    CHECK(krb5_ret_uint32(sp, &temp), 0);
+    CHECK(temp, 0);
+    /* timestamp le 64 bit ts */
+    CHECK(krb5_ret_uint32(sp, &temp), 0);
+    t = temp;
+    CHECK(krb5_ret_uint32(sp, &temp), 0);
+    t |= ((uint64_t)temp)<< 32;
+
+    authtime = heim_ntlm_ts2unixtime(t);
+
+    if (abs((int)(authtime - now)) > authtimediff) {
+	ret = HNTLM_ERR_TIME_SKEW;
+	goto out;
+    }
+
+    /* client challenge */
+    CHECK_SIZE(krb5_storage_read(sp, clientnonce, 8), 8);
+
+    CHECK(krb5_ret_uint32(sp, &temp), 0); /* Z(4) */
+
+    /* let pick up targetinfo */
+    infotarget->length = answer->length - (size_t)krb5_storage_seek(sp, 0, SEEK_CUR);
+    if (infotarget->length < 4) {
+	ret = HNTLM_ERR_INVALID_LENGTH;
+	goto out;
+    }
+    infotarget->data = malloc(infotarget->length);
+    if (infotarget->data == NULL) {
+	ret = ENOMEM;
+	goto out;
+    }
+    CHECK_SIZE(krb5_storage_read(sp, infotarget->data, infotarget->length),
+	  infotarget->length);
+
+    krb5_storage_free(sp);
+    sp = NULL;
+
+    if (answer->length < 16) {
+	ret = HNTLM_ERR_INVALID_LENGTH;
+	goto out;
+    }
+
+    heim_ntlm_derive_ntlm2_sess(ntlmv2,
+				((unsigned char *)answer->data) + 16, answer->length - 16,
+				serverchallenge,
+				serveranswer);
+
+    if (memcmp(serveranswer, clientanswer, 16) != 0) {
+	heim_ntlm_free_buf(infotarget);
+	return HNTLM_ERR_AUTH;
+    }
+
+    return 0;
+out:
+    heim_ntlm_free_buf(infotarget);
+    if (sp)
+	krb5_storage_free(sp);
+    return ret;
+}
 
 /**
  * Verify NTLMv2 response.
@@ -1580,95 +1845,31 @@ heim_ntlm_verify_ntlm2(const void *key, size_t len,
 		       struct ntlm_buf *infotarget,
 		       unsigned char ntlmv2[16])
 {
-    krb5_error_code ret;
-    unsigned char clientanswer[16];
-    unsigned char clientnonce[8];
-    unsigned char serveranswer[16];
-    krb5_storage *sp;
-    time_t authtime;
-    uint32_t temp;
-    uint64_t t;
+    int ret;
+    
+    /**
+     * First check with the domain as the client passed it to the function.
+     */
 
-    infotarget->length = 0;
-    infotarget->data = NULL;
+    ret = verify_ntlm2(key, len, username, target, 0, now,
+		       serverchallenge, answer, infotarget, ntlmv2);
 
-    if (answer->length < 16)
-	return HNTLM_ERR_INVALID_LENGTH;
+    /**
+     * Second check with domain uppercased.
+     */
 
-    if (now == 0)
-	now = time(NULL);
+    if (ret)
+	ret = verify_ntlm2(key, len, username, target, 1, now,
+			   serverchallenge, answer, infotarget, ntlmv2);
 
-    /* calculate ntlmv2 key */
-
-    heim_ntlm_ntlmv2_key(key, len, username, target, ntlmv2);
-
-    /* calculate and build ntlmv2 answer */
-
-    sp = krb5_storage_from_readonly_mem(answer->data, answer->length);
-    if (sp == NULL)
-	return ENOMEM;
-    krb5_storage_set_flags(sp, KRB5_STORAGE_BYTEORDER_LE);
-
-    CHECK(krb5_storage_read(sp, clientanswer, 16), 16);
-
-    CHECK(krb5_ret_uint32(sp, &temp), 0);
-    CHECK(temp, 0x00000101);
-    CHECK(krb5_ret_uint32(sp, &temp), 0);
-    CHECK(temp, 0);
-    /* timestamp le 64 bit ts */
-    CHECK(krb5_ret_uint32(sp, &temp), 0);
-    t = temp;
-    CHECK(krb5_ret_uint32(sp, &temp), 0);
-    t |= ((uint64_t)temp)<< 32;
-
-    authtime = nt2unixtime(t);
-
-    if (abs((int)(authtime - now)) > authtimediff) {
-	ret = HNTLM_ERR_TIME_SKEW;
-	goto out;
-    }
-
-    /* client challenge */
-    CHECK(krb5_storage_read(sp, clientnonce, 8), 8);
-
-    CHECK(krb5_ret_uint32(sp, &temp), 0); /* unknown */
-
-    /* should really unparse the infotarget, but lets pick up everything */
-    infotarget->length = answer->length - krb5_storage_seek(sp, 0, SEEK_CUR);
-    infotarget->data = malloc(infotarget->length);
-    if (infotarget->data == NULL) {
-	ret = ENOMEM;
-	goto out;
-    }
-    CHECK(krb5_storage_read(sp, infotarget->data, infotarget->length),
-	  infotarget->length);
-    /* XXX remove the unknown ?? */
-    krb5_storage_free(sp);
-    sp = NULL;
-
-    if (answer->length < 16) {
-	ret = HNTLM_ERR_INVALID_LENGTH;
-	goto out;
-    }
-
-    heim_ntlm_derive_ntlm2_sess(ntlmv2,
-				((unsigned char *)answer->data) + 16, answer->length - 16,
-				serverchallenge,
-				serveranswer);
-
-    if (memcmp(serveranswer, clientanswer, 16) != 0) {
-	heim_ntlm_free_buf(infotarget);
-	return HNTLM_ERR_AUTH;
-    }
-
-    return 0;
-out:
-    heim_ntlm_free_buf(infotarget);
-    if (sp)
-	krb5_storage_free(sp);
+    /**
+     * Third check with empty domain.
+     */
+    if (ret)
+	ret = verify_ntlm2(key, len, username, "", 0, now,
+			   serverchallenge, answer, infotarget, ntlmv2);
     return ret;
 }
-
 
 /*
  * Calculate the NTLM2 Session Response
@@ -1750,18 +1951,17 @@ heim_ntlm_calculate_ntlm2_sess_hash(const unsigned char clnt_nonce[8],
 				    const unsigned char svr_chal[8],
 				    unsigned char verifier[8])
 {
-    unsigned char ntlm2_sess_hash[MD5_DIGEST_LENGTH];
-    EVP_MD_CTX *m;
+    unsigned char ntlm2_sess_hash[CC_MD5_DIGEST_LENGTH];
+    CCDigestRef m;
 
-    m = EVP_MD_CTX_create();
+    m = CCDigestCreate(kCCDigestMD5);
     if (m == NULL)
 	return ENOMEM;
 
-    EVP_DigestInit_ex(m, EVP_md5(), NULL);
-    EVP_DigestUpdate(m, svr_chal, 8); /* session nonce part 1 */
-    EVP_DigestUpdate(m, clnt_nonce, 8); /* session nonce part 2 */
-    EVP_DigestFinal_ex(m, ntlm2_sess_hash, NULL); /* will only use first 8 bytes */
-    EVP_MD_CTX_destroy(m);
+    CCDigestUpdate(m, svr_chal, 8); /* session nonce part 1 */
+    CCDigestUpdate(m, clnt_nonce, 8); /* session nonce part 2 */
+    CCDigestFinal(m, ntlm2_sess_hash); /* will only use first 8 bytes */
+    CCDigestDestroy(m);
 
     memcpy(verifier, ntlm2_sess_hash, 8);
 
@@ -1789,15 +1989,137 @@ heim_ntlm_derive_ntlm2_sess(const unsigned char sessionkey[16],
 			    const unsigned char svr_chal[8],
 			    unsigned char derivedkey[16])
 {
-    unsigned int hmaclen;
-    HMAC_CTX c;
+    CCHmacContext c;
 
     /* HMAC(Ksession, serverchallenge || clientchallenge) */
-    HMAC_CTX_init(&c);
-    HMAC_Init_ex(&c, sessionkey, 16, EVP_md5(), NULL);
-    HMAC_Update(&c, svr_chal, 8);
-    HMAC_Update(&c, clnt_nonce, clnt_nonce_length);
-    HMAC_Final(&c, derivedkey, &hmaclen);
-    HMAC_CTX_cleanup(&c);
+    CCHmacInit(&c, kCCHmacAlgMD5, sessionkey, 16);
+    CCHmacUpdate(&c, svr_chal, 8);
+    CCHmacUpdate(&c, clnt_nonce, clnt_nonce_length);
+    CCHmacFinal(&c, derivedkey);
+    memset(&c, 0, sizeof(c));
 }
 
+/*
+ *
+ */
+
+static const uint8_t shapad1[40] =
+    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+static const uint8_t shapad2[40] =
+    "\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2"
+    "\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2\xf2";
+
+static const uint8_t Magic1[27] =
+   {0x54, 0x68, 0x69, 0x73, 0x20, 0x69, 0x73, 0x20, 0x74,
+    0x68, 0x65, 0x20, 0x4d, 0x50, 0x50, 0x45, 0x20, 0x4d,
+    0x61, 0x73, 0x74, 0x65, 0x72, 0x20, 0x4b, 0x65, 0x79};
+
+static const uint8_t Magic2[84] =
+    {0x4f, 0x6e, 0x20, 0x74, 0x68, 0x65, 0x20, 0x63, 0x6c, 0x69,
+     0x65, 0x6e, 0x74, 0x20, 0x73, 0x69, 0x64, 0x65, 0x2c, 0x20,
+     0x74, 0x68, 0x69, 0x73, 0x20, 0x69, 0x73, 0x20, 0x74, 0x68,
+     0x65, 0x20, 0x73, 0x65, 0x6e, 0x64, 0x20, 0x6b, 0x65, 0x79,
+     0x3b, 0x20, 0x6f, 0x6e, 0x20, 0x74, 0x68, 0x65, 0x20, 0x73,
+     0x65, 0x72, 0x76, 0x65, 0x72, 0x20, 0x73, 0x69, 0x64, 0x65,
+     0x2c, 0x20, 0x69, 0x74, 0x20, 0x69, 0x73, 0x20, 0x74, 0x68,
+     0x65, 0x20, 0x72, 0x65, 0x63, 0x65, 0x69, 0x76, 0x65, 0x20,
+     0x6b, 0x65, 0x79, 0x2e};
+
+static const uint8_t Magic3[84] = {
+    0x4f, 0x6e, 0x20, 0x74, 0x68, 0x65, 0x20, 0x63, 0x6c, 0x69,
+    0x65, 0x6e, 0x74, 0x20, 0x73, 0x69, 0x64, 0x65, 0x2c, 0x20,
+    0x74, 0x68, 0x69, 0x73, 0x20, 0x69, 0x73, 0x20, 0x74, 0x68,
+    0x65, 0x20, 0x72, 0x65, 0x63, 0x65, 0x69, 0x76, 0x65, 0x20,
+    0x6b, 0x65, 0x79, 0x3b, 0x20, 0x6f, 0x6e, 0x20, 0x74, 0x68,
+    0x65, 0x20, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x20, 0x73,
+    0x69, 0x64, 0x65, 0x2c, 0x20, 0x69, 0x74, 0x20, 0x69, 0x73,
+    0x20, 0x74, 0x68, 0x65, 0x20, 0x73, 0x65, 0x6e, 0x64, 0x20,
+    0x6b, 0x65, 0x79, 0x2e
+};
+
+/**
+ *
+ * @ingroup ntlm_core
+ */
+
+int
+heim_ntlm_mppe_getmasterkey(const uint8_t ntlmHashHash[16],
+			    const uint8_t ntlmResponse[24],
+			    uint8_t masterKey[16])
+{
+    CCDigestRef m;
+
+    m = CCDigestCreate(kCCDigestSHA1);
+    if (m == NULL)
+	return ENOMEM;
+
+    CCDigestUpdate(m, ntlmHashHash, 16);
+    CCDigestUpdate(m, ntlmResponse, 24);
+    CCDigestUpdate(m, Magic1, sizeof(Magic1));
+
+    CCDigestFinal(m, masterKey);
+    CCDigestDestroy(m);
+
+    return 0;
+}
+
+/**
+ *
+ * @ingroup ntlm_core
+ */
+
+int
+heim_ntlm_mppe_getasymmetricstartkey(const uint8_t MasterKey[16], uint8_t *MasterXKey, size_t len,
+				     int isSend, int isServer)
+{
+    const uint8_t *s =  (!!isSend) ^ (!!isSend) ? Magic2 : Magic3;
+
+    unsigned char res[CC_SHA1_DIGEST_LENGTH];
+    CCDigestRef m;
+
+    if (sizeof(res) < len)
+	return EINVAL;
+
+    m = CCDigestCreate(kCCDigestSHA1);
+    if (m == NULL)
+	return ENOMEM;
+
+    CCDigestUpdate(m, MasterKey, 16);
+    CCDigestUpdate(m, shapad1, sizeof(shapad1));
+    CCDigestUpdate(m, s, 84);
+    CCDigestUpdate(m, shapad2, sizeof(shapad2));
+    CCDigestFinal(m, res);
+    CCDigestDestroy(m);
+
+    memcpy(MasterXKey, res, len);
+
+    return 0;
+}
+
+int
+heim_ntlm_mppe_getsessionkey(const uint8_t ntlmHash[16],
+			     const uint8_t ntlmResponse[24],
+			     int isServer,
+			     size_t len, uint8_t *sendKey, uint8_t *recvKey)
+{
+    uint8_t hashHash[CC_MD4_DIGEST_LENGTH];
+    uint8_t masterKey[CC_SHA1_DIGEST_LENGTH];
+    int ret;
+ 
+    CC_MD4(ntlmHash, 16, hashHash);
+    ret = heim_ntlm_mppe_getmasterkey(hashHash, ntlmResponse, masterKey);
+    memset(hashHash, 0, sizeof(hashHash));
+    if (ret)
+	return ret;
+
+    ret = heim_ntlm_mppe_getasymmetricstartkey(masterKey, sendKey, len, TRUE, isServer);
+    if (ret == 0)
+	ret = heim_ntlm_mppe_getasymmetricstartkey(masterKey, recvKey, len, FALSE, isServer);
+    memset(masterKey, 0, sizeof(masterKey));
+    
+    return ret;
+}
+
+
+#endif /* ENABLE_NTLM */

@@ -248,6 +248,7 @@ krb5_string_to_key_derived(krb5_context context,
 			   krb5_enctype etype,
 			   krb5_keyblock *key)
 {
+#ifdef HEIM_KRB5_DES3
     struct _krb5_encryption_type *et = _krb5_find_enctype(etype);
     krb5_error_code ret;
     struct _krb5_key_data kd;
@@ -302,4 +303,10 @@ krb5_string_to_key_derived(krb5_context context,
     ret = krb5_copy_keyblock_contents(context, kd.key, key);
     _krb5_free_key_data(context, &kd, et);
     return ret;
+#else
+    krb5_set_error_message (context, KRB5_PROG_ETYPE_NOSUPP,
+			    N_("encryption type %d not supported", ""),
+			    etype);
+    return KRB5_PROG_ETYPE_NOSUPP;
+#endif
 }

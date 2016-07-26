@@ -90,7 +90,7 @@ static OM_uint32 inquire_sec_context_tkt_flags
     tkt_flags = TicketFlags2int(context_handle->ticket->ticket.flags);
     HEIMDAL_MUTEX_unlock(&context_handle->ctx_id_mutex);
 
-    _gsskrb5_encode_om_uint32(tkt_flags, buf);
+    _gss_mg_encode_le_uint32(tkt_flags, buf);
     value.length = sizeof(buf);
     value.value = buf;
 
@@ -133,10 +133,6 @@ static OM_uint32 inquire_sec_context_get_subkey
 	break;
     case TOKEN_KEY:
 	ret = _gsskrb5i_get_token_key(context_handle, context, &key);
-	break;
-    default:
-	_gsskrb5_set_status(EINVAL, "%d is not a valid subkey type", keytype);
-	ret = EINVAL;
 	break;
    }
     HEIMDAL_MUTEX_unlock(&context_handle->ctx_id_mutex);
@@ -241,6 +237,13 @@ static OM_uint32 inquire_sec_context_authz_data
 	return GSS_S_NO_CONTEXT;
     }
 
+    if (ad_type == KRB5_AUTHDATA_WIN2K_PAC && (context_handle->more_flags & PAC_VALID) == 0){
+	HEIMDAL_MUTEX_unlock(&context_handle->ctx_id_mutex);
+	*minor_status = EINVAL;
+	_gsskrb5_set_status(HEIM_PAC_NOT_VALID, "pac not valid");
+	return GSS_S_NO_CONTEXT;
+    }
+
     ret = krb5_ticket_get_authorization_data_type(context,
 						  context_handle->ticket,
 						  ad_type,
@@ -333,7 +336,7 @@ export_lucid_sec_context_v1(OM_uint32 *minor_status,
     if (ret) goto out;
     ret = krb5_store_int32(sp, (context_handle->more_flags & LOCAL) ? 1 : 0);
     if (ret) goto out;
-    ret = krb5_store_int32(sp, context_handle->lifetime);
+    ret = krb5_store_int32(sp, (int32_t)context_handle->endtime);
     if (ret) goto out;
     krb5_auth_con_getlocalseqnumber (context,
 				     context_handle->auth_context,
@@ -388,7 +391,7 @@ export_lucid_sec_context_v1(OM_uint32 *minor_status,
 	ret = krb5_store_keyblock(sp, *key);
 	if (ret) goto out;
     } else {
-	int subkey_p = (context_handle->more_flags & ACCEPTOR_SUBKEY) ? 1 : 0;
+	int subkey_p = (context_handle->gk5c.flags & GK5C_ACCEPTOR_SUBKEY) ? 1 : 0;
 
 	/* have_acceptor_subkey */
 	ret = krb5_store_int32(sp, subkey_p);
@@ -448,17 +451,45 @@ get_authtime(OM_uint32 *minor_status,
 	return GSS_S_FAILURE;
     }
 
-    authtime = ctx->ticket->ticket.authtime;
+    authtime = (OM_uint32)ctx->ticket->ticket.authtime;
 
     HEIMDAL_MUTEX_unlock(&ctx->ctx_id_mutex);
 
-    _gsskrb5_encode_om_uint32(authtime, buf);
+    _gss_mg_encode_le_uint32(authtime, buf);
     value.length = sizeof(buf);
     value.value = buf;
 
     return gss_add_buffer_set_member(minor_status,
 				     &value,
 				     data_set);
+}
+
+static OM_uint32
+get_pfs_status(OM_uint32 *minor_status,
+	       gsskrb5_ctx ctx,
+	       gss_buffer_set_t *data_set)
+
+{
+    gss_buffer_desc value;
+    unsigned char buf[4];
+    int usingPFS;
+
+    HEIMDAL_MUTEX_lock(&ctx->ctx_id_mutex);
+    usingPFS = (ctx->auth_context != NULL) &&
+	(ctx->auth_context->flags & KRB5_AUTH_CONTEXT_USED_PFS);
+    HEIMDAL_MUTEX_unlock(&ctx->ctx_id_mutex);
+
+    if (!usingPFS) {
+	_gsskrb5_set_status(EINVAL, "No auth_context or PFS");
+	*minor_status = EINVAL;
+	return GSS_S_FAILURE;
+    }
+
+    _gss_mg_encode_le_uint32(1, buf);
+    value.length = sizeof(buf);
+    value.value = buf;
+
+    return gss_add_buffer_set_member(minor_status, &value, data_set);
 }
 
 
@@ -523,6 +554,7 @@ out:
     }
     return maj_stat;
 }
+
 /*
  *
  */
@@ -577,6 +609,8 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_inquire_sec_context_by_oid
                                                         data_set);
     } else if (gss_oid_equal(desired_object, GSS_KRB5_GET_AUTHTIME_X)) {
 	return get_authtime(minor_status, ctx, data_set);
+    } else if (gss_oid_equal(desired_object, GSS_C_CTX_PFS_X)) {
+	return get_pfs_status(minor_status, ctx, data_set);
     } else if (oid_prefix_equal(desired_object,
 				GSS_KRB5_EXTRACT_AUTHZ_DATA_FROM_SEC_CONTEXT_X,
 				&suffix)) {

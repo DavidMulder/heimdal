@@ -58,7 +58,7 @@
 #include "roken.h"
 
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
-get_window_size(int fd, int *lines, int *columns)
+rk_get_window_size(int fd, int *lines, int *columns)
 {
     char *s;
 

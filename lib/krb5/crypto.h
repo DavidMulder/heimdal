@@ -42,11 +42,25 @@ struct _krb5_key_data {
 
 struct _krb5_key_usage;
 
+/*
+ * Locking rules for krb5_crypto are the following:
+ *
+ * all data are immutable once the lock is dropped
+ *
+ * When adding a setting up a new usage or keydata or the assosiated
+ * schedule the lock must be held, after the data is initialized, it
+ * can be assumed to be valid until krb5_crypto_destroy()
+ *
+ * Changing the values of keys are thus not allowed after
+ * krb5_crypto_init() have completed.
+ */
+
 struct krb5_crypto_data {
     struct _krb5_encryption_type *et;
     struct _krb5_key_data key;
     int num_key_usage;
-    struct _krb5_key_usage *key_usage;
+    struct _krb5_key_usage **key_usage;
+    HEIMDAL_MUTEX mutex;
 };
 
 #define CRYPTO_ETYPE(C) ((C)->et->type)
@@ -177,3 +191,11 @@ struct _krb5_evp_schedule {
     EVP_CIPHER_CTX ectx;
     EVP_CIPHER_CTX dctx;
 };
+
+struct _krb5_etypes_deprected {
+    krb5_enctype type;
+    const char *name;
+};
+
+extern struct _krb5_etypes_deprected _krb5_deprecated_etypes[];
+extern int _krb5_num_deprecated_etypes;

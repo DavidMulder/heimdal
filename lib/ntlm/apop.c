@@ -55,7 +55,7 @@ heim_generate_challenge(const char *hostname)
 	hostname = host;
     }
 
-    t = time(NULL);
+    t = (uint32_t)time(NULL);
     num = rk_random();
 
     asprintf(&str, "<%lu%lu@%s>", (unsigned long)t,
@@ -72,8 +72,8 @@ heim_apop_create(const char *challenge, const char *password)
     CC_MD5_CTX ctx;
 
     CC_MD5_Init(&ctx);
-    CC_MD5_Update(&ctx, challenge, strlen(challenge));
-    CC_MD5_Update(&ctx, password, strlen(password));
+    CC_MD5_Update(&ctx, challenge, (CC_LONG)strlen(challenge));
+    CC_MD5_Update(&ctx, password, (CC_LONG)strlen(password));
 
     CC_MD5_Final(hash, &ctx);
 
@@ -102,7 +102,7 @@ heim_apop_verify(const char *challenge, const char *password, const char *respon
     return 0;
 }
 
-struct heim_cram_md5 {
+struct heim_cram_md5_data {
     CC_MD5_CTX ipad;
     CC_MD5_CTX opad;
 };
@@ -114,13 +114,13 @@ heim_cram_md5_export(const char *password, heim_CRAM_MD5_STATE *state)
     size_t keylen = strlen(password);
     uint8_t key[CC_MD5_BLOCK_BYTES];
     uint8_t pad[CC_MD5_BLOCK_BYTES];
-    struct heim_cram_md5 ctx;
+    struct heim_cram_md5_data ctx;
     size_t n;
 
     memset(&ctx, 0, sizeof(ctx));
 
     if (keylen > CC_MD5_BLOCK_BYTES) {
-	CC_MD5(password, keylen, key);
+	CC_MD5(password, (CC_LONG)keylen, key);
 	keylen = sizeof(keylen);
     } else {
 	memcpy(key, password, keylen);
@@ -163,7 +163,6 @@ heim_cram_md5_import(void *data, size_t len)
 {
     heim_CRAM_MD5_STATE state;
     heim_cram_md5 ctx;
-    unsigned n;
 
     if (len != sizeof(state))
 	return NULL;
@@ -198,7 +197,7 @@ heim_cram_md5_verify_ctx(heim_cram_md5 ctx, const char *challenge, const char *r
     char *str = NULL;
     int res;
 
-    CC_MD5_Update(&ctx->ipad, challenge, strlen(challenge));
+    CC_MD5_Update(&ctx->ipad, challenge, (CC_LONG)strlen(challenge));
     CC_MD5_Final(hash, &ctx->ipad);
 
     CC_MD5_Update(&ctx->opad, hash, sizeof(hash));

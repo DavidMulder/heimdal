@@ -9,4 +9,9 @@ GSSAPIContextToken ::= [APPLICATION 0] IMPLICIT SEQUENCE {
 	innerContextToken heim_any_set
 }
 
+IAKERB-HEADER ::= SEQUENCE {
+	target-realm	[1] UTF8String,
+	cookie		[2] OCTET STRING OPTIONAL
+}
+
 END

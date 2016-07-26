@@ -38,8 +38,11 @@
 
 /* symbol renaming */
 #define UI_UTIL_read_pw_string hc_UI_UTIL_read_pw_string
+#define UI_UTIL_read_pw_string_stdio hc_UI_UTIL_read_pw_string_stdio
 
-int	UI_UTIL_read_pw_string(char *, int, const char *, int); /* XXX */
+int	UI_UTIL_read_pw_string(char *, int, const char *, int);
+/* dont use apple specific */
+int	UI_UTIL_read_pw_string_stdio(char *, int, const char *, int);
 
 #endif /* _HEIM_UI_H */
 

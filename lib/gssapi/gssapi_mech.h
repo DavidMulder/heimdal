@@ -2,6 +2,8 @@
  * Copyright (c) 2005 Doug Rabson
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -30,6 +32,9 @@
 #define GSSAPI_MECH_H 1
 
 #include <gssapi.h>
+
+struct _gss_name;
+struct _gss_cred;
 
 typedef OM_uint32 GSSAPI_CALLCONV _gss_acquire_cred_t
 	      (OM_uint32 *,            /* minor_status */
@@ -163,7 +168,7 @@ typedef OM_uint32 GSSAPI_CALLCONV _gss_display_name_t
 typedef OM_uint32 GSSAPI_CALLCONV _gss_import_name_t
 	      (OM_uint32 *,            /* minor_status */
 	       const gss_buffer_t,     /* input_name_buffer */
-	       const gss_OID,          /* input_name_type */
+	       gss_const_OID,          /* input_name_type */
 	       gss_name_t *            /* output_name */
 	      );
 
@@ -246,7 +251,7 @@ typedef OM_uint32 GSSAPI_CALLCONV _gss_import_sec_context_t (
 
 typedef OM_uint32 GSSAPI_CALLCONV _gss_inquire_names_for_mech_t (
 	       OM_uint32 *,            /* minor_status */
-	       const gss_OID,          /* mechanism */
+	       gss_const_OID,          /* mechanism */
 	       gss_OID_set *           /* name_types */
 	      );
 
@@ -353,6 +358,15 @@ _gss_import_cred_t(OM_uint32 * minor_status,
 		   gss_buffer_t cred_token,
 		   gss_cred_id_t * cred_handle);
 
+typedef OM_uint32
+_gss_acquire_cred_ex_t(gss_status_id_t /* status */,
+		       const gss_name_t /* desired_name */,
+		       OM_uint32 /* flags */,
+		       OM_uint32 /* time_req */,
+		       gss_cred_usage_t /* cred_usage */,
+		       gss_auth_identity_t /* identity */,
+		       void * /* ctx */,
+		       void (* /*complete */)(void *, OM_uint32, gss_status_id_t, gss_cred_id_t, OM_uint32));
 
 typedef OM_uint32 GSSAPI_CALLCONV
 _gss_acquire_cred_ext_t(OM_uint32 * /*minor_status */,
@@ -439,17 +453,24 @@ typedef OM_uint32 GSSAPI_CALLCONV _gss_export_name_composite_t (
 	       gss_buffer_t           /* exp_composite_name */
 	    );
 
+typedef OM_uint32 GSSAPI_CALLCONV _gss_aapl_change_password_t(
+		OM_uint32 *,	      /* minor_status */
+		gss_name_t,	      /* name */
+		const char *,	      /* oldpw */
+		const char *	      /* newpw */
+	    );
+
 /*
  *
  */
 
-typedef struct gss_mo_desc_struct gss_mo_desc;
+typedef struct gss_mo_desc gss_mo_desc;
 
 typedef OM_uint32 GSSAPI_CALLCONV
 _gss_mo_init (OM_uint32 *, gss_OID, gss_mo_desc **, size_t *);
 
 
-struct gss_mo_desc_struct {
+struct gss_mo_desc {
     gss_OID option;
     OM_uint32 flags;
 #define GSS_MO_MA		1
@@ -545,20 +566,26 @@ typedef struct gssapi_mech_interface_desc {
         _gss_delete_name_attribute_t    *gm_delete_name_attribute;
         _gss_export_name_composite_t    *gm_export_name_composite;
         struct gss_mech_compat_desc_struct  *gm_compat;
+	_gss_aapl_change_password_t	*gm_aapl_change_password;
 } gssapi_mech_interface_desc, *gssapi_mech_interface;
 
-gssapi_mech_interface
+__nullable gssapi_mech_interface
 __gss_get_mechanism(gss_const_OID /* oid */);
 
-gssapi_mech_interface __gss_spnego_initialize(void);
-gssapi_mech_interface __gss_krb5_initialize(void);
-gssapi_mech_interface __gss_ntlm_initialize(void);
+__nullable gssapi_mech_interface __gss_spnego_initialize(void);
+__nullable gssapi_mech_interface __gss_krb5_initialize(void);
+__nullable gssapi_mech_interface __gss_pku2u_initialize(void);
+__nullable gssapi_mech_interface __gss_iakerb_initialize(void);
+__nullable gssapi_mech_interface __gss_ntlm_initialize(void);
+__nullable gssapi_mech_interface __gss_scram_initialize(void);
+__nullable gssapi_mech_interface __gss_netlogon_initialize(void);
 
-void		gss_mg_collect_error(gss_OID, OM_uint32, OM_uint32);
 
-int _gss_mo_get_option_1(gss_const_OID, gss_mo_desc *, gss_buffer_t);
-int _gss_mo_get_option_0(gss_const_OID, gss_mo_desc *, gss_buffer_t);
-int _gss_mo_get_ctx_as_string(gss_const_OID, gss_mo_desc *, gss_buffer_t);
+struct _gss_name_type {
+    gss_OID	gnt_name_type;
+    OM_uint32	(*gnt_parse)(OM_uint32 *, gss_const_OID, const gss_buffer_t,
+			     gss_const_OID, gss_name_t *);
+};
 
 struct _gss_oid_name_table {
     gss_OID oid;
@@ -580,15 +607,17 @@ extern gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_cred_password_oid_desc;
 extern gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_cred_certificate_oid_desc;
 #define GSS_C_CRED_CERTIFICATE (&__gss_c_cred_certificate_oid_desc)
 
-OM_uint32 _gss_acquire_cred_ext
-           (OM_uint32 * /*minor_status*/,
-            const gss_name_t /*desired_name*/,
-            gss_const_OID /*credential_type*/,
-            const void * /*credential_data*/,
-            OM_uint32 /*time_req*/,
-            gss_const_OID /*desired_mech*/,
-            gss_cred_usage_t /*cred_usage*/,
-            gss_cred_id_t * /*output_cred_handle*/
-           );
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+
+__nullable CFTypeRef
+_gss_mg_copy_key(__nonnull CFStringRef domain, __nonnull CFStringRef key);
+
+__nullable CFErrorRef
+_gss_mg_cferror(OM_uint32 major,
+		OM_uint32 minor,
+		__nullable gss_const_OID mech);
+
+#endif /* __APPLE__ */
 
 #endif /* GSSAPI_MECH_H */

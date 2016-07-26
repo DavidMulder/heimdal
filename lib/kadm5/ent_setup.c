@@ -113,10 +113,11 @@ perform_tl_data(krb5_context context,
 }
 
 static void
-default_flags(hdb_entry_ex *ent, int server)
+default_flags(hdb_entry_ex *ent)
 {
+    memset(&ent->entry.flags, 0, sizeof(ent->entry.flags));
     ent->entry.flags.client      = 1;
-    ent->entry.flags.server      = !!server;
+    ent->entry.flags.server      = 1;
     ent->entry.flags.forwardable = 1;
     ent->entry.flags.proxiable   = 1;
     ent->entry.flags.renewable   = 1;
@@ -160,19 +161,20 @@ _kadm5_setup_entry(kadm5_server_context *context,
 	    attr_to_flags(def->attributes, &ent->entry.flags);
 	    ent->entry.flags.invalid = 0;
 	} else {
-	    default_flags(ent, 1);
-	}
+	    default_flags(ent);
     }
+    } else
+	default_flags(ent);
 
     if(mask & KADM5_MAX_LIFE) {
 	if(princ_mask & KADM5_MAX_LIFE) {
 	    if(princ->max_life)
-	      set_value(ent->entry.max_life, princ->max_life);
+	      set_value(ent->entry.max_life, (unsigned int)princ->max_life);
 	    else
 	      set_null(ent->entry.max_life);
 	} else if(def_mask & KADM5_MAX_LIFE) {
 	    if(def->max_life)
-	      set_value(ent->entry.max_life, def->max_life);
+	      set_value(ent->entry.max_life, (unsigned int)def->max_life);
 	    else
 	      set_null(ent->entry.max_life);
 	}
@@ -189,12 +191,12 @@ _kadm5_setup_entry(kadm5_server_context *context,
     if(mask & KADM5_MAX_RLIFE) {
 	if(princ_mask & KADM5_MAX_RLIFE) {
 	  if(princ->max_renewable_life)
-	    set_value(ent->entry.max_renew, princ->max_renewable_life);
+	    set_value(ent->entry.max_renew, (unsigned int)princ->max_renewable_life);
 	  else
 	    set_null(ent->entry.max_renew);
 	} else if(def_mask & KADM5_MAX_RLIFE) {
 	  if(def->max_renewable_life)
-	    set_value(ent->entry.max_renew, def->max_renewable_life);
+	    set_value(ent->entry.max_renew, (unsigned int)def->max_renewable_life);
 	  else
 	    set_null(ent->entry.max_renew);
 	}

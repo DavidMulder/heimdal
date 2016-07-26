@@ -48,7 +48,7 @@ typedef enum kcm_operation {
     KCM_OP_NOOP,
     KCM_OP_GET_NAME,
     KCM_OP_RESOLVE,
-    KCM_OP_GEN_NEW,
+    KCM_OP_DEPRECATED_GEN_NEW,
     KCM_OP_INITIALIZE,
     KCM_OP_DESTROY,
     KCM_OP_STORE,
@@ -69,21 +69,49 @@ typedef enum kcm_operation {
     KCM_OP_SET_DEFAULT_CACHE,
     KCM_OP_GET_KDC_OFFSET,
     KCM_OP_SET_KDC_OFFSET,
+    KCM_OP_RETAIN_KCRED,
+    KCM_OP_RELEASE_KCRED,
+    KCM_OP_GET_UUID,
     /* NTLM operations */
     KCM_OP_ADD_NTLM_CRED,
     KCM_OP_HAVE_NTLM_CRED,
-    KCM_OP_DEL_NTLM_CRED,
+    KCM_OP_ADD_NTLM_CHALLENGE,
     KCM_OP_DO_NTLM_AUTH,
     KCM_OP_GET_NTLM_USER_LIST,
+    /* SCRAM */
+    KCM_OP_ADD_SCRAM_CRED,
+    KCM_OP_HAVE_SCRAM_CRED,
+    KCM_OP_DEL_SCRAM_CRED,
+    KCM_OP_DO_SCRAM_AUTH,
+    KCM_OP_GET_SCRAM_USER_LIST,
+    /* GENERIC */
+    KCM_OP_DESTROY_CRED,
+    KCM_OP_RETAIN_CRED,
+    KCM_OP_RELEASE_CRED,
+    KCM_OP_CRED_LABEL_GET,
+    KCM_OP_CRED_LABEL_SET,
+    /* */
+    KCM_OP_CHECK_NTLM_CHALLENGE,
     KCM_OP_MAX
 } kcm_operation;
 
 #define _PATH_KCM_SOCKET      "/var/run/.kcm_socket"
 #define _PATH_KCM_DOOR      "/var/run/.kcm_door"
 
-#define KCM_NTLM_FLAG_SESSIONKEY 1
-#define KCM_NTLM_FLAG_NTLM2_SESSION 2
-#define KCM_NTLM_FLAG_KEYEX 4
+#define KRB5_KCM_NOTIFY_CACHE_CHANGED "com.apple.Kerberos.cache.changed"
+
+/* notification name used on MacOS X */
+#define kCCAPICacheCollectionChangedNotification "CCAPICacheCollectionChangedNotification"
+#define kCCAPICCacheChangedNotification "CCAPICCacheChangedNotification"
+
+
+#define KCM_STATUS_KEY			"kcm-status"
+#define KCM_STATUS_ACQUIRE_START	0
+#define KCM_STATUS_ACQUIRE_SUCCESS	1
+#define KCM_STATUS_ACQUIRE_FAILED	2
+#define KCM_STATUS_ACQUIRE_STOPPED	3
+
+
 #define KCM_NTLM_FLAG_AV_GUEST 8
 
 #endif /* __KCM_H__ */

@@ -31,15 +31,15 @@
 #include "mech_locl.h"
 
 OM_uint32
-_gss_acquire_mech_cred(OM_uint32 *minor_status,
-		       gssapi_mech_interface m,
-		       const struct _gss_mechanism_name *mn,
-		       gss_const_OID credential_type,
-		       const void *credential_data,
+_gss_acquire_mech_cred(OM_uint32 *__nonnull minor_status,
+		       struct gssapi_mech_interface_desc *__nonnull m,
+		       const struct _gss_mechanism_name *__nullable mn,
+		       __nullable gss_const_OID credential_type,
+		       const void *__nullable credential_data,
 		       OM_uint32 time_req,
-		       gss_const_OID desired_mech,
+		       gss_const_OID __nullable desired_mech,
 		       gss_cred_usage_t cred_usage,
-		       struct _gss_mechanism_cred **output_cred_handle)
+		       struct _gss_mechanism_cred *__nonnull* __nullable output_cred_handle)
 {
     OM_uint32 major_status;
     struct _gss_mechanism_cred *mc;
@@ -61,13 +61,16 @@ _gss_acquire_mech_cred(OM_uint32 *minor_status,
 
     if (m->gm_acquire_cred_ext) {
 	major_status = m->gm_acquire_cred_ext(minor_status,
-					      mn->gmn_name,
+					      mn ? mn->gmn_name : NULL,
 					      credential_type,
 					      credential_data,
 					      time_req,
 					      mc->gmc_mech_oid,
 					      cred_usage,
 					      &mc->gmc_cred);
+	if (major_status)
+	    _gss_mg_error(m, *minor_status);
+
     } else if (gss_oid_equal(credential_type, GSS_C_CRED_PASSWORD) &&
 		m->gm_compat &&
 		m->gm_compat->gmc_acquire_cred_with_password) {
@@ -77,7 +80,7 @@ _gss_acquire_mech_cred(OM_uint32 *minor_status,
 	 */
 
 	major_status = m->gm_compat->gmc_acquire_cred_with_password(minor_status,
-				mn->gmn_name,
+				mn ? mn->gmn_name : NULL,
 				(const gss_buffer_t)credential_data,
 				time_req,
 				&set2,
@@ -85,15 +88,21 @@ _gss_acquire_mech_cred(OM_uint32 *minor_status,
 				&mc->gmc_cred,
 				NULL,
 				NULL);
+	if (major_status)
+	    _gss_mg_error(m, *minor_status);
+
     } else if (credential_type == GSS_C_NO_OID) {
 	major_status = m->gm_acquire_cred(minor_status,
-					  mn->gmn_name,
+					  mn ? mn->gmn_name : NULL,
 					  time_req,
 					  &set2,
 					  cred_usage,
 					  &mc->gmc_cred,
 					  NULL,
 					  NULL);
+	if (major_status)
+	    _gss_mg_error(m, *minor_status);
+
     } else {
 	major_status = GSS_S_UNAVAILABLE;
 	free(mc);
@@ -105,14 +114,14 @@ _gss_acquire_mech_cred(OM_uint32 *minor_status,
 }
 
 OM_uint32
-_gss_acquire_cred_ext(OM_uint32 *minor_status,
-    const gss_name_t desired_name,
-    gss_const_OID credential_type,
-    const void *credential_data,
+gss_acquire_cred_ext(OM_uint32 *__nonnull minor_status,
+    __nonnull const gss_name_t desired_name,
+    __nonnull gss_const_OID credential_type,
+    const void *__nonnull credential_data,
     OM_uint32 time_req,
-    gss_const_OID desired_mech,
+    __nullable gss_const_OID desired_mech,
     gss_cred_usage_t cred_usage,
-    gss_cred_id_t *output_cred_handle)
+    __nonnull gss_cred_id_t *__nullable output_cred_handle)
 {
     OM_uint32 major_status;
     struct _gss_name *name = (struct _gss_name *) desired_name;
@@ -141,27 +150,33 @@ _gss_acquire_cred_ext(OM_uint32 *minor_status,
     } else
 	mechs = _gss_mech_oids;
 
-    cred = calloc(1, sizeof(*cred));
+    cred = _gss_mg_alloc_cred();
     if (cred == NULL) {
 	*minor_status = ENOMEM;
 	return GSS_S_FAILURE;
     }
 
-    HEIM_SLIST_INIT(&cred->gc_mc);
+    /*
+     * Return if no credential is created
+     */
+
+    major_status = GSS_S_NO_CRED;
+    *minor_status = 0;
 
     for (i = 0; i < mechs->count; i++) {
 	struct _gss_mechanism_name *mn = NULL;
 	struct _gss_mechanism_cred *mc = NULL;
 	gss_name_t desired_mech_name = GSS_C_NO_NAME;
+	OM_uint32 major2, junk;
 
 	m = __gss_get_mechanism(&mechs->elements[i]);
 	if (!m)
 	    continue;
 
 	if (desired_name != GSS_C_NO_NAME) {
-	    major_status = _gss_find_mn(minor_status, name,
+	    major2 = _gss_find_mn(&junk, name,
 					&mechs->elements[i], &mn);
-	    if (major_status != GSS_S_COMPLETE)
+	    if (major2 != GSS_S_COMPLETE)
 		continue;
 
 	    desired_mech_name = mn->gmn_name;
@@ -179,12 +194,11 @@ _gss_acquire_cred_ext(OM_uint32 *minor_status,
 
     /*
      * If we didn't manage to create a single credential, return
-     * an error.
+     * the last mech's error.
      */
     if (!HEIM_SLIST_FIRST(&cred->gc_mc)) {
 	free(cred);
-	*minor_status = 0;
-	return GSS_S_NO_CRED;
+	return major_status;
     }
 
     *output_cred_handle = (gss_cred_id_t) cred;

@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2010 Kungliga Tekniska Högskolan
+ * Copyright (c) 2010 - 2011 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
- * Portions Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Portions Copyright (c) 2010 - 2011 Apple Inc. All rights reserved.
  * Portions Copyright (c) 2010 PADL Software Pty Ltd. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -35,29 +35,84 @@
  */
 
 #include "mech_locl.h"
+#include <CoreFoundation/CoreFoundation.h>
+#include <krb5.h>
 
 #include <crypto-headers.h>
 
 static int
-get_option_def(int def, gss_const_OID mech, gss_mo_desc *mo, gss_buffer_t value)
+get_option_def(int def, gss_const_OID mech, struct gss_mo_desc *mo, gss_buffer_t value)
 {
+#ifdef __APPLE__
+    CFStringRef domain, key;
+    CFPropertyListRef val = NULL;
+    const char *name;
+
+    name = gss_oid_to_name(mech);
+
+    domain = CFStringCreateWithFormat(NULL, 0, CFSTR("com.apple.GSS.%s"), name);
+    if (domain == NULL)
+	return def;
+    key = CFStringCreateWithCString(NULL, mo->name,  kCFStringEncodingUTF8);
+    if (key == NULL) {
+	CFRelease(domain);
+	return def;
+    }
+    
+    val = _gss_mg_copy_key(domain, key);
+    CFRelease(domain);
+    CFRelease(key);
+    if (val == NULL)
+	return def;
+
+    if (CFGetTypeID(val) == CFBooleanGetTypeID()) {
+	def = CFBooleanGetValue((CFBooleanRef)val);
+    } else if (CFGetTypeID(val) == CFNumberGetTypeID()) {
+	CFNumberGetValue((CFNumberRef)val, kCFNumberIntType, &def);
+    } else if (CFGetTypeID(val) == CFDictionaryGetTypeID()) {
+	CFDictionaryRef dict = (CFDictionaryRef)val;
+	CFBooleanRef enable = (CFBooleanRef)CFDictionaryGetValue(dict, CFSTR("enable"));
+	CFDataRef data = (CFDataRef)CFDictionaryGetValue(dict, CFSTR("data"));
+	
+	if (enable && CFGetTypeID(enable) == CFBooleanGetTypeID())
+	    def = CFBooleanGetValue(enable);
+	else if (enable && CFGetTypeID(enable) == CFNumberGetTypeID())
+	    CFNumberGetValue((CFNumberRef)val, kCFNumberIntType, &def);
+
+	if (data && CFGetTypeID(data) == CFDataGetTypeID()) {
+	    value->value = malloc(CFDataGetLength(data));
+	    if (value->value != NULL) {
+		memcpy(value->value, CFDataGetBytePtr(data), value->length);
+		value->length = CFDataGetLength(data);
+	    }
+	}
+    }
+
+    CFRelease(val);
+#endif
     return def;
 }
 
 int
-_gss_mo_get_option_1(gss_const_OID mech, gss_mo_desc *mo, gss_buffer_t value)
+_gss_mo_get_option_1(__nonnull gss_const_OID mech,
+		     struct gss_mo_desc *__nonnull mo,
+		     __nonnull gss_buffer_t value)
 {
     return get_option_def(1, mech, mo, value);
 }
 
 int
-_gss_mo_get_option_0(gss_const_OID mech, gss_mo_desc *mo, gss_buffer_t value)
+_gss_mo_get_option_0(__nonnull gss_const_OID mech,
+		     struct gss_mo_desc *__nonnull mo,
+		     __nonnull gss_buffer_t value)
 {
     return get_option_def(0, mech, mo, value);
 }
 
 int
-_gss_mo_get_ctx_as_string(gss_const_OID mech, gss_mo_desc *mo, gss_buffer_t value)
+_gss_mo_get_ctx_as_string(__nonnull gss_const_OID mech,
+			  struct gss_mo_desc *__nonnull mo,
+			  __nullable gss_buffer_t value)
 {
     if (value) {
 	value->value = strdup((char *)mo->ctx);
@@ -69,8 +124,10 @@ _gss_mo_get_ctx_as_string(gss_const_OID mech, gss_mo_desc *mo, gss_buffer_t valu
 }
 
 GSSAPI_LIB_FUNCTION int GSSAPI_LIB_CALL
-gss_mo_set(gss_const_OID mech, gss_const_OID option,
-	   int enable, gss_buffer_t value)
+gss_mo_set(__nonnull gss_const_OID mech,
+	   __nonnull gss_const_OID option,
+	   int enable,
+	   __nullable gss_buffer_t value)
 {
     gssapi_mech_interface m;
     size_t n;
@@ -81,17 +138,22 @@ gss_mo_set(gss_const_OID mech, gss_const_OID option,
     for (n = 0; n < m->gm_mo_num; n++)
 	if (gss_oid_equal(option, m->gm_mo[n].option) && m->gm_mo[n].set)
 	    return m->gm_mo[n].set(mech, &m->gm_mo[n], enable, value);
-
-    return GSS_S_UNAVAILABLE;
+    return 0;
 }
 
 GSSAPI_LIB_FUNCTION int GSSAPI_LIB_CALL
-gss_mo_get(gss_const_OID mech, gss_const_OID option, gss_buffer_t value)
+gss_mo_get(__nonnull gss_const_OID mech,
+	   __nonnull gss_const_OID option,
+	   __nullable gss_buffer_t value)
 {
     gssapi_mech_interface m;
     size_t n;
 
+    if (value)
     _mg_buffer_zero(value);
+
+    if ((m = __gss_get_mechanism(mech)) == NULL)
+	return 0;
 
     if ((m = __gss_get_mechanism(mech)) == NULL)
 	return GSS_S_BAD_MECH;
@@ -100,7 +162,7 @@ gss_mo_get(gss_const_OID mech, gss_const_OID option, gss_buffer_t value)
 	if (gss_oid_equal(option, m->gm_mo[n].option) && m->gm_mo[n].get)
 	    return m->gm_mo[n].get(mech, &m->gm_mo[n], value);
 
-    return GSS_S_UNAVAILABLE;
+    return 0;
 }
 
 static void
@@ -115,7 +177,8 @@ add_all_mo(gssapi_mech_interface m, gss_OID_set *options, OM_uint32 mask)
 }
 
 GSSAPI_LIB_FUNCTION void GSSAPI_LIB_CALL
-gss_mo_list(gss_const_OID mech, gss_OID_set *options)
+gss_mo_list(__nonnull gss_const_OID mech,
+	    __nonnull gss_OID_set *__nullable options)
 {
     gssapi_mech_interface m;
     OM_uint32 major, minor;
@@ -136,7 +199,9 @@ gss_mo_list(gss_const_OID mech, gss_OID_set *options)
 }
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_mo_name(gss_const_OID mech, gss_const_OID option, gss_buffer_t name)
+gss_mo_name(__nonnull gss_const_OID mech,
+	    __nonnull gss_const_OID option,
+	    __nonnull gss_buffer_t name)
 {
     gssapi_mech_interface m;
     size_t n;
@@ -188,7 +253,7 @@ static char basis_32[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 static OM_uint32
 make_sasl_name(OM_uint32 *minor, const gss_OID mech, char sasl_name[16])
 {
-    EVP_MD_CTX *ctx;
+    CCDigestRef ctx;
     char *p = sasl_name;
     u_char hdr[2], hash[20], *h = hash;
 
@@ -198,11 +263,11 @@ make_sasl_name(OM_uint32 *minor, const gss_OID mech, char sasl_name[16])
     hdr[0] = 0x06;
     hdr[1] = mech->length;
 
-    ctx = EVP_MD_CTX_create();
-    EVP_DigestInit_ex(ctx, EVP_sha1(), NULL);
-    EVP_DigestUpdate(ctx, hdr, 2);
-    EVP_DigestUpdate(ctx, mech->elements, mech->length);
-    EVP_DigestFinal_ex(ctx, hash, NULL);
+    ctx = CCDigestCreate(kCCDigestSHA1);
+    CCDigestUpdate(ctx, hdr, 2);
+    CCDigestUpdate(ctx, mech->elements, mech->length);
+    CCDigestFinal(ctx, hash);
+    CCDigestDestroy(ctx);
 
     memcpy(p, "GS2-", 4);
     p += 4;
@@ -272,11 +337,11 @@ inquire_saslname_for_mech_compat(OM_uint32 *minor,
  */
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_inquire_saslname_for_mech(OM_uint32 *minor_status,
-			      const gss_OID desired_mech,
-			      gss_buffer_t sasl_mech_name,
-			      gss_buffer_t mech_name,
-			      gss_buffer_t mech_description)
+gss_inquire_saslname_for_mech(OM_uint32 *__nonnull minor_status,
+			      __nonnull const gss_OID desired_mech,
+			      __nullable gss_buffer_t sasl_mech_name,
+			      __nullable gss_buffer_t mech_name,
+			      __nullable gss_buffer_t mech_description)
 {
     OM_uint32 major;
 
@@ -332,16 +397,16 @@ gss_inquire_saslname_for_mech(OM_uint32 *minor_status,
  * Find a mech for a sasl name
  *
  * @param minor_status minor status code
- * @param sasl_mech_name
- * @param mech_type
+ * @param sasl_mech_name sasl mech name
+ * @param mech_type mech type
  *
  * @return returns GSS_S_COMPLETE or an error code.
  */
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_inquire_mech_for_saslname(OM_uint32 *minor_status,
-			      const gss_buffer_t sasl_mech_name,
-			      gss_OID *mech_type)
+gss_inquire_mech_for_saslname(OM_uint32 *__nonnull minor_status,
+			      __nullable const gss_buffer_t sasl_mech_name,
+			      __nullable gss_OID *__nullable mech_type)
 {
     struct _gss_mech_switch *m;
     gss_buffer_desc name;
@@ -433,21 +498,15 @@ test_mech_attrs(gssapi_mech_interface mi,
 /**
  * Return set of mechanism that fullfill the criteria
  *
- * @param minor_status minor status code
- * @param desired_mech_attrs
- * @param except_mech_attrs
- * @param critical_mech_attrs
- * @param mechs returned mechs, free with gss_release_oid_set().
- *
  * @return returns GSS_S_COMPLETE or an error code.
  */
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_indicate_mechs_by_attrs(OM_uint32 * minor_status,
-			    gss_const_OID_set desired_mech_attrs,
-			    gss_const_OID_set except_mech_attrs,
-			    gss_const_OID_set critical_mech_attrs,
-			    gss_OID_set *mechs)
+gss_indicate_mechs_by_attrs(OM_uint32 * __nonnull minor_status,
+			    __nullable gss_const_OID_set desired_mech_attrs,
+			    __nullable gss_const_OID_set except_mech_attrs,
+			    __nullable gss_const_OID_set critical_mech_attrs,
+			    __nonnull gss_OID_set * __nullable mechs)
 {
     struct _gss_mech_switch *ms;
     gss_OID_set mech_attrs = GSS_C_NO_OID_SET;
@@ -510,10 +569,10 @@ gss_indicate_mechs_by_attrs(OM_uint32 * minor_status,
  */
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_inquire_attrs_for_mech(OM_uint32 * minor_status,
-			   gss_const_OID mech,
-			   gss_OID_set *mech_attr,
-			   gss_OID_set *known_mech_attrs)
+gss_inquire_attrs_for_mech(OM_uint32 * __nonnull minor_status,
+			   __nonnull gss_const_OID mech,
+			   __nullable gss_OID_set *__nullable mech_attr,
+			   __nullable gss_OID_set *__nullable known_mech_attrs)
 {
     OM_uint32 major, junk;
 
@@ -571,20 +630,20 @@ gss_inquire_attrs_for_mech(OM_uint32 * minor_status,
  * Return names and descriptions of mech attributes
  *
  * @param minor_status minor status code
- * @param mech_attr
- * @param name
- * @param short_desc
- * @param long_desc
+ * @param mech_attr attributes wanted
+ * @param name name of attribute
+ * @param short_desc short description
+ * @param long_desc long description
  *
  * @return returns GSS_S_COMPLETE or an error code.
  */
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_display_mech_attr(OM_uint32 * minor_status,
-		      gss_const_OID mech_attr,
-		      gss_buffer_t name,
-		      gss_buffer_t short_desc,
-		      gss_buffer_t long_desc)
+gss_display_mech_attr(OM_uint32 * __nonnull minor_status,
+		      __nonnull gss_const_OID mech_attr,
+		      __nullable gss_buffer_t name,
+		      __nullable gss_buffer_t short_desc,
+		      __nullable gss_buffer_t long_desc)
 {
     struct _gss_oid_name_table *ma = NULL;
     OM_uint32 major;

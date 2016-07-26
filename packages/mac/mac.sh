@@ -32,7 +32,7 @@ echo "Install"
 make install DESTDIR=${destdir} > /dev/null || exit 1 
 
 echo "Build package"
-/Developer/usr/bin/packagemaker \
+packagemaker \
     --version "${version}" \
     --root ${destdir} \
     --info ${base}/Info.plist \

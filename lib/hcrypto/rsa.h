@@ -40,6 +40,10 @@
 
 /* symbol renaming */
 #define RSA_null_method hc_RSA_null_method
+#define RSA_imath_method hc_RSA_imath_method
+#define RSA_cdsa_method hc_RSA_cdsa_method
+#define RSA_sf_method hc_RSA_sf_method
+#define RSA_tfm_method hc_RSA_tfm_method
 #define RSA_ltm_method hc_RSA_ltm_method
 #define RSA_gmp_method hc_RSA_gmp_method
 #define RSA_tfm_method hc_RSA_tfm_method
@@ -136,6 +140,8 @@ struct RSA {
 
 const RSA_METHOD *RSA_null_method(void);
 const RSA_METHOD *RSA_gmp_method(void);
+const RSA_METHOD *RSA_sf_method(void);
+const RSA_METHOD *RSA_cdsa_method(void);
 const RSA_METHOD *RSA_tfm_method(void);
 const RSA_METHOD *RSA_ltm_method(void);
 

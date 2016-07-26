@@ -36,6 +36,18 @@
 #ifndef HCRYPTO_COMMON_H
 #define HCRYPTO_COMMON_H 1
 
+#ifdef NEED_CDSA
+
+#include <Security/cssm.h>
+
+extern const CSSM_DATA _hc_labelData;
+
+CSSM_CSP_HANDLE
+_hc_get_cdsa_csphandle(void);
+
+#endif
+
+
 int
 _hc_BN_to_integer(BIGNUM *, heim_integer *);
 

@@ -149,7 +149,7 @@ gmp_rsa_public_encrypt(int flen, const unsigned char* from,
     assert(padlen >= 8);
 
     *p++ = 2;
-    if (RAND_bytes(p, padlen) != 1) {
+    if (CCRandomCopyBytes(kCCRandomDefault,p, padlen) != 0) {
 	mpz_clear(e);
 	mpz_clear(n);
 	free(p0);
@@ -433,7 +433,7 @@ random_num(mpz_t num, size_t len)
     p = malloc(len);
     if (p == NULL)
 	return 1;
-    if (RAND_bytes(p, len) != 1) {
+    if (CCRandomCopyBytes(kCCRandomDefault, p, len) != 0) {
 	free(p);
 	return 1;
     }
@@ -554,7 +554,7 @@ gmp_rsa_finish(RSA *rsa)
     return 1;
 }
 
-const RSA_METHOD hc_rsa_gmp_method = {
+const RSA_METHOD _hc_rsa_gmp_method = {
     "hcrypto GMP RSA",
     gmp_rsa_public_encrypt,
     gmp_rsa_public_decrypt,
@@ -581,7 +581,7 @@ const RSA_METHOD *
 RSA_gmp_method(void)
 {
 #ifdef HAVE_GMP
-    return &hc_rsa_gmp_method;
+    return &_hc_rsa_gmp_method;
 #else
     return NULL;
 #endif

@@ -191,9 +191,9 @@ mandoc_template(struct getargs *args,
 }
 
 static int
-check_column(FILE *f, int col, int len, int columns)
+check_column(FILE *f, int col, size_t len, int columns)
 {
-    if(col + len > columns) {
+    if(col + len > (size_t)columns) {
 	fprintf(f, "\n");
 	col = fprintf(f, "  ");
     }
@@ -238,7 +238,7 @@ arg_printusage_i18n (struct getargs *args,
 	mandoc_template(args, num_args, progname, extra_string, i18n);
 	return;
     }
-    if(get_window_size(2, NULL, &columns) == -1)
+    if(rk_get_window_size(STDERR_FILENO, NULL, &columns) == -1)
 	columns = 80;
     col = 0;
     col += fprintf (stderr, "%s: %s", usage, progname);
@@ -354,9 +354,9 @@ arg_match_long(struct getargs *args, size_t num_args,
     int partial_match = 0;
     struct getargs *partial = NULL;
     struct getargs *current = NULL;
-    int argv_len;
+    size_t argv_len;
     char *p;
-    int p_len;
+    size_t p_len;
 
     argv_len = strlen(argv);
     p = strchr (argv, '=');
@@ -365,7 +365,7 @@ arg_match_long(struct getargs *args, size_t num_args,
 
     for (i = 0; i < num_args; ++i) {
 	if(args[i].long_name) {
-	    int len = strlen(args[i].long_name);
+	    size_t len = strlen(args[i].long_name);
 	    p = argv;
 	    p_len = argv_len;
 	    negate = 0;
@@ -459,13 +459,9 @@ arg_match_long(struct getargs *args, size_t num_args,
     }
     case arg_collect:{
 	struct getarg_collect_info *c = current->value;
-	int o = argv - rargv[*goptind];
+	int o = (int)(argv - rargv[*goptind]);
 	return (*c->func)(FALSE, argc, rargv, goptind, &o, c->data);
     }
-
-    default:
-	abort ();
-	UNREACHABLE(return 0);
     }
 }
 

@@ -575,3 +575,4 @@ RSA_tfm_method(void)
 #endif
 }
 
+#endif

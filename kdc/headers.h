@@ -96,6 +96,7 @@
 #ifdef KX509
 #include <kx509_asn1.h>
 #endif
+#include <pku2u_asn1.h>
 #include <hdb.h>
 #include <hdb_err.h>
 #include <der.h>
@@ -103,8 +104,12 @@
 #ifndef NO_NTLM
 #include <heimntlm.h>
 #endif
+
+#include <heim-ipc.h>
 #include <kdc.h>
 #include <windc_plugin.h>
+
+#include <heimbase.h>
 
 #undef ALLOC
 #define ALLOC(X) ((X) = calloc(1, sizeof(*(X))))

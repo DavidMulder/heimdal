@@ -165,7 +165,6 @@ _netlogon_decode_NL_AUTH_SIGNATURE(const uint8_t *ptr,
         break;
     default:
         return EINVAL;
-        break;
     }
 
     if (sig->SealAlgorithm == NL_SEAL_ALG_NONE)
@@ -193,18 +192,15 @@ _netlogon_derive_rc4_hmac_key(uint8_t key[16],
                               EVP_CIPHER_CTX *rc4Key,
                               int enc)
 {
-    uint8_t tmpData[MD5_DIGEST_LENGTH];
-    uint8_t derivedKey[MD5_DIGEST_LENGTH];
-    unsigned int len = MD5_DIGEST_LENGTH;
+    uint8_t tmpData[CC_MD5_DIGEST_LENGTH];
+    uint8_t derivedKey[CC_MD5_DIGEST_LENGTH];
 
-    HMAC(EVP_md5(), key, 16, zeros, sizeof(zeros), tmpData, &len);
-    HMAC(EVP_md5(), tmpData, MD5_DIGEST_LENGTH,
-         salt, saltLength, derivedKey, &len);
-
-    assert(len == MD5_DIGEST_LENGTH);
+    CCHmac(kCCHmacAlgMD5, key, 16, zeros, sizeof(zeros), tmpData);
+    CCHmac(kCCHmacAlgMD5, tmpData, sizeof(tmpData), salt, saltLength, derivedKey);
 
     EVP_CipherInit_ex(rc4Key, EVP_rc4(), NULL, derivedKey, NULL, enc);
 
+    memset(tmpData, 0, sizeof(tmpData));
     memset(derivedKey, 0, sizeof(derivedKey));
 }
 
@@ -215,7 +211,7 @@ _netlogon_derive_rc4_seal_key(gssnetlogon_ctx ctx,
                               int enc)
 {
     uint8_t xorKey[16];
-    int i;
+    size_t i;
 
     for (i = 0; i < sizeof(xorKey); i++) {
         xorKey[i] = ctx->SessionKey[i] ^ 0xF0;
@@ -245,7 +241,7 @@ _netlogon_derive_aes_seal_key(gssnetlogon_ctx ctx,
 {
     uint8_t encryptionKey[16];
     uint8_t ivec[16];
-    int i;
+    size_t i;
 
     for (i = 0; i < sizeof(encryptionKey); i++) {
         encryptionKey[i] = ctx->SessionKey[i] ^ 0xF0;
@@ -348,21 +344,19 @@ _netlogon_digest_md5(gssnetlogon_ctx ctx,
                      int iov_count,
                      uint8_t *md)
 {
-    EVP_MD_CTX *md5;
+    CCDigestRef md5;
     uint8_t header[NL_AUTH_SIGNATURE_HEADER_LENGTH];
-    uint8_t digest[MD5_DIGEST_LENGTH];
-    unsigned int md_len = MD5_DIGEST_LENGTH;
+    uint8_t digest[CC_MD5_DIGEST_LENGTH];
     int i;
 
     _netlogon_encode_NL_AUTH_SIGNATURE(sig, header, sizeof(header));
 
-    md5 = EVP_MD_CTX_create();
-    EVP_DigestInit_ex(md5, EVP_md5(), NULL);
-    EVP_DigestUpdate(md5, zeros, sizeof(zeros));
-    EVP_DigestUpdate(md5, header, sizeof(header));
+    md5 = CCDigestCreate(kCCDigestMD5);
+    CCDigestUpdate(md5, zeros, sizeof(zeros));
+    CCDigestUpdate(md5, header, sizeof(header));
 
     if (sig->SealAlgorithm != NL_SEAL_ALG_NONE) {
-        EVP_DigestUpdate(md5, sig->Confounder, sizeof(sig->Confounder));
+        CCDigestUpdate(md5, sig->Confounder, sizeof(sig->Confounder));
     }
 
     for (i = 0; i < iov_count; i++) {
@@ -372,18 +366,17 @@ _netlogon_digest_md5(gssnetlogon_ctx ctx,
         case GSS_IOV_BUFFER_TYPE_DATA:
         case GSS_IOV_BUFFER_TYPE_PADDING:
         case GSS_IOV_BUFFER_TYPE_SIGN_ONLY:
-            EVP_DigestUpdate(md5, iovp->buffer.value, iovp->buffer.length);
+            CCDigestUpdate(md5, iovp->buffer.value, iovp->buffer.length);
             break;
         default:
             break;
         }
     }
 
-    EVP_DigestFinal_ex(md5, digest, NULL);
-    EVP_MD_CTX_destroy(md5);
+    CCDigestFinal(md5, digest);
+    CCDigestDestroy(md5);
 
-    HMAC(EVP_md5(), ctx->SessionKey, sizeof(ctx->SessionKey),
-         digest, sizeof(digest), digest, &md_len);
+    CCHmac(kCCHmacAlgMD5, ctx->SessionKey, sizeof(ctx->SessionKey), digest, sizeof(digest), digest);
     memcpy(md, digest, 8);
 }
 
@@ -394,19 +387,16 @@ _netlogon_digest_sha256(gssnetlogon_ctx ctx,
                         int iov_count,
                         uint8_t *md)
 {
-    HMAC_CTX hmac;
+    CCHmacContext hmac;
     uint8_t header[NL_AUTH_SIGNATURE_HEADER_LENGTH];
-    uint8_t digest[SHA256_DIGEST_LENGTH];
-    unsigned int md_len = SHA256_DIGEST_LENGTH;
+    uint8_t digest[CC_SHA256_DIGEST_LENGTH];
     int i;
 
     /* Encode first 8 bytes of signature into header */
     _netlogon_encode_NL_AUTH_SIGNATURE(sig, header, sizeof(header));
 
-    HMAC_CTX_init(&hmac);
-    HMAC_Init_ex(&hmac, ctx->SessionKey, sizeof(ctx->SessionKey),
-                 EVP_sha256(), NULL);
-    HMAC_Update(&hmac, header, sizeof(header));
+    CCHmacInit(&hmac, kCCHmacAlgSHA256, ctx->SessionKey, sizeof(ctx->SessionKey));
+    CCHmacUpdate(&hmac, header, sizeof(header));
 
     if (sig->SealAlgorithm != NL_SEAL_ALG_NONE) {
         /*
@@ -414,7 +404,7 @@ _netlogon_digest_sha256(gssnetlogon_ctx ctx,
          * update this code to point to &sig->Checksum[32] as that is
          * where the confounder is supposed to be.
          */
-        HMAC_Update(&hmac, sig->Confounder, 8);
+        CCHmacUpdate(&hmac, sig->Confounder, 8);
     }
 
     for (i = 0; i < iov_count; i++) {
@@ -424,15 +414,15 @@ _netlogon_digest_sha256(gssnetlogon_ctx ctx,
         case GSS_IOV_BUFFER_TYPE_DATA:
         case GSS_IOV_BUFFER_TYPE_PADDING:
         case GSS_IOV_BUFFER_TYPE_SIGN_ONLY:
-            HMAC_Update(&hmac, iovp->buffer.value, iovp->buffer.length);
+            CCHmacUpdate(&hmac, iovp->buffer.value, iovp->buffer.length);
             break;
         default:
             break;
         }
     }
 
-    HMAC_Final(&hmac, digest, &md_len);
-    HMAC_CTX_cleanup(&hmac);
+    CCHmacFinal(&hmac, digest);
+    memset(&hmac, 0, sizeof(hmac));
     memcpy(md, digest, 8);
 }
 
@@ -464,7 +454,6 @@ _netlogon_wrap_iov(OM_uint32 * minor_status,
     NL_AUTH_SIGNATURE *sig = NL_AUTH_SIGNATURE_P(&sigbuf);
     gssnetlogon_ctx ctx = (gssnetlogon_ctx)context_handle;
     size_t size;
-    uint8_t *seqdata;
 
     if (ctx->State != NL_AUTH_ESTABLISHED) {
         *minor_status = EINVAL;
@@ -539,7 +528,7 @@ _netlogon_unwrap_iov(OM_uint32 *minor_status,
     NL_AUTH_SIGNATURE_U sigbuf;
     NL_AUTH_SIGNATURE *sig = NL_AUTH_SIGNATURE_P(&sigbuf);
     gssnetlogon_ctx ctx = (gssnetlogon_ctx)context_handle;
-    uint8_t checksum[SHA256_DIGEST_LENGTH];
+    uint8_t checksum[CC_SHA256_DIGEST_LENGTH];
     uint64_t SequenceNumber;
 
     if (ctx->State != NL_AUTH_ESTABLISHED) {
@@ -620,7 +609,6 @@ _netlogon_wrap_iov_length(OM_uint32 * minor_status,
         	          gss_iov_buffer_desc *iov,
         	          int iov_count)
 {
-    OM_uint32 ret;
     gss_iov_buffer_t iovp;
     gssnetlogon_ctx ctx = (gssnetlogon_ctx)context_handle;
     size_t len;
@@ -726,7 +714,7 @@ _netlogon_wrap_size_limit (
     if (req_output_size < iov[0].buffer.length)
         *max_input_size = 0;
     else
-        *max_input_size = req_output_size - iov[0].buffer.length;
+        *max_input_size = (OM_uint32)(req_output_size - iov[0].buffer.length);
 
     return GSS_S_COMPLETE;
 }

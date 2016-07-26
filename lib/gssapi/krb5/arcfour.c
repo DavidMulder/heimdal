@@ -226,7 +226,7 @@ _gssapi_get_mic_arcfour(OM_uint32 * minor_status,
 				     context_handle->auth_context,
 				     &seq_number);
     p = p0 + 8; /* SND_SEQ */
-    _gsskrb5_encode_be_om_uint32(seq_number, p);
+    _gss_mg_encode_be_uint32(seq_number, p);
 
     krb5_auth_con_setlocalseqnumber (context,
 				     context_handle->auth_context,
@@ -318,7 +318,7 @@ _gssapi_verify_mic_arcfour(OM_uint32 * minor_status,
 	memset(k6_data, 0, sizeof(k6_data));
     }
 
-    _gsskrb5_decode_be_om_uint32(SND_SEQ, &seq_number);
+    _gss_mg_decode_be_uint32(SND_SEQ, &seq_number);
 
     if (context_handle->more_flags & LOCAL)
 	cmp = memcmp(&SND_SEQ[4], "\xff\xff\xff\xff", 4);
@@ -332,7 +332,7 @@ _gssapi_verify_mic_arcfour(OM_uint32 * minor_status,
     }
 
     HEIMDAL_MUTEX_lock(&context_handle->ctx_id_mutex);
-    omret = _gssapi_msg_order_check(context_handle->order, seq_number);
+    omret = _gssapi_msg_order_check(context_handle->gk5c.order, seq_number);
     HEIMDAL_MUTEX_unlock(&context_handle->ctx_id_mutex);
     if (omret)
 	return omret;
@@ -406,7 +406,7 @@ _gssapi_wrap_arcfour(OM_uint32 * minor_status,
 				     context_handle->auth_context,
 				     &seq_number);
 
-    _gsskrb5_encode_be_om_uint32(seq_number, p0 + 8);
+    _gss_mg_encode_be_uint32(seq_number, p0 + 8);
 
     krb5_auth_con_setlocalseqnumber (context,
 				     context_handle->auth_context,
@@ -589,7 +589,7 @@ OM_uint32 _gssapi_unwrap_arcfour(OM_uint32 *minor_status,
 	memset(k6_data, 0, sizeof(k6_data));
     }
 
-    _gsskrb5_decode_be_om_uint32(SND_SEQ, &seq_number);
+    _gss_mg_decode_be_uint32(SND_SEQ, &seq_number);
 
     if (context_handle->more_flags & LOCAL)
 	cmp = memcmp(&SND_SEQ[4], "\xff\xff\xff\xff", 4);
@@ -674,7 +674,7 @@ OM_uint32 _gssapi_unwrap_arcfour(OM_uint32 *minor_status,
     }
 
     HEIMDAL_MUTEX_lock(&context_handle->ctx_id_mutex);
-    omret = _gssapi_msg_order_check(context_handle->order, seq_number);
+    omret = _gssapi_msg_order_check(context_handle->gk5c.order, seq_number);
     HEIMDAL_MUTEX_unlock(&context_handle->ctx_id_mutex);
     if (omret)
 	return omret;
@@ -706,7 +706,7 @@ max_wrap_length_arcfour(const gsskrb5_ctx ctx,
 	if (input_length < len)
 	    *max_input_size = 0;
 	else
-	    *max_input_size = input_length - len;
+	    *max_input_size = (OM_uint32)(input_length - len);
 
     } else {
 	size_t extrasize = GSS_ARCFOUR_WRAP_TOKEN_SIZE;
@@ -719,7 +719,7 @@ max_wrap_length_arcfour(const gsskrb5_ctx ctx,
 
 	total_len -= input_length; /* token length */
 	if (total_len < input_length) {
-	    *max_input_size = (input_length - total_len);
+	    *max_input_size = (OM_uint32)(input_length - total_len);
 	    (*max_input_size) &= (~(OM_uint32)(blocksize - 1));
 	} else {
 	    *max_input_size = 0;

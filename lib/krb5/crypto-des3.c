@@ -33,6 +33,8 @@
 
 #include "krb5_locl.h"
 
+#ifdef HEIM_KRB5_DES3
+
 /*
  *
  */
@@ -41,15 +43,72 @@ static void
 DES3_random_key(krb5_context context,
 		krb5_keyblock *key)
 {
-    DES_cblock *k = key->keyvalue.data;
+    uint8_t *k = key->keyvalue.data;
     do {
-	krb5_generate_random_block(k, 3 * sizeof(DES_cblock));
-	DES_set_odd_parity(&k[0]);
-	DES_set_odd_parity(&k[1]);
-	DES_set_odd_parity(&k[2]);
-    } while(DES_is_weak_key(&k[0]) ||
-	    DES_is_weak_key(&k[1]) ||
-	    DES_is_weak_key(&k[2]));
+	krb5_generate_random_block(key->keyvalue.data, key->keyvalue.length);
+	CCDesSetOddParity(&k[0], 8);
+	CCDesSetOddParity(&k[8], 8);
+	CCDesSetOddParity(&k[16], 8);
+    } while(CCDesIsWeakKey(&k[0], 8) ||
+	    CCDesIsWeakKey(&k[8], 8) ||
+	    CCDesIsWeakKey(&k[16], 8));
+}
+
+static krb5_error_code
+DES3_prf(krb5_context context,
+	 krb5_crypto crypto,
+	 const krb5_data *in,
+	 krb5_data *out)
+{
+    struct _krb5_checksum_type *ct = crypto->et->checksum;
+    krb5_error_code ret;
+    Checksum result;
+    krb5_keyblock *derived;
+    size_t prfsize;
+
+    result.cksumtype = ct->type;
+    ret = krb5_data_alloc(&result.checksum, ct->checksumsize);
+    if (ret) {
+	krb5_set_error_message(context, ret, N_("malloc: out memory", ""));
+	return ret;
+    }
+
+    ret = (*ct->checksum)(context, NULL, in->data, in->length, 0, &result);
+    if (ret) {
+	krb5_data_free(&result.checksum);
+	return ret;
+    }
+
+    if (result.checksum.length < crypto->et->blocksize)
+	krb5_abortx(context, "internal prf error");
+
+    derived = NULL;
+    ret = krb5_derive_key(context, crypto->key.key,
+			  crypto->et->type, "prf", 3, &derived);
+    if (ret)
+	krb5_abortx(context, "krb5_derive_key");
+
+    prfsize = (result.checksum.length / crypto->et->blocksize) * crypto->et->blocksize;
+    heim_assert(prfsize == crypto->et->prf_length, "prfsize not same ?");
+
+    ret = krb5_data_alloc(out, prfsize);
+    if (ret)
+	krb5_abortx(context, "malloc failed");
+
+    {
+	const EVP_CIPHER *c = (*crypto->et->keytype->evp)();
+	EVP_CIPHER_CTX ctx;
+
+	EVP_CIPHER_CTX_init(&ctx); /* ivec all zero */
+	EVP_CipherInit_ex(&ctx, c, NULL, derived->keyvalue.data, NULL, 1);
+	EVP_Cipher(&ctx, out->data, result.checksum.data, prfsize);
+	EVP_CIPHER_CTX_cleanup(&ctx);
+    }
+
+    krb5_data_free(&result.checksum);
+    krb5_free_keyblock(context, derived);
+
+    return ret;
 }
 
 
@@ -92,7 +151,7 @@ RSA_MD5_DES3_checksum(krb5_context context,
 		      unsigned usage,
 		      Checksum *C)
 {
-    return _krb5_des_checksum(context, EVP_md5(), key, data, len, C);
+    return _krb5_des_checksum(context, kCCDigestMD5, key, data, len, C);
 }
 
 static krb5_error_code
@@ -103,7 +162,7 @@ RSA_MD5_DES3_verify(krb5_context context,
 		    unsigned usage,
 		    Checksum *C)
 {
-    return _krb5_des_verify(context, EVP_md5(), key, data, len, C);
+    return _krb5_des_verify(context, kCCDigestMD5, key, data, len, C);
 }
 
 struct _krb5_checksum_type _krb5_checksum_rsa_md5_des3 = {
@@ -155,8 +214,8 @@ struct _krb5_encryption_type _krb5_enctype_des3_cbc_sha1 = {
     &_krb5_checksum_hmac_sha1_des3,
     F_DERIVED,
     _krb5_evp_encrypt,
-    0,
-    NULL
+    16,
+    DES3_prf
 };
 
 #ifdef DES3_OLD_ENCTYPE
@@ -197,12 +256,16 @@ _krb5_DES3_random_to_key(krb5_context context,
 			 const void *data,
 			 size_t size)
 {
-    unsigned char *x = key->keyvalue.data;
-    const u_char *q = data;
-    DES_cblock *k;
+    unsigned char *x;
+    const uint8_t *q = data;
+    uint8_t *k;
     int i, j;
 
+    if (size < 21)
+	abort();
+
     memset(key->keyvalue.data, 0, key->keyvalue.length);
+    x = key->keyvalue.data;
     for (i = 0; i < 3; ++i) {
 	unsigned char foo;
 	for (j = 0; j < 7; ++j) {
@@ -219,8 +282,11 @@ _krb5_DES3_random_to_key(krb5_context context,
     }
     k = key->keyvalue.data;
     for (i = 0; i < 3; i++) {
-	DES_set_odd_parity(&k[i]);
-	if(DES_is_weak_key(&k[i]))
-	    _krb5_xor(&k[i], (const unsigned char*)"\0\0\0\0\0\0\0\xf0");
+	CCDesSetOddParity(&k[i * 8], 8);
+	if(CCDesIsWeakKey(&k[i * 8], 8))
+	    _krb5_xor((void *)&k[i * 8],
+		      (const unsigned char*)"\0\0\0\0\0\0\0\xf0");
     }
 }
+
+#endif /* HEIM_KRB5_DES3 */

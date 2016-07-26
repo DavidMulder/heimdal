@@ -34,13 +34,22 @@
 #include "krb5_locl.h"
 #include <err.h>
 
+#undef HEIMDAL_PRINTF_ATTRIBUTE
+#define HEIMDAL_PRINTF_ATTRIBUTE(x)
+#undef HEIMDAL_NORETURN_ATTRIBUTE
+#define HEIMDAL_NORETURN_ATTRIBUTE
+
 static krb5_error_code _warnerr(krb5_context context, int do_errtext,
-	 krb5_error_code code, int level, const char *fmt, va_list ap)
-	__attribute__((__format__(__printf__, 5, 0)));
+	 krb5_error_code code, int level,
+	 void (*logfunc)(const char *fmt, ...) __attribute__((__format__(__printf__, 1, 2))),
+	 const char *fmt, va_list ap)
+	__attribute__((__format__(__printf__, 6, 0)));
 
 static krb5_error_code
 _warnerr(krb5_context context, int do_errtext,
-	 krb5_error_code code, int level, const char *fmt, va_list ap)
+	 krb5_error_code code, int level,
+	 void (*logfunc)(const char *fmt, ...),
+	 const char *fmt, va_list ap)
 {
     char xfmt[7] = "";
     const char *args[2], **arg;
@@ -70,10 +79,22 @@ _warnerr(krb5_context context, int do_errtext,
 	}
     }
 
-    if(context && context->warn_dest)
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
+	
+    if (logfunc)
+	logfunc(xfmt, args[0], args[1]);
+    else if(context && context->warn_dest)
 	krb5_log(context, context->warn_dest, level, xfmt, args[0], args[1]);
     else
 	warnx(xfmt, args[0], args[1]);
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
     free(msg);
     krb5_free_error_message(context, err_str);
     return 0;
@@ -83,11 +104,8 @@ _warnerr(krb5_context context, int do_errtext,
     krb5_error_code ret;						\
     va_list ap;								\
     va_start(ap, fmt);							\
-    ret = _warnerr(context, ETEXT, CODE, LEVEL, fmt, ap); 		\
+    ret = _warnerr(context, ETEXT, CODE, LEVEL, NULL, fmt, ap); 	\
     va_end(ap);
-
-#undef __attribute__
-#define __attribute__(X)
 
 /**
  * Log a warning to the log, default stderr, include the error from
@@ -104,9 +122,9 @@ _warnerr(krb5_context context, int do_errtext,
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_vwarn(krb5_context context, krb5_error_code code,
 	   const char *fmt, va_list ap)
-     __attribute__ ((format (printf, 3, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 0))
 {
-    return _warnerr(context, 1, code, 1, fmt, ap);
+    return _warnerr(context, 1, code, 1, NULL, fmt, ap);
 }
 
 /**
@@ -122,7 +140,7 @@ krb5_vwarn(krb5_context context, krb5_error_code code,
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_warn(krb5_context context, krb5_error_code code, const char *fmt, ...)
-     __attribute__ ((format (printf, 3, 4)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 4))
 {
     FUNC(1, code, 1);
     return ret;
@@ -140,9 +158,9 @@ krb5_warn(krb5_context context, krb5_error_code code, const char *fmt, ...)
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_vwarnx(krb5_context context, const char *fmt, va_list ap)
-     __attribute__ ((format (printf, 2, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 2, 0))
 {
-    return _warnerr(context, 0, 0, 1, fmt, ap);
+    return _warnerr(context, 0, 0, 1, NULL, fmt, ap);
 }
 
 /**
@@ -156,7 +174,7 @@ krb5_vwarnx(krb5_context context, const char *fmt, va_list ap)
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_warnx(krb5_context context, const char *fmt, ...)
-     __attribute__ ((format (printf, 2, 3)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 2, 3))
 {
     FUNC(0, 0, 1);
     return ret;
@@ -175,12 +193,13 @@ krb5_warnx(krb5_context context, const char *fmt, ...)
  * @ingroup krb5_error
  */
 
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_verr(krb5_context context, int eval, krb5_error_code code,
 	  const char *fmt, va_list ap)
-     __attribute__ ((noreturn, format (printf, 4, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 0))
+    HEIMDAL_NORETURN_ATTRIBUTE
 {
-    _warnerr(context, 1, code, 0, fmt, ap);
+    _warnerr(context, 1, code, 0, NULL, fmt, ap);
     exit(eval);
     UNREACHABLE(return 0);
 }
@@ -197,10 +216,11 @@ krb5_verr(krb5_context context, int eval, krb5_error_code code,
  * @ingroup krb5_error
  */
 
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_err(krb5_context context, int eval, krb5_error_code code,
 	 const char *fmt, ...)
-     __attribute__ ((noreturn, format (printf, 4, 5)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 5))
+    HEIMDAL_NORETURN_ATTRIBUTE
 {
     FUNC(1, code, 0);
     exit(eval);
@@ -218,11 +238,12 @@ krb5_err(krb5_context context, int eval, krb5_error_code code,
  * @ingroup krb5_error
  */
 
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_verrx(krb5_context context, int eval, const char *fmt, va_list ap)
-     __attribute__ ((noreturn, format (printf, 3, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 0))
+    HEIMDAL_NORETURN_ATTRIBUTE
 {
-    _warnerr(context, 0, 0, 0, fmt, ap);
+    _warnerr(context, 0, 0, 0, NULL, fmt, ap);
     exit(eval);
     UNREACHABLE(return 0);
 }
@@ -237,9 +258,10 @@ krb5_verrx(krb5_context context, int eval, const char *fmt, va_list ap)
  * @ingroup krb5_error
  */
 
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_errx(krb5_context context, int eval, const char *fmt, ...)
-     __attribute__ ((noreturn, format (printf, 3, 4)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 4))
+    HEIMDAL_NORETURN_ATTRIBUTE
 {
     FUNC(0, 0, 0);
     exit(eval);
@@ -258,12 +280,13 @@ krb5_errx(krb5_context context, int eval, const char *fmt, ...)
  * @ingroup krb5_error
  */
 
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_vabort(krb5_context context, krb5_error_code code,
 	    const char *fmt, va_list ap)
-     __attribute__ ((noreturn, format (printf, 3, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 0))
+    HEIMDAL_NORETURN_ATTRIBUTE
 {
-    _warnerr(context, 1, code, 0, fmt, ap);
+    _warnerr(context, 1, code, 0, NULL, fmt, ap);
     abort();
     UNREACHABLE(return 0);
 }
@@ -279,20 +302,25 @@ krb5_vabort(krb5_context context, krb5_error_code code,
  * @ingroup krb5_error
  */
 
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_abort(krb5_context context, krb5_error_code code, const char *fmt, ...)
-     __attribute__ ((noreturn, format (printf, 3, 4)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 4))
+    HEIMDAL_NORETURN_ATTRIBUTE
 {
-    FUNC(1, code, 0);
+    va_list ap;
+    va_start(ap, fmt);
+    _warnerr(context, 1, code, 0, heim_abort, fmt, ap);
+    va_end(ap);
     abort();
     UNREACHABLE(return 0);
 }
 
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_vabortx(krb5_context context, const char *fmt, va_list ap)
-     __attribute__ ((noreturn, format (printf, 2, 0)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 2, 0))
+    HEIMDAL_NORETURN_ATTRIBUTE
 {
-    _warnerr(context, 0, 0, 0, fmt, ap);
+    _warnerr(context, 0, 0, 0, heim_abort, fmt, ap);
     abort();
     UNREACHABLE(return 0);
 }
@@ -301,15 +329,15 @@ krb5_vabortx(krb5_context context, const char *fmt, va_list ap)
  * Log a warning to the log, default stderr, and then abort.
  *
  * @param context A Kerberos 5 context
- * @param code error code of the last error
  * @param fmt message to print
  *
  * @ingroup krb5_error
  */
 
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_abortx(krb5_context context, const char *fmt, ...)
-     __attribute__ ((noreturn, format (printf, 2, 3)))
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 2, 3))
+    HEIMDAL_NORETURN_ATTRIBUTE
 {
     FUNC(0, 0, 0);
     abort();
@@ -328,6 +356,8 @@ krb5_abortx(krb5_context context, const char *fmt, ...)
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_set_warn_dest(krb5_context context, krb5_log_facility *fac)
 {
+    if (context->warn_dest)
+	krb5_closelog(context, context->warn_dest);
     context->warn_dest = fac;
     return 0;
 }
@@ -344,4 +374,36 @@ KRB5_LIB_FUNCTION krb5_log_facility * KRB5_LIB_CALL
 krb5_get_warn_dest(krb5_context context)
 {
     return context->warn_dest;
+}
+
+/**
+ * Set the default debug logging facility.
+ *
+ * @param context A Kerberos 5 context
+ * @param fac Facility to use for logging.
+ *
+ * @ingroup krb5_error
+ */
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_set_debug_dest(krb5_context context, krb5_log_facility *fac)
+{
+    if (context->debug_dest)
+	krb5_closelog(context, context->debug_dest);
+    context->debug_dest = fac;
+    return 0;
+}
+
+/**
+ * Get the default debug logging facility.
+ *
+ * @param context A Kerberos 5 context
+ *
+ * @ingroup krb5_error
+ */
+
+KRB5_LIB_FUNCTION krb5_log_facility * KRB5_LIB_CALL
+krb5_get_debug_dest(krb5_context context)
+{
+    return context->debug_dest;
 }

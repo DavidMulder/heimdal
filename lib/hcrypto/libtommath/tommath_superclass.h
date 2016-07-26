@@ -1,10 +1,16 @@
 /* super class file for PK algos */
 
+#include <config.h>
+
+#ifdef HEIM_HC_LTM
+
+
 /* default ... include all MPI */
-#define LTM_ALL
+/* #define LTM_ALL */
 
 /* RSA only (does not support DH/DSA/ECC) */
-/* #define SC_RSA_1 */
+#define SC_RSA_1
+#define BN_MP_ZERO_MULTI_C
 
 /* For reference.... On an Athlon64 optimizing for speed...
 
@@ -70,6 +76,8 @@
 #endif
 
 #endif
+
+#endif /* HEIM_HC_LTM */
 
 /* $Source: /cvs/libtom/libtommath/tommath_superclass.h,v $ */
 /* $Revision: 1.3 $ */

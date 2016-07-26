@@ -41,7 +41,12 @@
 #include "heim_ipc_asyncServer.h"
 
 #include <dispatch/dispatch.h>
+
 #include <mach/mach.h>
+#include <servers/bootstrap.h>
+#ifdef __APPLE_PRIVATE__
+#include <bootstrap_priv.h>
+#endif
 
 static dispatch_once_t jobqinited = 0;
 static dispatch_queue_t jobq = NULL;
@@ -55,6 +60,17 @@ struct mach_ctx {
 static int
 mach_release(void *ctx);
 
+static kern_return_t
+look_up(const char *service, mach_port_t *nport)
+{
+#ifdef __APPLE_PRIVATE__
+    return bootstrap_look_up2(bootstrap_port, service, nport, 0, BOOTSTRAP_PRIVILEGED_SERVER);
+#else
+    return bootstrap_look_up(bootstrap_port, service, nport);
+#endif
+}
+
+
 static int
 mach_init(const char *service, void **ctx)
 {
@@ -67,7 +83,7 @@ mach_init(const char *service, void **ctx)
 	    syncq = dispatch_queue_create("heim-ipc-syncq", NULL);
 	});
 
-    ret = bootstrap_look_up(bootstrap_port, service, &sport);
+    ret = look_up(service, &sport);
     if (ret)
 	return ret;
 
@@ -100,13 +116,21 @@ mach_ipc(void *ctx,
     heim_ipc_message_outband_t requestout = NULL;
     mach_msg_type_number_t requestout_length = 0;
     heim_ipc_message_inband_t replyin;
-    mach_msg_type_number_t replyin_length;
-    heim_ipc_message_outband_t replyout;
-    mach_msg_type_number_t replyout_length;
-    int ret, errorcode, retries = 0;
+    mach_msg_type_number_t replyin_length = 0;
+    heim_ipc_message_outband_t replyout = 0;
+    mach_msg_type_number_t replyout_length = 0;
+    int ret, errorcode = -1, retries = 0;
 
+    if (request->length < sizeof(requestin)) {
     memcpy(requestin, request->data, request->length);
-    requestin_length = request->length;
+	requestin_length = (mach_msg_type_number_t)request->length;
+    } else {
+	ret = vm_read(mach_task_self(), 
+		      (vm_address_t)request->data, request->length, 
+		      (vm_address_t *)&requestout, &requestout_length);
+	if (ret)
+	    return ENOMEM;
+    }
 
     while (retries < 2) {
 	__block mach_port_t sport;
@@ -122,7 +146,7 @@ mach_ipc(void *ctx,
 	if (ret == MACH_SEND_INVALID_DEST) {
 	    mach_port_t nport;
 	    /* race other threads to get a new port */
-	    ret = bootstrap_look_up(bootstrap_port, ipc->name, &nport);
+	    ret = look_up(ipc->name, &nport);
 	    if (ret)
 		return ret;
 	    dispatch_sync(syncq, ^{
@@ -189,7 +213,7 @@ mheim_ado_acall_reply(mach_port_t server_port,
 		      heim_ipc_message_outband_t replyout,
 		      mach_msg_type_number_t replyoutCnt)
 {
-    struct async_client *c = dispatch_get_context(dispatch_get_current_queue());
+    struct async_client *c = dispatch_get_specific((void *)mheim_ado_acall_reply);
     heim_idata response;
 
     if (returnvalue) {
@@ -237,12 +261,14 @@ mach_async(void *ctx, const heim_idata *request, void *userctx,
 	return ENOMEM;
 
     kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &c->mp);
-    if (kr != KERN_SUCCESS)
+    if (kr != KERN_SUCCESS) {
+	free(c);
 	return EINVAL;
+    }
 
     c->queue = dispatch_queue_create("heim-ipc-async-client", NULL);
     c->source = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, c->mp, 0, c->queue);
-    dispatch_set_context(c->queue, c);
+    dispatch_queue_set_specific(c->queue, (void *)mheim_ado_acall_reply, c, NULL);
 
     dispatch_source_set_event_handler(c->source, ^{
 	    dispatch_mig_server(c->source,
@@ -264,9 +290,16 @@ mach_async(void *ctx, const heim_idata *request, void *userctx,
     dispatch_resume(c->source);
 
     /* ok, send the message */
-
+    if (request->length < sizeof(requestin)) {
     memcpy(requestin, request->data, request->length);
-    requestin_length = request->length;
+	requestin_length = (mach_msg_type_number_t)request->length;
+    } else {
+	ret = vm_read(mach_task_self(), 
+		      (vm_address_t)request->data, request->length, 
+		      (vm_address_t *)&requestout, &requestout_length);
+	if (ret)
+	    return ENOMEM;
+    }
 
     while (retries < 2) {
 	__block mach_port_t sport;
@@ -277,7 +310,7 @@ mach_async(void *ctx, const heim_idata *request, void *userctx,
 				     requestin, requestin_length,
 				     requestout, requestout_length);
 	if (ret == MACH_SEND_INVALID_DEST) {
-	    ret = bootstrap_look_up(bootstrap_port, ipc->name, &sport);
+	    ret = look_up(ipc->name, &sport);
 	    if (ret) {
 		dispatch_source_cancel(c->source);
 		return ret;
@@ -331,9 +364,11 @@ connect_unix(struct path_ctx *s)
     if (s->fd < 0)
 	return errno;
     rk_cloexec(s->fd);
+    socket_set_nopipe(s->fd, 1);
 
     if (connect(s->fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 	close(s->fd);
+	s->fd = -1;
 	return errno;
     }
 
@@ -403,14 +438,16 @@ unix_socket_ipc(void *ctx,
     retval = ntohl(rv);
 
     rep->length = ntohl(len);
-    if (rep->length > 0) {
+    if (rep->length > MAX_PACKET_SIZE) {
+	rep->length = 0;
+	return EINVAL;
+    } else {
 	rep->data = malloc(rep->length);
 	if (rep->data == NULL)
 	    return -1;
 	if (net_read(s->fd, rep->data, rep->length) != (ssize_t)rep->length)
 	    return -1;
-    } else
-	rep->data = NULL;
+    }
 
     return retval;
 }

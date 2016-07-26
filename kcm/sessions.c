@@ -35,7 +35,7 @@
 
 #include "kcm_locl.h"
 
-#if 0
+#ifdef __APPLE__
 #include <bsm/audit_session.h>
 #endif
 
@@ -48,7 +48,7 @@ kcm_session_add(pid_t session_id)
 void
 kcm_session_setup_handler(void)
 {
-#if 0
+#ifdef __APPLE__
     au_sdev_handle_t *h;
     dispatch_queue_t bgq;
 

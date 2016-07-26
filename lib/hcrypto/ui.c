@@ -106,9 +106,13 @@ read_string(const char *preprompt, const char *prompt,
 #define NSIG 47
 #endif
 
+#define FLAG_ECHO	1
+#define FLAG_USE_STDIO	2
+
+
 static int
 read_string(const char *preprompt, const char *prompt,
-	    char *buf, size_t len, int echo)
+	    char *buf, size_t len, int flags)
 {
     struct sigaction sigs[NSIG];
     int oksigs[NSIG];
@@ -116,7 +120,7 @@ read_string(const char *preprompt, const char *prompt,
     FILE *tty;
     int ret = 0;
     int of = 0;
-    int i;
+    size_t i;
     int c;
     char *p;
 
@@ -133,7 +137,17 @@ read_string(const char *preprompt, const char *prompt,
 	    if (sigaction(i, &sa, &sigs[i]) == 0)
 		oksigs[i] = 1;
 
-    if((tty = fopen("/dev/tty", "r")) != NULL)
+    /* 
+     * Don't use /dev/tty for now since server tools want to to
+     * read/write from stdio when setting up and interacting with the
+     * Kerberos subsystem.
+     *
+     * When <rdar://problem/7308846> is in we can remove this, this is
+     * to make transiation easier for server folks.
+     */
+    if((flags & FLAG_USE_STDIO) != 0)
+	tty = stdin;
+    else if ((tty = fopen("/dev/tty", "r")) != NULL)
 	rk_cloexec_file(tty);
     else
 	tty = stdin;
@@ -141,7 +155,7 @@ read_string(const char *preprompt, const char *prompt,
     fprintf(stderr, "%s%s", preprompt, prompt);
     fflush(stderr);
 
-    if(echo == 0){
+    if((flags & FLAG_ECHO) == 0){
 	tcgetattr(fileno(tty), &t_old);
 	memcpy(&t_new, &t_old, sizeof(t_new));
 	t_new.c_lflag &= ~ECHO;
@@ -166,7 +180,7 @@ read_string(const char *preprompt, const char *prompt,
 	p--;
     *p = 0;
 
-    if(echo == 0){
+    if((flags & FLAG_ECHO) == 0){
 	fprintf(stderr, "\n");
 	tcsetattr(fileno(tty), TCSANOW, &t_old);
     }
@@ -205,6 +219,33 @@ UI_UTIL_read_pw_string(char *buf, int length, const char *prompt, int verify)
 	    return 1;
 
 	ret = read_string("Verify password - ", prompt, buf2, length, 0);
+	if (ret) {
+	    free(buf2);
+	    return ret;
+	}
+	if (strcmp(buf2, buf) != 0)
+	    ret = 1;
+	free(buf2);
+    }
+    return ret;
+}
+
+int
+UI_UTIL_read_pw_string_stdio(char *buf, int length, const char *prompt, int verify)
+{
+    int ret;
+
+    ret = read_string("", prompt, buf, length, FLAG_USE_STDIO);
+    if (ret)
+	return ret;
+
+    if (verify) {
+	char *buf2;
+	buf2 = malloc(length);
+	if (buf2 == NULL)
+	    return 1;
+
+	ret = read_string("Verify password - ", prompt, buf2, length, FLAG_USE_STDIO);
 	if (ret) {
 	    free(buf2);
 	    return ret;

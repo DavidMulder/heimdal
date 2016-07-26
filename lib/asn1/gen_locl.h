@@ -64,6 +64,8 @@ void generate_type_copy (const Symbol *);
 void generate_type_seq (const Symbol *);
 void generate_glue (const Type *, const char*);
 
+void check_preserve_type(const char *, Type *);
+
 const char *classname(Der_class);
 const char *valuename(Der_class, int);
 
@@ -92,10 +94,13 @@ void gen_template_import(const Symbol *);
 
 
 extern FILE *privheaderfile, *headerfile, *codefile, *logfile, *templatefile;
+extern const char *fuzzer_string;
 extern int support_ber;
 extern int template_flag;
 extern int rfc1510_bitstring;
 extern int one_code_file;
+extern int parse_units_flag;
+extern char *type_file_string;
 
 extern int error_flag;
 

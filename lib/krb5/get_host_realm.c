@@ -33,6 +33,7 @@
 
 #include "krb5_locl.h"
 #include <resolve.h>
+#include "config_plugin.h"
 
 /* To automagically find the correct realm of a host (without
  * [domain_realm] in krb5.conf) add a text record for your domain with
@@ -167,7 +168,8 @@ _krb5_get_host_realm_int (krb5_context context,
     const char *p, *q;
     krb5_boolean dns_locate_enable;
 
-    dns_locate_enable = krb5_config_get_bool_default(context, NULL, TRUE,
+    dns_locate_enable = krb5_config_get_bool_default(context, NULL,
+        KRB5_DNS_DOMAIN_REALM_DEFAULT,
 	"libdefaults", "dns_lookup_realm", NULL);
     for (p = host; p != NULL; p = strchr (p + 1, '.')) {
 	if(config_find_realm(context, p, realms) == 0) {
@@ -211,36 +213,128 @@ _krb5_get_host_realm_int (krb5_context context,
 }
 
 /*
+ * Query plugins for domain realm mappings
+ */
+
+static void
+add_host_domain(krb5_context context, void *userctx, krb5_const_realm realm)
+{
+    heim_array_t array = userctx;
+    heim_string_t s = heim_string_create(realm);
+    
+    if (s) {
+	heim_array_append_value(array, s);
+	heim_release(s);
+    }
+}
+
+struct host_domain_ctx {
+    const char *host;
+    heim_array_t array;
+};
+
+static krb5_error_code
+config_plugin(krb5_context context,
+	      const void *plug, void *plugctx, void *userctx)
+{
+    const krb5plugin_config_ftable *config = plug;
+    struct host_domain_ctx *ctx = userctx;
+    if (config->get_host_domain == NULL)
+	return KRB5_PLUGIN_NO_HANDLE;
+    
+    return config->get_host_domain(context, ctx->host, plugctx, ctx->array, add_host_domain);
+}
+
+static krb5_error_code
+get_plugin(krb5_context context, const char *hostname, heim_array_t array)
+{
+    struct host_domain_ctx ctx;
+
+    ctx.host = hostname;
+    ctx.array = array;
+
+    return krb5_plugin_run_f(context, "krb5",
+			     KRB5_PLUGIN_CONFIGURATION,
+			     KRB5_PLUGIN_CONFIGURATION_VERSION_1,
+			     0, &ctx, config_plugin);
+}
+
+/*
+ *
+ */
+
+static void
+merge_irealm(heim_array_t array, krb5_realm *irealm)
+{
+    size_t len;
+
+    for (len = 0; irealm[len]; len++) {
+	heim_string_t r = heim_string_create(irealm[len]);
+	if (r) {
+	    if (!heim_array_contains_value(array, r))
+		heim_array_append_value(array, r);
+	    heim_release(r);
+	}
+    }
+}
+
+/*
  * Return the realm(s) of `host' as a NULL-terminated list in
  * `realms'. Free `realms' with krb5_free_host_realm().
  */
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_get_host_realm(krb5_context context,
-		    const char *targethost,
+		    const char *host,
 		    krb5_realm **realms)
 {
-    const char *host = targethost;
     char hostname[MAXHOSTNAMELEN];
     krb5_error_code ret;
+    heim_array_t array;
     int use_dns;
+    krb5_realm *irealm = NULL;
 
     if (host == NULL) {
 	if (gethostname (hostname, sizeof(hostname))) {
 	    *realms = NULL;
 	    return errno;
 	}
-	host = hostname;
+	hostname[sizeof(hostname) - 1] = '\0';
+    } else
+	strlcpy(hostname, host, sizeof(hostname));
+
+    _krb5_remove_trailing_dot(hostname);
+
+    array = heim_array_create();
+    if (array == NULL)
+	return ENOMEM;
+    
+
+    ret = config_find_realm(context, hostname, &irealm);
+    if (ret == 0 && irealm) {
+	merge_irealm(array, irealm);
+	krb5_free_host_realm(context, irealm);
     }
 
+    /*
+     * Check plugins
+     */
+    
+    get_plugin(context, hostname, array);
+    
     /*
      * If our local hostname is without components, don't even try to dns.
      */
 
-    use_dns = (strchr(host, '.') != NULL);
+    use_dns = (strchr(hostname, '.') != NULL);
 
-    ret = _krb5_get_host_realm_int (context, host, use_dns, realms);
-    if (ret && targethost != NULL) {
+    ret = _krb5_get_host_realm_int (context, hostname, use_dns, &irealm);
+    if (ret == 0 && irealm) {
+	merge_irealm(array, irealm);
+	krb5_free_host_realm(context, irealm);
+    }
+    
+    if (heim_array_get_length(array) == 0 && host != NULL) {
 	/*
 	 * If there was no realm mapping for the host (and we wasn't
 	 * looking for ourself), guess at the local realm, maybe our
@@ -250,9 +344,16 @@ krb5_get_host_realm(krb5_context context,
 	if (ret) {
 	    krb5_set_error_message(context, KRB5_ERR_HOST_REALM_UNKNOWN,
 				   N_("Unable to find realm of host %s", ""),
-				   host);
+				   hostname);
 	    return KRB5_ERR_HOST_REALM_UNKNOWN;
 	}
+    } else if (heim_array_get_length(array) == 0) {
+	krb5_set_error_message(context, KRB5_ERR_HOST_REALM_UNKNOWN,
+			       N_("Unable to find realm of self", ""));
+	return KRB5_ERR_HOST_REALM_UNKNOWN;
+    } else {
+	ret = _krb5_array_to_realms(context, array, realms);
     }
+    heim_release(array);
     return ret;
 }

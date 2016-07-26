@@ -56,13 +56,14 @@ enum hdb_lockop{ HDB_RLOCK, HDB_WLOCK };
 #define HDB_F_GET_ANY		28	/* fetch any of client,server,krbtgt */
 #define HDB_F_CANON		32	/* want canonicalition */
 #define HDB_F_ADMIN_DATA	64	/* want data that kdc don't use  */
-#define HDB_F_KVNO_SPECIFIED	128	/* we want a particular KVNO */
-#define HDB_F_CURRENT_KVNO	256	/* we want the current KVNO */
-#define HDB_F_LIVE_CLNT_KVNOS	512	/* we want all live keys for pre-auth */
-#define HDB_F_LIVE_SVC_KVNOS	1024	/* we want all live keys for tix */
-#define HDB_F_ALL_KVNOS		2048	/* we want all the keys, live or not */
-#define HDB_F_FOR_AS_REQ	4096	/* fetch is for a AS REQ */
-#define HDB_F_FOR_TGS_REQ	8192	/* fetch is for a TGS REQ */
+#define HDB_F_CHANGE_PASSWORD	128	/* change password store  */
+#define HDB_F_KVNO_SPECIFIED	256	/* we want a particular KVNO */
+#define HDB_F_CURRENT_KVNO	512	/* we want the current KVNO */
+#define HDB_F_LIVE_CLNT_KVNOS	1024	/* we want all live keys for pre-auth */
+#define HDB_F_LIVE_SVC_KVNOS	2048	/* we want all live keys for tix */
+#define HDB_F_ALL_KVNOS		4096	/* we want all the keys, live or not */
+#define HDB_F_FOR_AS_REQ	8192	/* fetch is for a AS REQ */
+#define HDB_F_FOR_TGS_REQ	16384	/* fetch is for a TGS REQ */
 
 /* hdb_capability_flags */
 #define HDB_CAP_F_HANDLE_ENTERPRISE_PRINCIPAL 1
@@ -73,6 +74,8 @@ enum hdb_lockop{ HDB_RLOCK, HDB_WLOCK };
 #define HDB_AUTH_SUCCESS		0
 #define HDB_AUTH_WRONG_PASSWORD		1
 #define HDB_AUTH_INVALID_SIGNATURE	2
+
+#define HDB_PWD_CONDITIONAL		1
 
 /* key usage for master key */
 #define HDB_KU_MKEY	0x484442
@@ -214,6 +217,7 @@ typedef struct HDB{
      * point for the module.
      */
     krb5_error_code (*hdb_destroy)(krb5_context, struct HDB*);
+
     /**
      * Get the list of realms this backend handles.
      * This call is optional to support. The returned realms are used
@@ -230,8 +234,9 @@ typedef struct HDB{
      * all other operations, increasing the kvno, and update
      * modification timestamp.
      *
-     * The backend needs to call _kadm5_set_keys() and perform password
-     * quality checks.
+     * The backend needs to call _kadm5_set_keys() and perform
+     * password quality checks. The password quality should only be
+     * performed when the flag argument have HDB_PWD_CONDITIONAL set.
      */
     krb5_error_code (*hdb_password)(krb5_context, struct HDB*, hdb_entry_ex*, const char *, int);
 
@@ -254,6 +259,11 @@ typedef struct HDB{
      * Check if this name is an alias for the supplied client for PKINIT userPrinicpalName logins
      */
     krb5_error_code (*hdb_check_pkinit_ms_upn_match)(krb5_context, struct HDB *, hdb_entry_ex *, krb5_const_principal);
+
+    /**
+     * Return 0 if this domain support NTLM and return the domain name
+     */
+    krb5_error_code (*hdb_get_ntlm_domain)(krb5_context, struct HDB *, char **);
 
     /**
      * Check if s4u2self is allowed from this client to this server

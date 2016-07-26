@@ -31,9 +31,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef HAVE_CONFIG_H
 #include <config.h>
-#endif
 
 #include <roken.h>
 #include <stdio.h>
@@ -42,11 +40,14 @@
 #include <stdarg.h>
 #include <gssapi.h>
 #include <gssapi_krb5.h>
-#include <gssapi_spnego.h>
+#include <gssapi_spi.h>
 #include <err.h>
 #include <getarg.h>
+#include <base64.h>
 
 #include "test_common.h"
+
+static int verbose_flag;
 
 static void
 print_time(OM_uint32 time_rec)
@@ -59,20 +60,21 @@ print_time(OM_uint32 time_rec)
     }
 }
 
-#if 0
-
 static void
-test_add(gss_cred_id_t cred_handle)
+test_add(gss_const_OID mech, int flag, gss_cred_id_t cred_handle)
 {
     OM_uint32 major_status, minor_status;
     gss_cred_id_t copy_cred;
     OM_uint32 time_rec;
 
+    if (verbose_flag)
+	printf("trying add cred\n");
+
     major_status = gss_add_cred (&minor_status,
 				 cred_handle,
 				 GSS_C_NO_NAME,
-				 GSS_KRB5_MECHANISM,
-				 GSS_C_INITIATE,
+				 rk_UNCONST(mech),
+				 flag,
 				 0,
 				 0,
 				 &copy_cred,
@@ -83,6 +85,7 @@ test_add(gss_cred_id_t cred_handle)
     if (GSS_ERROR(major_status))
 	errx(1, "add_cred failed");
 
+    if (verbose_flag)
     print_time(time_rec);
 
     major_status = gss_release_cred(&minor_status,
@@ -90,6 +93,8 @@ test_add(gss_cred_id_t cred_handle)
     if (GSS_ERROR(major_status))
 	errx(1, "release_cred failed");
 }
+
+#if 0
 
 static void
 copy_cred(void)
@@ -109,6 +114,7 @@ copy_cred(void)
     if (GSS_ERROR(major_status))
 	errx(1, "acquire_cred failed");
 
+    if (verbose_flag)
     print_time(time_rec);
 
     test_add(cred_handle);
@@ -123,7 +129,7 @@ copy_cred(void)
 #endif
 
 static gss_cred_id_t
-acquire_cred_service(const char *service,
+acquire_cred_service(gss_buffer_t name_buffer,
 		     gss_OID nametype,
 		     gss_OID_set oidset,
 		     int flags)
@@ -131,15 +137,11 @@ acquire_cred_service(const char *service,
     OM_uint32 major_status, minor_status;
     gss_cred_id_t cred_handle;
     OM_uint32 time_rec;
-    gss_buffer_desc name_buffer;
     gss_name_t name = GSS_C_NO_NAME;
 
-    if (service) {
-	name_buffer.value = rk_UNCONST(service);
-	name_buffer.length = strlen(service);
-
+    if (name_buffer) {
 	major_status = gss_import_name(&minor_status,
-				       &name_buffer,
+				       name_buffer,
 				       nametype,
 				       &name);
 	if (GSS_ERROR(major_status))
@@ -158,8 +160,8 @@ acquire_cred_service(const char *service,
 	warnx("acquire_cred failed: %s",
 	     gssapi_err(major_status, minor_status, GSS_C_NO_OID));
     } else {
+	if (verbose_flag)
 	print_time(time_rec);
-	gss_release_cred(&minor_status, &cred_handle);
     }
 
     if (name != GSS_C_NO_NAME)
@@ -175,11 +177,15 @@ static int version_flag = 0;
 static int help_flag	= 0;
 static int kerberos_flag = 0;
 static int enctype = 0;
+static int no_ui_flag = 0;
 static char *acquire_name;
 static char *acquire_type;
+static char *cred_type;
+static char *mech_type;
 static char *target_name;
 static char *name_type;
 static char *ccache;
+static int anonymous_flag;
 static int num_loops = 1;
 
 static struct getargs args[] = {
@@ -191,6 +197,11 @@ static struct getargs args[] = {
     {"target-name", 0,	arg_string,	&target_name, "name", NULL },
     {"ccache", 0,	arg_string,	&ccache, "name", NULL },
     {"name-type", 0,	arg_string,	&name_type, "type", NULL },
+    {"cred-type", 0,	arg_string,	&cred_type, "mech-oid", NULL },
+    {"mech-type", 0,	arg_string,	&mech_type, "mech-oid", NULL },
+    {"no-ui", 0,	arg_flag,	&no_ui_flag, NULL },
+    {"anonymous", 0,	arg_flag,	&anonymous_flag, NULL },
+    {"verbose", 0,	arg_flag,	&verbose_flag, NULL },
     {"version",	0,	arg_flag,	&version_flag, "print version", NULL },
     {"help",	0,	arg_flag,	&help_flag,  NULL, NULL }
 };
@@ -206,13 +217,18 @@ int
 main(int argc, char **argv)
 {
     gss_OID_set oidset = GSS_C_NULL_OID_SET;
-    gss_OID mechoid = GSS_C_NO_OID;
-    OM_uint32 maj_stat, min_stat;
+    gss_const_OID mechoid = GSS_C_NO_OID;
+    gss_const_OID credoid = GSS_C_NO_OID;
+    OM_uint32 maj_stat, min_stat, isc_flags;
     gss_cred_id_t cred;
     gss_name_t target = GSS_C_NO_NAME;
     int i, optidx = 0;
     OM_uint32 flag;
     gss_OID type;
+    gss_buffer_t acquire_name_buffer = GSS_C_NO_BUFFER;
+    gss_buffer_desc acquire_name_buffer_desc = { 0, NULL };
+    int export_name = 0;
+    uint8_t *decoded_name = NULL;
 
     setprogname(argv[0]);
     if(getarg(args, sizeof(args) / sizeof(args[0]), argc, argv, &optidx))
@@ -227,7 +243,6 @@ main(int argc, char **argv)
     }
 
     argc -= optidx;
-    argv += optidx;
 
     if (argc != 0)
 	usage(1);
@@ -242,14 +257,27 @@ main(int argc, char **argv)
 	else
 	    errx(1, "unknown type %s", acquire_type);
     } else
-	flag = GSS_C_ACCEPT;
+	flag = GSS_C_INITIATE;
+	
+    if (no_ui_flag)
+	flag |= GSS_C_CRED_NO_UI;
 
     if (name_type) {
 	if (strcasecmp("hostbased-service", name_type) == 0)
 	    type = GSS_C_NT_HOSTBASED_SERVICE;
 	else if (strcasecmp("user-name", name_type) == 0)
 	    type = GSS_C_NT_USER_NAME;
-	else
+	else if (strcasecmp("krb5-principal-name", name_type) == 0)
+	    type = GSS_KRB5_NT_PRINCIPAL_NAME;
+	else if (strcasecmp("krb5-principal-name-referral", name_type) == 0)
+	    type = GSS_KRB5_NT_PRINCIPAL_NAME_REFERRAL;
+	else if (strcasecmp("anonymous", name_type) == 0) {
+	    type = GSS_C_NT_ANONYMOUS;
+	    acquire_name_buffer = &acquire_name_buffer_desc;
+	} else if (strcasecmp("export-name", name_type) == 0) {
+	    type = GSS_C_NT_EXPORT_NAME;
+	    export_name = 1;
+	} else
 	    errx(1, "unknown name type %s", name_type);
     } else
 	type = GSS_C_NT_HOSTBASED_SERVICE;
@@ -261,15 +289,23 @@ main(int argc, char **argv)
 		 gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
     }
 
-    if (kerberos_flag) {
+    if (kerberos_flag)
 	mechoid = GSS_KRB5_MECHANISM;
+
+    if (mech_type)
+	mechoid = gss_name_to_oid(mech_type);
+
+    if (cred_type) {
+	credoid = gss_name_to_oid(cred_type);
+	if (credoid == NULL)
+	    errx(1, "failed to find cred type %s", cred_type);
 
 	maj_stat = gss_create_empty_oid_set(&min_stat, &oidset);
 	if (maj_stat != GSS_S_COMPLETE)
 	    errx(1, "gss_create_empty_oid_set: %s",
 		 gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
 
-	maj_stat = gss_add_oid_set_member(&min_stat, GSS_KRB5_MECHANISM, &oidset);
+	maj_stat = gss_add_oid_set_member(&min_stat, credoid, &oidset); 
 	if (maj_stat != GSS_S_COMPLETE)
 	    errx(1, "gss_add_oid_set_member: %s",
 		 gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
@@ -287,9 +323,39 @@ main(int argc, char **argv)
 		 gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
     }
 
+    if (acquire_name) {
+	acquire_name_buffer = &acquire_name_buffer_desc;
+
+	if (export_name) {
+	    int len;
+
+	    decoded_name = emalloc(strlen(acquire_name));
+	    len = base64_decode(acquire_name, decoded_name);
+	    if (len < 0)
+		abort();
+
+	    acquire_name_buffer->value = decoded_name;
+	    acquire_name_buffer->length = len;
+	} else {
+	    acquire_name_buffer->value = acquire_name;
+	    acquire_name_buffer->length = strlen(acquire_name);
+	}
+    }
+
+    isc_flags = GSS_C_MUTUAL_FLAG;
+    if (anonymous_flag)
+	isc_flags |= GSS_C_ANON_FLAG;
+
     for (i = 0; i < num_loops; i++) {
 
-	cred = acquire_cred_service(acquire_name, type, oidset, flag);
+	cred = acquire_cred_service(acquire_name_buffer, type, oidset, flag);
+
+	if (credoid) {
+	    int j;
+
+	    for (j = 0; j < 10; j++)
+		test_add(credoid, flag, cred);
+	}
 
 	if (enctype) {
 	    int32_t enctypelist = enctype;
@@ -310,8 +376,8 @@ main(int argc, char **argv)
 
 	    maj_stat = gss_init_sec_context(&min_stat,
 					    cred, &context,
-					    target, mechoid,
-					    GSS_C_MUTUAL_FLAG, 0, NULL,
+					    target, rk_UNCONST(mechoid), 
+					    isc_flags, 0, NULL,
 					    GSS_C_NO_BUFFER, NULL,
 					    &out, NULL, NULL);
 	    if (maj_stat != GSS_S_COMPLETE && maj_stat != GSS_S_CONTINUE_NEEDED)
@@ -324,6 +390,12 @@ main(int argc, char **argv)
 	gss_release_cred(&min_stat, &cred);
     }
 
+    cred = acquire_cred_service(acquire_name_buffer, type, NULL, flag);
+    if (cred)
+	gss_release_cred(&min_stat, &cred);
+
+    if (decoded_name)
+	free(decoded_name);
 
     return 0;
 }

@@ -31,9 +31,7 @@
  * SUCH DAMAGE.
  */
 
-#ifdef HAVE_CONFIG_H
 #include <config.h>
-#endif
 
 #define HC_DEPRECATED
 #define HC_DEPRECATED_CRYPTO
@@ -48,11 +46,13 @@
 #include <evp-hcrypto.h>
 #include <evp-cc.h>
 
+#include <CommonCrypto/CommonRandomSPI.h>
+
 #include <krb5-types.h>
 #include <roken.h>
 
 #ifndef HCRYPTO_DEF_PROVIDER
-#define HCRYPTO_DEF_PROVIDER hcrypto
+#define HCRYPTO_DEF_PROVIDER cc
 #endif
 
 #define HC_CONCAT4(x,y,z,aa)	x ## y ## z ## aa
@@ -249,6 +249,7 @@ EVP_MD_CTX_block_size(EVP_MD_CTX *ctx)
 int
 EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *md, ENGINE *engine)
 {
+    assert(md != NULL);
     if (ctx->md != md || ctx->engine != engine) {
 	EVP_MD_CTX_cleanup(ctx);
 	ctx->md = md;
@@ -582,12 +583,19 @@ EVP_CIPHER_CTX_init(EVP_CIPHER_CTX *c)
 int
 EVP_CIPHER_CTX_cleanup(EVP_CIPHER_CTX *c)
 {
-    if (c->cipher && c->cipher->cleanup)
+    if (c->cipher) {
+	size_t size = c->cipher->ctx_size;
+	void *cipher_data = c->cipher_data;
+
+	if (c->cipher->cleanup)
 	c->cipher->cleanup(c);
-    if (c->cipher_data) {
-	memset(c->cipher_data, 0, c->cipher->ctx_size);
-	free(c->cipher_data);
+
+	if (cipher_data) {
+	    memset(cipher_data, 0, size);
+	    free(cipher_data);
 	c->cipher_data = NULL;
+    }
+	EVP_CIPHER_CTX_init(c);
     }
     return 1;
 }
@@ -803,7 +811,6 @@ EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *c, ENGINE *engine,
 	break;
 
     case EVP_CIPH_STREAM_CIPHER:
-	break;
     case EVP_CIPH_CFB8_MODE:
 	if (iv)
 	    memcpy(ctx->iv, iv, EVP_CIPHER_CTX_iv_length(ctx));
@@ -842,7 +849,7 @@ int
 EVP_CipherUpdate(EVP_CIPHER_CTX *ctx, void *out, int *outlen,
 		 void *in, size_t inlen)
 {
-    int ret, left, blocksize;
+    size_t ret, left, blocksize;
 
     *outlen = 0;
 
@@ -1176,7 +1183,7 @@ EVP_aes_256_cbc(void)
 }
 
 /**
- * The AES-128 cipher type
+ * The AES-128 CFB8 cipher type
  *
  * @return the AES-128 EVP_CIPHER pointer.
  *
@@ -1186,12 +1193,16 @@ EVP_aes_256_cbc(void)
 const EVP_CIPHER *
 EVP_aes_128_cfb8(void)
 {
+#ifndef __APPLE_TARGET_EMBEDDED__
     hcrypto_validate();
     return EVP_DEF_OP(HCRYPTO_DEF_PROVIDER, aes_128_cfb8);
+#else
+    return NULL;
+#endif
 }
 
 /**
- * The AES-192 cipher type
+ * The AES-192 CFB8 cipher type
  *
  * @return the AES-192 EVP_CIPHER pointer.
  *
@@ -1201,12 +1212,16 @@ EVP_aes_128_cfb8(void)
 const EVP_CIPHER *
 EVP_aes_192_cfb8(void)
 {
+#ifndef __APPLE_TARGET_EMBEDDED__
     hcrypto_validate();
     return EVP_DEF_OP(HCRYPTO_DEF_PROVIDER, aes_192_cfb8);
+#else
+    return NULL;
+#endif
 }
 
 /**
- * The AES-256 cipher type
+ * The AES-256 CFB8 cipher type
  *
  * @return the AES-256 EVP_CIPHER pointer.
  *
@@ -1216,8 +1231,12 @@ EVP_aes_192_cfb8(void)
 const EVP_CIPHER *
 EVP_aes_256_cfb8(void)
 {
+#ifndef __APPLE_TARGET_EMBEDDED__
     hcrypto_validate();
     return EVP_DEF_OP(HCRYPTO_DEF_PROVIDER, aes_256_cfb8);
+#else
+    return NULL;
+#endif
 }
 
 /**
@@ -1298,7 +1317,7 @@ static const struct cipher_name {
 const EVP_CIPHER *
 EVP_get_cipherbyname(const char *name)
 {
-    int i;
+    size_t i;
     for (i = 0; i < sizeof(cipher_name)/sizeof(cipher_name[0]); i++) {
 	if (strcasecmp(cipher_name[i].name, name) == 0)
 	    return (*cipher_name[i].func)();
@@ -1431,7 +1450,7 @@ EVP_CIPHER_CTX_rand_key(EVP_CIPHER_CTX *ctx, void *key)
 {
     if (ctx->cipher->flags & EVP_CIPH_RAND_KEY)
 	return EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_RAND_KEY, 0, key);
-    if (RAND_bytes(key, ctx->key_len) != 1)
+    if (CCRandomCopyBytes(kCCRandomDefault, key, ctx->key_len) != 0)
 	return 0;
     return 1;
 }

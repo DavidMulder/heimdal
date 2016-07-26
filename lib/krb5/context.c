@@ -49,6 +49,13 @@
     } while(0)
 
 /*
+ * Variables
+ */
+
+static HEIMDAL_MUTEX homedir_mutex = HEIMDAL_MUTEX_INITIALIZER;
+static krb5_boolean allow_homedir = TRUE;
+
+/*
  * Set the list of etypes `ret_etypes' from the configuration variable
  * `name'
  */
@@ -87,6 +94,50 @@ set_etypes (krb5_context context,
     return 0;
 }
 
+#ifdef __APPLE__
+
+static CFTypeRef
+CopyKeyFromFile(CFStringRef file, CFStringRef key)
+{
+    CFReadStreamRef s;
+    CFDictionaryRef d;
+    CFErrorRef e;
+    CFURLRef url;
+    CFTypeRef val;
+    
+    url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, file, kCFURLPOSIXPathStyle, false);
+    if (url == NULL)
+	return NULL;
+    
+    s = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
+    CFRelease(url);
+    if (s == NULL)
+	return NULL;
+    
+    if (!CFReadStreamOpen(s)) {
+	CFRelease(s);
+	return NULL;
+    }
+    
+    d = (CFDictionaryRef)CFPropertyListCreateWithStream (kCFAllocatorDefault, s, 0, kCFPropertyListImmutable, NULL, &e);
+    CFRelease(s);
+    if (d == NULL)
+	return NULL;
+    
+    if (CFGetTypeID(d) != CFDictionaryGetTypeID()) {
+	CFRelease(d);
+	return NULL;
+    }
+    
+    val = CFDictionaryGetValue(d, key);
+    if (val)
+	CFRetain(val);
+    CFRelease(d);
+    return val;
+}
+
+#endif /* __APPLE__ */
+
 /*
  * read variables from the configuration file and set in `context'
  */
@@ -100,7 +151,9 @@ init_context_from_config_file(krb5_context context)
     krb5_enctype *tmptypes;
 
     INIT_FIELD(context, time, max_skew, 5 * 60, "clockskew");
-    INIT_FIELD(context, time, kdc_timeout, 3, "kdc_timeout");
+    INIT_FIELD(context, time, kdc_timeout, 30, "kdc_timeout");
+    INIT_FIELD(context, time, host_timeout, 3, "host_timeout");
+    INIT_FIELD(context, time, tgs_negative_timeout, 1200, "tgs_negative_cache_timeout");
     INIT_FIELD(context, int, max_retries, 3, "max_retries");
 
     INIT_FIELD(context, string, http_proxy, NULL, "http_proxy");
@@ -176,7 +229,8 @@ init_context_from_config_file(krb5_context context)
 				 "dns_proxy", NULL);
     if(tmp)
 	roken_gethostby_setup(context->http_proxy, tmp);
-    krb5_free_host_realm (context, context->default_realms);
+
+    heim_release(context->default_realms);
     context->default_realms = NULL;
 
     {
@@ -220,18 +274,87 @@ init_context_from_config_file(krb5_context context)
     INIT_FIELD(context, bool, srv_lookup, TRUE, "srv_lookup");
     INIT_FIELD(context, bool, srv_lookup, context->srv_lookup, "dns_lookup_kdc");
     INIT_FIELD(context, int, large_msg_size, 1400, "large_message_size");
+    INIT_FIELD(context, int, max_msg_size, 1000 * 1024, "maximum_message_size");
     INIT_FLAG(context, flags, KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME, TRUE, "dns_canonicalize_hostname");
     INIT_FLAG(context, flags, KRB5_CTX_F_CHECK_PAC, TRUE, "check_pac");
+
+    if (context->default_cc_name)
+	free(context->default_cc_name);
     context->default_cc_name = NULL;
     context->default_cc_name_set = 0;
 
     s = krb5_config_get_strings(context, NULL, "logging", "krb5", NULL);
     if(s) {
 	char **p;
+
+	if (context->debug_dest)
+	    krb5_closelog(context, context->debug_dest);
+
 	krb5_initlog(context, "libkrb5", &context->debug_dest);
 	for(p = s; *p; p++)
 	    krb5_addlog_dest(context, context->debug_dest, *p);
 	krb5_config_free_strings(s);
+    } else if (context->debug_dest == NULL) {
+	char *logline = NULL;
+
+	if (!issuid()) {
+	    char *e = getenv("KRB5_TRACE");
+	    if (e)
+		asprintf(&logline, "0-/FILE:%s", e);
+	}
+
+#if __APPLE__
+
+#ifdef __APPLE_TARGET_EMBEDDED__
+#define GLOBAL_PREFERENCE_FILE CFSTR("/Library/Managed Preferences/mobile/.GlobalPreferences.plist")
+#else
+#define GLOBAL_PREFERENCE_FILE CFSTR("/Library/Managed Preferences/.GlobalPreferences.plist")
+#endif
+
+	if (logline == NULL) {
+	    CFTypeRef val = NULL;
+
+	    if (geteuid() && krb5_homedir_access(NULL)) {
+		/*
+		 * Pick up global preferences that can be configured via a
+		 * profile.
+		 */
+		val = CFPreferencesCopyAppValue(CFSTR("KerberosDebugLevel"), CFSTR(".GlobalPreferences"));
+	    } else {
+		val = CopyKeyFromFile(GLOBAL_PREFERENCE_FILE, CFSTR("KerberosDebugLevel"));
+	    }
+	    if (val) {
+		int logLevel = 1;
+
+		if (CFGetTypeID(val) == CFBooleanGetTypeID())
+		    logLevel = CFBooleanGetValue(val) ? 1 : 0;
+		else if (CFGetTypeID(val) == CFNumberGetTypeID())
+		    CFNumberGetValue(val, kCFNumberIntType, &logLevel);
+		else
+		    /* ignore other types */;
+		CFRelease(val);
+
+		asprintf(&logline, "0-%d/ASL:NOTICE:libkrb5", logLevel);
+	    }
+	}
+#endif /* __APPLE__ */
+
+#if __APPLE_TARGET_EMBEDDED__
+	/* on embedded, don't do any debug logging by default */
+	if (logline) {
+	    krb5_initlog(context, "libkrb5", &context->debug_dest);
+	    krb5_addlog_dest(context, context->debug_dest, logline);
+	    free(logline);
+	}
+#else
+	krb5_initlog(context, "libkrb5", &context->debug_dest);
+	if (logline) {
+	    krb5_addlog_dest(context, context->debug_dest, logline);
+	    free(logline);
+	} else {
+	    krb5_addlog_dest(context, context->debug_dest, "0-1/ASL:DEBUG:libkrb5");
+	}
+#endif
     }
 
     tmp = krb5_config_get_string(context, NULL, "libdefaults",
@@ -252,7 +375,7 @@ cc_ops_register(krb5_context context)
     context->cc_ops = NULL;
     context->num_cc_ops = 0;
 
-#ifndef KCM_IS_API_CACHE
+#if HAVE_ACC
     krb5_cc_register(context, &krb5_acc_ops, TRUE);
 #endif
     krb5_cc_register(context, &krb5_fcc_ops, TRUE);
@@ -266,9 +389,214 @@ cc_ops_register(krb5_context context)
 #endif
     krb5_cc_register(context, &krb5_kcm_ops, TRUE);
 #endif
+#ifdef HAVE_XCC
+#ifdef XCACHE_IS_API_CACHE
+    krb5_cc_register(context, &krb5_xcc_api_ops, TRUE);
+#endif
+    krb5_cc_register(context, &krb5_xcc_ops, TRUE);
+#endif
     _krb5_load_ccache_plugins(context);
     return 0;
 }
+
+static krb5_error_code
+kt_ops_register(krb5_context context)
+{
+    context->num_kt_types = 0;
+    context->kt_types     = NULL;
+
+    krb5_kt_register (context, &krb5_fkt_ops);
+    krb5_kt_register (context, &krb5_wrfkt_ops);
+    krb5_kt_register (context, &krb5_javakt_ops);
+#ifdef HEIM_KT_MEMORY
+    krb5_kt_register (context, &krb5_mkt_ops);
+#endif
+#ifdef HEIM_KT_AKF
+    krb5_kt_register (context, &krb5_akf_ops);
+#endif
+#ifdef HEIM_KT_ANY
+    krb5_kt_register (context, &krb5_any_ops);
+#endif
+    return 0;
+}
+
+#ifdef HAVE_NOTIFY_H
+static int check_token = -1;
+static int config_token = -1;
+#endif
+
+static const char *sysplugin_dirs[] =  {
+    LIBDIR "/plugin/krb5",
+#ifdef __APPLE__
+    "/Library/KerberosPlugins/KerberosFrameworkPlugins",
+    "/System/Library/KerberosPlugins/KerberosFrameworkPlugins",
+#endif
+    NULL
+};
+
+static void
+init_context_once(void *ctx)
+{
+    krb5_context context = ctx;
+
+#ifdef HAVE_NOTIFY_H
+    notify_register_check(KRB5_CONFIGURATION_CHANGE_NOTIFY_NAME,
+			  &check_token);
+    notify_register_check("com.apple.ManagedConfiguration.profileListChanged",
+			  &config_token);
+#endif
+
+    krb5_load_plugins(context, "krb5", sysplugin_dirs);
+
+    bindtextdomain(HEIMDAL_TEXTDOMAIN, HEIMDAL_LOCALEDIR);
+}
+
+static void
+context_release(void *ptr)
+{
+    krb5_context context = (krb5_context)ptr;
+
+    if (context->default_cc_name)
+	free(context->default_cc_name);
+    if (context->default_cc_name_env)
+	free(context->default_cc_name_env);
+    if (context->config_files)
+	krb5_free_config_files(context->config_files);
+    free(context->etypes);
+    free(context->etypes_des);
+    heim_release(context->default_realms);
+    krb5_config_file_free (context, context->cf);
+    free_error_table (context->et_list);
+    free(rk_UNCONST(context->cc_ops));
+    free(context->kt_types);
+    krb5_clear_error_message(context);
+    if (context->warn_dest != NULL)
+	krb5_closelog(context, context->warn_dest);
+    if (context->debug_dest != NULL)
+	krb5_closelog(context, context->debug_dest);
+    krb5_set_extra_addresses(context, NULL);
+    krb5_set_ignore_addresses(context, NULL);
+#ifndef HEIMDAL_SMALLER
+    krb5_set_send_to_kdc_func(context, NULL, NULL);
+#endif
+
+#ifdef PKINIT
+    if (context->hx509ctx)
+	hx509_context_free(&context->hx509ctx);
+#endif
+
+    HEIMDAL_MUTEX_destroy(context->mutex);
+    free(context->mutex);
+    if (context->flags & KRB5_CTX_F_SOCKETS_INITIALIZED) {
+ 	rk_SOCK_EXIT();
+    }
+}
+
+/**
+ * Initializes the context structure and reads the configuration files.
+ *
+ * The structure should be freed by calling
+ * krb5_free_context() when it is no longer being used.
+ *
+ * @param context pointer to returned context
+ * @param flags controls context creation failure.
+ *
+ * Possible flags are:
+ * - KRB5_CONTEXT_FLAG_NO_CONFIG - don't read the any configuration files
+ *
+ * @return Returns 0 to indicate success.  Otherwise an errno code is
+ * returned.  Failure means either that something bad happened during
+ * initialization (typically ENOMEM) or that Kerberos should not be
+ * used ENXIO.
+ *
+ * @see krb5_init_context
+ * @ingroup krb5
+ */
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_init_context_flags(unsigned int flags, krb5_context *context)
+{
+    static heim_base_once_t init_context = HEIM_BASE_ONCE_INIT;
+    krb5_context p;
+    krb5_error_code ret;
+    char **files = NULL;
+
+    *context = NULL;
+
+    p = heim_uniq_alloc(sizeof(*p), "krb5-context", context_release);
+    if(!p)
+	return ENOMEM;
+
+    p->mutex = malloc(sizeof(HEIMDAL_MUTEX));
+    if (p->mutex == NULL) {
+	heim_release(p);
+	return ENOMEM;
+    }
+    HEIMDAL_MUTEX_init(p->mutex);
+
+    HEIMDAL_MUTEX_lock(&homedir_mutex);
+    if (allow_homedir)
+    p->flags |= KRB5_CTX_F_HOMEDIR_ACCESS;
+    HEIMDAL_MUTEX_unlock(&homedir_mutex);
+
+    if ((flags & KRB5_CONTEXT_FLAG_NO_CONFIG) == 0) {
+    ret = krb5_get_default_config_files(&files);
+    if(ret)
+	goto out;
+    }
+    ret = krb5_set_config_files(p, files);
+    krb5_free_config_files(files);
+    if(ret)
+	goto out;
+
+    heim_base_once_f(&init_context, p, init_context_once);
+
+    /* init error tables */
+    krb5_init_ets(p);
+    cc_ops_register(p);
+    kt_ops_register(p);
+
+#ifdef PKINIT
+    ret = hx509_context_init(&p->hx509ctx);
+    if (ret)
+	goto out;
+#endif
+#if rk_SOCK_INIT
+    if (rk_SOCK_INIT())
+	p->flags |= KRB5_CTX_F_SOCKETS_INITIALIZED;
+#endif
+
+out:
+    if(ret) {
+	krb5_free_context(p);
+	p = NULL;
+    }
+
+    *context = p;
+    return ret;
+}
+
+/**
+ * Initializes the context structure and reads the configuration files.
+
+ * The structure should be freed by calling krb5_free_context() when
+ * it is no longer being used.
+ *
+ * @param context pointer to returned context
+ *
+ * @return Returns 0 to indicate success.
+ *
+ * @ingroup krb5
+ */
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_init_context(krb5_context *context)
+{
+    return krb5_init_context_flags(0, context);
+}
+
+
+#ifndef HEIMDAL_SMALLER
 
 static krb5_error_code
 cc_ops_copy(krb5_context context, const krb5_context src_context)
@@ -288,28 +616,11 @@ cc_ops_copy(krb5_context context, const krb5_context src_context)
 	return KRB5_CC_NOMEM;
     }
 
-    memcpy(rk_UNCONST(cc_ops), src_context->cc_ops,
+    memcpy(cc_ops, src_context->cc_ops,
 	   sizeof(cc_ops[0]) * src_context->num_cc_ops);
     context->cc_ops = cc_ops;
     context->num_cc_ops = src_context->num_cc_ops;
 
-    return 0;
-}
-
-static krb5_error_code
-kt_ops_register(krb5_context context)
-{
-    context->num_kt_types = 0;
-    context->kt_types     = NULL;
-
-    krb5_kt_register (context, &krb5_fkt_ops);
-    krb5_kt_register (context, &krb5_wrfkt_ops);
-    krb5_kt_register (context, &krb5_javakt_ops);
-    krb5_kt_register (context, &krb5_mkt_ops);
-#ifndef HEIMDAL_SMALLER
-    krb5_kt_register (context, &krb5_akf_ops);
-#endif
-    krb5_kt_register (context, &krb5_any_ops);
     return 0;
 }
 
@@ -334,105 +645,6 @@ kt_ops_copy(krb5_context context, const krb5_context src_context)
 	   sizeof(context->kt_types[0]) * src_context->num_kt_types);
 
     return 0;
-}
-
-static const char *sysplugin_dirs[] =  {
-    LIBDIR "/plugin/krb5",
-#ifdef __APPLE__
-    "/Library/KerberosPlugins/KerberosFrameworkPlugins",
-    "/System/Library/KerberosPlugins/KerberosFrameworkPlugins",
-#endif
-    NULL
-};
-
-static void
-init_context_once(void *ctx)
-{
-    krb5_context context = ctx;
-
-    _krb5_load_plugins(context, "krb5", sysplugin_dirs);
-
-    bindtextdomain(HEIMDAL_TEXTDOMAIN, HEIMDAL_LOCALEDIR);
-}
-
-
-/**
- * Initializes the context structure and reads the configuration file
- * /etc/krb5.conf. The structure should be freed by calling
- * krb5_free_context() when it is no longer being used.
- *
- * @param context pointer to returned context
- *
- * @return Returns 0 to indicate success.  Otherwise an errno code is
- * returned.  Failure means either that something bad happened during
- * initialization (typically ENOMEM) or that Kerberos should not be
- * used ENXIO.
- *
- * @ingroup krb5
- */
-
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
-krb5_init_context(krb5_context *context)
-{
-    static heim_base_once_t init_context = HEIM_BASE_ONCE_INIT;
-    krb5_context p;
-    krb5_error_code ret;
-    char **files;
-
-    *context = NULL;
-
-    p = calloc(1, sizeof(*p));
-    if(!p)
-	return ENOMEM;
-
-    p->mutex = malloc(sizeof(HEIMDAL_MUTEX));
-    if (p->mutex == NULL) {
-	free(p);
-	return ENOMEM;
-    }
-    HEIMDAL_MUTEX_init(p->mutex);
-
-    p->flags |= KRB5_CTX_F_HOMEDIR_ACCESS;
-
-    ret = krb5_get_default_config_files(&files);
-    if(ret)
-	goto out;
-    ret = krb5_set_config_files(p, files);
-    krb5_free_config_files(files);
-    if(ret)
-	goto out;
-
-    /* init error tables */
-    krb5_init_ets(p);
-    cc_ops_register(p);
-    kt_ops_register(p);
-
-#ifdef PKINIT
-    ret = hx509_context_init(&p->hx509ctx);
-    if (ret)
-	goto out;
-#endif
-    if (rk_SOCK_INIT())
-	p->flags |= KRB5_CTX_F_SOCKETS_INITIALIZED;
-
-out:
-    if(ret) {
-	krb5_free_context(p);
-	p = NULL;
-    } else {
-	heim_base_once_f(&init_context, p, init_context_once);
-    }
-    *context = p;
-    return ret;
-}
-
-#ifndef HEIMDAL_SMALLER
-
-KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
-krb5_get_permitted_enctypes(krb5_context context,
-			    krb5_enctype **etypes)
-{
-    return krb5_get_default_in_tkt_etypes(context, KRB5_PDU_NONE, etypes);
 }
 
 /*
@@ -512,12 +724,8 @@ krb5_copy_context(krb5_context context, krb5_context *out)
 	    goto out;
     }
 
-    if (context->default_realms) {
-	ret = krb5_copy_host_realm(context,
-				   context->default_realms, &p->default_realms);
-	if (ret)
-	    goto out;
-    }
+    if (context->default_realms)
+	p->default_realms = heim_retain(context->default_realms);
 
     ret = _krb5_config_copy(context, context->cf, &p->cf);
     if (ret)
@@ -569,39 +777,30 @@ krb5_copy_context(krb5_context context, krb5_context *out)
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_free_context(krb5_context context)
 {
-    if (context->default_cc_name)
-	free(context->default_cc_name);
-    if (context->default_cc_name_env)
-	free(context->default_cc_name_env);
-    free(context->etypes);
-    free(context->etypes_des);
-    krb5_free_host_realm (context, context->default_realms);
-    krb5_config_file_free (context, context->cf);
-    free_error_table (context->et_list);
-    free(rk_UNCONST(context->cc_ops));
-    free(context->kt_types);
-    krb5_clear_error_message(context);
-    if(context->warn_dest != NULL)
-	krb5_closelog(context, context->warn_dest);
-    if(context->debug_dest != NULL)
-	krb5_closelog(context, context->debug_dest);
-    krb5_set_extra_addresses(context, NULL);
-    krb5_set_ignore_addresses(context, NULL);
-    krb5_set_send_to_kdc_func(context, NULL, NULL);
+    heim_release(context);
+}
 
-#ifdef PKINIT
-    if (context->hx509ctx)
-	hx509_context_free(&context->hx509ctx);
-#endif
+static krb5_error_code
+add_file(char ***pfilenames, unsigned *len, char *file)
+{
+    char **pp = *pfilenames;
+    unsigned i;
 
-    HEIMDAL_MUTEX_destroy(context->mutex);
-    free(context->mutex);
-    if (context->flags & KRB5_CTX_F_SOCKETS_INITIALIZED) {
- 	rk_SOCK_EXIT();
-    }
+    for (i = 0; i < *len; i++)
+	if (strcmp(pp[i], file) == 0)
+	    return 0;
 
-    memset(context, 0, sizeof(*context));
-    free(context);
+    pp = realloc(*pfilenames, (*len + 2) * sizeof(*pp));
+    if (pp == NULL)
+	return ENOMEM;
+    *pfilenames = pp;
+
+    pp[*len] = strdup(file);
+    if (pp[*len] == NULL)
+	return ENOMEM;
+    pp[*len + 1] = NULL;
+    *len += 1;
+    return 0;
 }
 
 /**
@@ -621,14 +820,29 @@ krb5_set_config_files(krb5_context context, char **filenames)
 {
     krb5_error_code ret;
     krb5_config_binding *tmp = NULL;
-    while(filenames != NULL && *filenames != NULL && **filenames != '\0') {
+    char **files = NULL;
+
+    if (filenames) {
+	unsigned len = 0;
+
+	while (*filenames != NULL && **filenames != '\0') {
+
+	    ret = add_file(&files, &len, *filenames);
+	    if (ret == 0)
 	ret = krb5_config_parse_file_multi(context, *filenames, &tmp);
-	if(ret != 0 && ret != ENOENT && ret != EACCES && ret != EPERM) {
+
+	    if (ret != 0 && ret != ENOENT && ret != EACCES && ret != EPERM && ret != KRB5_CONFIG_BADFORMAT) {
+		krb5_free_config_files(files);
 	    krb5_config_file_free(context, tmp);
 	    return ret;
 	}
 	filenames++;
     }
+    }
+    
+    krb5_free_config_files(context->config_files);
+    context->config_files = files;
+
 #if 0
     /* with this enabled and if there are no config files, Kerberos is
        considererd disabled */
@@ -646,32 +860,6 @@ krb5_set_config_files(krb5_context context, char **filenames)
     return ret;
 }
 
-static krb5_error_code
-add_file(char ***pfilenames, int *len, char *file)
-{
-    char **pp = *pfilenames;
-    int i;
-
-    for(i = 0; i < *len; i++) {
-	if(strcmp(pp[i], file) == 0) {
-	    free(file);
-	    return 0;
-	}
-    }
-
-    pp = realloc(*pfilenames, (*len + 2) * sizeof(*pp));
-    if (pp == NULL) {
-	free(file);
-	return ENOMEM;
-    }
-
-    pp[*len] = file;
-    pp[*len + 1] = NULL;
-    *pfilenames = pp;
-    *len += 1;
-    return 0;
-}
-
 /*
  *  `pq' isn't free, it's up the the caller
  */
@@ -680,15 +868,11 @@ KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_prepend_config_files(const char *filelist, char **pq, char ***ret_pp)
 {
     krb5_error_code ret;
-    const char *p, *q;
-    char **pp;
-    int len;
+    const char *q, *p = filelist;
+    char **pp = NULL;
+    unsigned len = 0;
     char *fn;
 
-    pp = NULL;
-
-    len = 0;
-    p = filelist;
     while(1) {
 	ssize_t l;
 	q = p;
@@ -702,6 +886,7 @@ krb5_prepend_config_files(const char *filelist, char **pq, char ***ret_pp)
 	}
 	(void)strsep_copy(&p, PATH_SEP, fn, l + 1);
 	ret = add_file(&pp, &len, fn);
+	free(fn);
 	if (ret) {
 	    krb5_free_config_files(pp);
 	    return ret;
@@ -712,12 +897,7 @@ krb5_prepend_config_files(const char *filelist, char **pq, char ***ret_pp)
 	int i;
 
 	for (i = 0; pq[i] != NULL; i++) {
-	    fn = strdup(pq[i]);
-	    if (fn == NULL) {
-		krb5_free_config_files(pp);
-		return ENOMEM;
-	    }
-	    ret = add_file(&pp, &len, fn);
+	    ret = add_file(&pp, &len, pq[i]);
 	    if (ret) {
 		krb5_free_config_files(pp);
 		return ret;
@@ -847,9 +1027,6 @@ krb5_get_default_config_files(char ***pfilenames)
  * @param filenames list, terminated with a NULL pointer, to be
  * freed. NULL is an valid argument.
  *
- * @return Returns 0 to indicate success. Otherwise an kerberos et
- * error code is returned, see krb5_get_error_message().
- *
  * @ingroup krb5
  */
 
@@ -878,7 +1055,7 @@ krb5_free_config_files(char **filenames)
 KRB5_LIB_FUNCTION const krb5_enctype * KRB5_LIB_CALL
 krb5_kerberos_enctypes(krb5_context context)
 {
-    static const krb5_enctype p[] = {
+    static const krb5_enctype strong[] = {
 	ETYPE_AES256_CTS_HMAC_SHA1_96,
 	ETYPE_AES128_CTS_HMAC_SHA1_96,
 	ETYPE_DES3_CBC_SHA1,
@@ -890,7 +1067,6 @@ krb5_kerberos_enctypes(krb5_context context)
 	ETYPE_AES256_CTS_HMAC_SHA1_96,
 	ETYPE_AES128_CTS_HMAC_SHA1_96,
 	ETYPE_DES3_CBC_SHA1,
-	ETYPE_DES3_CBC_MD5,
 	ETYPE_ARCFOUR_HMAC_MD5,
 	ETYPE_DES_CBC_MD5,
 	ETYPE_DES_CBC_MD4,
@@ -903,15 +1079,12 @@ krb5_kerberos_enctypes(krb5_context context)
      * are valid, then return the former default enctype list
      * that contained the weak entries.
      */
-    if (krb5_enctype_valid(context, ETYPE_DES_CBC_CRC) == 0 &&
-        krb5_enctype_valid(context, ETYPE_DES_CBC_MD4) == 0 &&
-        krb5_enctype_valid(context, ETYPE_DES_CBC_MD5) == 0 &&
-        krb5_enctype_valid(context, ETYPE_DES_CBC_NONE) == 0 &&
-        krb5_enctype_valid(context, ETYPE_DES_CFB64_NONE) == 0 &&
-        krb5_enctype_valid(context, ETYPE_DES_PCBC_NONE) == 0)
-        return weak;
+    size_t n;
+    for (n = 0; weak[n] != ETYPE_NULL; n++)
+	if (krb5_enctype_valid(context, weak[n]) != 0)
+	    return strong;
 
-    return p;
+    return weak;
 }
 
 /*
@@ -964,6 +1137,11 @@ default_etypes(krb5_context context, krb5_enctype **etype)
  * Set the default encryption types that will be use in communcation
  * with the KDC, clients and servers.
  *
+ * If any of the enctypes selected are not valid, they are removed out
+ * from the list. If the list becomes empty because non of the
+ * proposed enctypes are supported, KRB5_PROG_ETYPE_NOSUPP is
+ * returned.
+ *
  * @param context Kerberos 5 context.
  * @param etypes Encryption types, array terminated with ETYPE_NULL (0).
  *
@@ -984,6 +1162,11 @@ krb5_set_default_in_tkt_etypes(krb5_context context,
 	ret = copy_enctypes(context, etypes, &p);
 	if (ret)
 	    return ret;
+    }
+    if (p == NULL) {
+	krb5_set_error_message(context, KRB5_PROG_ETYPE_NOSUPP,
+			       N_("entypes not supported", ""));
+	return KRB5_PROG_ETYPE_NOSUPP;
     }
     if(context->etypes)
 	free(context->etypes);
@@ -1476,11 +1659,8 @@ _krb5_init_etype(krb5_context context,
  * Allow homedir accces
  */
 
-static HEIMDAL_MUTEX homedir_mutex = HEIMDAL_MUTEX_INITIALIZER;
-static krb5_boolean allow_homedir = TRUE;
-
 krb5_boolean
-_krb5_homedir_access(krb5_context context)
+krb5_homedir_access(krb5_context context)
 {
     krb5_boolean allow;
 
@@ -1535,4 +1715,88 @@ krb5_set_home_dir_access(krb5_context context, krb5_boolean allow)
     }
 
     return old;
+}
+
+static krb5_boolean
+_krb5_need_to_reload(krb5_context context)
+{
+#ifdef HAVE_NOTIFY_H
+    int check = 0, ret;
+
+    if (check_token != -1) {
+	ret = notify_check(check_token, &check);
+	if (ret == NOTIFY_STATUS_OK && check) {
+	    context->last_config_update = time(NULL);
+	    return TRUE;
+	}
+    }
+    if (config_token != -1) {
+	ret = notify_check(config_token, &check);
+	if (ret == NOTIFY_STATUS_OK && check) {
+	    context->last_config_update = time(NULL);
+	    return TRUE;
+	}
+    }
+#endif
+    /* because of the perfomance penalty we don't reload unless we know its needed */
+    return FALSE;
+}
+
+/**
+ * Reload the configuration files that was used last time, used when
+ * they might have changed. Will only reload if know for sure that the
+ * files need to be reloaded.
+ *
+ * @param context the krb5 context to reload
+ * @param flags flag field, pass 0 for now
+ * @param reread the configuration file was re-read,
+ *        NULL is valid if the caller doesn't want to
+ *	  know if it was re-read or not.
+ *
+ * @return Returns 0 to indicate success. Otherwise an kerberos et
+ * error code is returned, see krb5_get_error_message().
+ *
+ * @ingroup krb5
+ */
+
+krb5_error_code
+krb5_reload_config(krb5_context context,
+		   unsigned flags,
+		   krb5_boolean *reread)
+{
+    krb5_error_code ret;
+    krb5_config_binding *tmp = NULL;
+    unsigned i;
+
+    /**
+     * If function returns a failure, and reread is used, value of
+     * reread is FALSE.
+     */
+
+    if (reread)
+	*reread = FALSE;
+
+    if (_krb5_need_to_reload(context) == FALSE)
+	return 0;
+
+    if (context->config_files == NULL)
+	return 0;
+
+    for (i = 0; context->config_files[i]; i++) {
+	ret = krb5_config_parse_file_multi(context,
+					   context->config_files[i],
+					   &tmp);
+	if (ret != 0 && ret != ENOENT && ret != EACCES && ret != EPERM && ret != KRB5_CONFIG_BADFORMAT) {
+	    krb5_config_file_free(context, tmp);
+	    return ret;
+	}
+    }
+
+    if (reread)
+	*reread = TRUE;
+
+    krb5_config_file_free(context, context->cf);
+    context->cf = tmp;
+
+    return init_context_from_config_file(context);
 }

@@ -58,6 +58,13 @@ _gsskrb5_delete_sec_context(OM_uint32 * minor_status,
 
     HEIMDAL_MUTEX_lock(&ctx->ctx_id_mutex);
 
+    if (ctx->ccache) {
+	if (ctx->more_flags & CLOSE_CCACHE)
+	    krb5_cc_close(context, ctx->ccache);
+	else if (ctx->more_flags & DESTROY_CCACHE)
+	    krb5_cc_destroy(context, ctx->ccache);
+    }
+
     krb5_auth_con_free (context, ctx->auth_context);
     krb5_auth_con_free (context, ctx->deleg_auth_context);
     if (ctx->kcred)
@@ -68,13 +75,35 @@ _gsskrb5_delete_sec_context(OM_uint32 * minor_status,
 	krb5_free_principal (context, ctx->target);
     if (ctx->ticket)
 	krb5_free_ticket (context, ctx->ticket);
-    if(ctx->order)
-	_gssapi_msg_order_destroy(&ctx->order);
+    if(ctx->gk5c.order)
+	_gssapi_msg_order_destroy(&ctx->gk5c.order);
     if (ctx->service_keyblock)
 	krb5_free_keyblock (context, ctx->service_keyblock);
     krb5_data_free(&ctx->fwd_data);
-    if (ctx->crypto)
-    	krb5_crypto_destroy(context, ctx->crypto);
+    if (ctx->gk5c.crypto)
+    	krb5_crypto_destroy(context, ctx->gk5c.crypto);
+#ifdef PKINIT
+    if (ctx->cert)
+	hx509_cert_free(ctx->cert);
+    if (ctx->gic_opt)
+	krb5_get_init_creds_opt_free(context, ctx->gic_opt);
+#endif
+    if (ctx->asctx)
+	krb5_init_creds_free(context, ctx->asctx);
+    if (ctx->password) {
+	memset(ctx->password, 0, strlen(ctx->password));
+	free(ctx->password);
+    }
+    if (ctx->cookie)
+	krb5_free_data(context, ctx->cookie);
+    if (ctx->iakerbrealm)
+	free(ctx->iakerbrealm);
+    if (ctx->messages)
+	krb5_storage_free(ctx->messages);
+    if (ctx->friendlyname.length)
+	krb5_data_free(&ctx->friendlyname);
+    if (ctx->lkdchostname.length)
+	krb5_data_free(&ctx->lkdchostname);
 
     HEIMDAL_MUTEX_unlock(&ctx->ctx_id_mutex);
     HEIMDAL_MUTEX_destroy(&ctx->ctx_id_mutex);

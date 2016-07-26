@@ -344,6 +344,7 @@ ipv6_anyaddr (struct sockaddr *sa, krb5_socklen_t *sa_size, int port)
     tmp.sin6_family = AF_INET6;
     tmp.sin6_port   = port;
     tmp.sin6_addr   = in6addr_any;
+    memcpy(sa, &tmp, min(sizeof(tmp), *sa_size));
     *sa_size = sizeof(tmp);
 }
 
@@ -400,8 +401,9 @@ ipv6_mask_boundary(krb5_context context, const krb5_address *inaddr,
 		   unsigned long len, krb5_address *low, krb5_address *high)
 {
     struct in6_addr addr, laddr, haddr;
+    size_t sub_len;
     uint32_t m;
-    int i, sub_len;
+    int i;
 
     if (len > 128) {
 	krb5_set_error_message(context, KRB5_PROG_ATYPE_NOSUPP,
@@ -723,9 +725,9 @@ addrport_print_addr (const krb5_address *addr, char *str, size_t len)
 
     ret = snprintf(str + size, len - size, ",PORT=%u", port);
     if (ret < 0)
-	return EINVAL;
+	return -1;
     ret_len += ret;
-    return ret_len;
+    return (int)ret_len;
 }
 
 static struct addr_operations at[] = {
@@ -1145,8 +1147,8 @@ krb5_print_address (const krb5_address *addr,
  * krb5_addresses addresses .
  *
  * @param context a Keberos context
- * @param string
- * @param addresses
+ * @param string string to parse as an address
+ * @param addresses return address, free with krb5_free_addresses()
  *
  * @return Return an error code or 0.
  *
@@ -1206,7 +1208,7 @@ krb5_parse_address(krb5_context context,
 
     addresses->len = 0;
     for (a = ai, i = 0; a != NULL; a = a->ai_next) {
-	if (krb5_sockaddr2address (context, ai->ai_addr, &addresses->val[i]))
+	if (krb5_sockaddr2address (context, a->ai_addr, &addresses->val[i]))
 	    continue;
 	if(krb5_address_search(context, &addresses->val[i], addresses)) {
 	    krb5_free_address(context, &addresses->val[i]);
@@ -1264,7 +1266,7 @@ krb5_address_order(krb5_context context,
     if(addr1->addr_type != addr2->addr_type)
 	return addr1->addr_type - addr2->addr_type;
     if(addr1->address.length != addr2->address.length)
-	return addr1->address.length - addr2->address.length;
+	return (int)(addr1->address.length - addr2->address.length);
     return memcmp (addr1->address.data,
 		   addr2->address.data,
 		   addr1->address.length);

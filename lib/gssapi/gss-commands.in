@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden). 
  * All rights reserved. 
  *
+ * Portions Copyright (c) 2009 - 2010 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without 
  * modification, are permitted provided that the following conditions 
  * are met: 
@@ -35,6 +37,157 @@
 command = {
 	name = "supported-mechanisms"
 	help = "Print the supported mechanisms"
+	option = {
+		long = "options"
+		type = "flag"
+	}
+}
+command = {
+	name = "acquire-credential"
+	help = "Acquire initial credential"
+	option = {
+		long = "user"
+		type = "string"
+		argument = "domain"
+	}
+	option = {
+		long = "realm"
+		type = "string"
+		argument = "domain"
+	}
+	option = {
+		long = "kdc-hostname"
+		type = "string"
+		argument = "hostname"
+	}
+	option = {
+		long = "certificate-persistant"
+		type = "string"
+		argument = "persistent reference"
+	}
+	option = {
+		long = "mech"
+		type = "string"
+		argument = "gssapi mechanism"
+	}
+	option = {
+		long = "validate"
+		type = "flag"
+	}
+	option = {
+		long = "server-hostname"
+		type = "string"
+		argument = "server name used for validation"
+	}
+	min_args = "0"
+	max_args = "1"
+	argument = "[user name]"
+}
+command = {
+	name = "list-credentials"
+	help = "List available credentials"
+	option = {
+		long = "verbose"
+		type = "flag"
+	}
+	option = {
+		long = "mech"
+		type = "string"
+		argument = "gssapi mechanism"
+	}
+
+	min_args = "0"
+	max_args = "0"
+}
+command = {
+	option = {
+		long = "name-type"
+		type = "string"
+		argument = "name-type"
+	}
+	option = {
+		long = "mech"
+		type = "string"
+		argument = "gssapi mechanism"
+	}
+	option = {
+		long = "all"
+		short = "A"
+		type = "flag"
+	}
+	name = "destroy"
+	argument = "[user name]"
+	min_args = "0"
+	max_args = "1"
+	help = "Destroy one or all credentials of optional mech type."
+}
+command = {
+	option = {
+		long = "name-type"
+		type = "string"
+		argument = "name-type"
+	}
+	option = {
+		long = "mech"
+		type = "string"
+		argument = "gssapi mechanism"
+	}
+	name = "hold"
+	argument = "user"
+	help = "Retain refcount on credential"
+	min_args = "0"
+	max_args = "1"
+}
+command = {
+	option = {
+		long = "name-type"
+		type = "string"
+		argument = "name-type"
+	}
+	option = {
+		long = "mech"
+		type = "string"
+		argument = "gssapi mechanism"
+	}
+	name = "unhold"
+	argument = "user"
+	help = "Release refcount on credential"
+	min_args = "0"
+	max_args = "1"
+}
+command = {
+	option = {
+		long = "name-type"
+		type = "string"
+		argument = "name-type"
+	}
+	option = {
+		long = "mech"
+		type = "string"
+		argument = "gssapi mechanism"
+	}
+	name = "get-label"
+	argument = "name label"
+	help = "Get label on credential"
+	min_args = "2"
+	max_args = "2"
+}
+command = {
+	option = {
+		long = "name-type"
+		type = "string"
+		argument = "name-type"
+	}
+	option = {
+		long = "mech"
+		type = "string"
+		argument = "gssapi mechanism"
+	}
+	name = "set-label"
+	argument = "name label data"
+	help = "Set label on credential"
+	min_args = "2"
+	max_args = "3"
 }
 command = {
 	name = "attrs-for-mech"
@@ -48,6 +201,30 @@ command = {
 		type = "string"
 		argument = "mechanism"
 	}
+}
+command = {
+	option = {
+		long = "mech"
+		type = "string"
+		argument = "mechanism"
+	}
+	option = {
+		long = "minor-status"
+		type = "flag"
+	}
+	name = "display-status"
+	argument = "status-code"
+	help = "unparse major and minor status codes"
+	min_args = "1"
+}
+command = {
+	option = {
+		long = "mech"
+		type = "string"
+		argument = "mechanism"
+	}
+	name = "credentials-status"
+	help = "dump status of credentials available in caches"
 }
 command = {
 	name = "help"

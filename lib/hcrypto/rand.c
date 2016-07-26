@@ -64,7 +64,13 @@ init_method(void)
 {
     if (selected_meth != NULL)
 	return;
-#if defined(_WIN32)
+#if defined(__APPLE_PRIVATE__)
+#ifdef __APPLE_TARGET_EMBEDDED__
+	selected_meth = &hc_rand_unix_method;
+#else
+    selected_meth = &hc_rand_cc_method;
+#endif
+#elif defined(_WIN32)
     selected_meth = &hc_rand_w32crypto_method;
 #elif defined(__APPLE__)
     selected_meth = &hc_rand_unix_method;
@@ -366,11 +372,14 @@ RAND_file_name(char *filename, size_t size)
      * So at least return the unix /dev/random if we have one
      */
     if (e == NULL) {
+#if defined(__APPLE_PRIVATE__)
+	e = "/dev/random";
+#else
 	int fd;
-
 	fd = _hc_unix_device_fd(O_RDONLY, &e);
 	if (fd >= 0)
 	    close(fd);
+#endif
     }
 #else  /* Win32 */
 

@@ -28,9 +28,11 @@ doing so.  It will make life easier for you and everyone else.
 * Cross realm::
 * Transit policy::
 * Setting up DNS::
+* How clients locate Kerberos KDCs::
 * Using LDAP to store the database::
 * Providing Kerberos credentials to servers and programs::
 * Setting up PK-INIT::
+* KDC maintainence::
 * Debugging Kerberos problems::
 @end menu
 
@@ -1000,7 +1002,7 @@ authentication.
 @c To test the cross realm configuration, use:
 @c    kmumble transit-check client server transit-realms ...
 
-@node Setting up DNS, Using LDAP to store the database, Transit policy, Setting up a realm
+@node Setting up DNS, How clients locate Kerberos KDCs, Transit policy, Setting up a realm
 @section Setting up DNS
 @cindex Setting up DNS
 
@@ -1062,7 +1064,28 @@ _kerberos.srv		TXT     "EXAMPLE.COM"
 
 @end example
 
-@node Using LDAP to store the database, Providing Kerberos credentials to servers and programs, Setting up DNS, Setting up a realm
+@node How clients locate Kerberos KDCs, Using LDAP to store the database, Setting up DNS, Setting up a realm
+@section How clients locate Kerberos KDCs
+@cindex Locate KDC
+
+clients use the following order to search for Kerberos KDC locations:
+
+@enumerate
+@item plugins
+@item configuration files
+  @enumerate
+  @item $KRB5_CONFIG (if not setuid)
+  @item  ~/Library/Preferences/edu.mit.Kerberos (on Mac OS X only)
+  @item  ~/Library/Preferences/com.apple.Kerberos.plist (on Mac OS X only)
+  @item /Library/Preferences/edu.mit.Kerberos (on Mac OS X only)
+  @item  /Library/Preferences/com.apple.Kerberos.plist (on Mac OS X only)
+  @item /etc/krb5.conf
+  @end enumerate
+@item dns
+@end enumerate
+
+
+@node Using LDAP to store the database, Providing Kerberos credentials to servers and programs, How clients locate Kerberos KDCs, Setting up a realm
 @section Using LDAP to store the database
 @cindex Using the LDAP backend
 
@@ -1293,7 +1316,7 @@ service@@host$ kinit --cache=/var/run/service_krb5_cache \
 @end example
 
 
-@node Setting up PK-INIT, Debugging Kerberos problems, Providing Kerberos credentials to servers and programs, Setting up a realm
+@node Setting up PK-INIT, KDC maintainence, Providing Kerberos credentials to servers and programs, Setting up a realm
 @section Setting up PK-INIT
 
 PK-INIT leverages an existing PKI (public key infrastructure), using
@@ -1692,7 +1715,56 @@ To enable Microsoft Smartcardlogin for certificates in your Windows
 ``HOW TO: Configure a Certification Authority to Issue Smart Card
 Certificates in Windows''.
 
-@node Debugging Kerberos problems, , Setting up PK-INIT, Setting up a realm
+@node KDC maintainence, Debugging Kerberos problems, Setting up PK-INIT, Setting up a realm
+@setting KDC maintainence
+
+As part of the regular maintainence of the KDC you should:
+
+@itemize @bullet
+@item Backup the KDC database
+@item Update the master key
+@enditemize
+
+@subsection Backup the KDC database
+
+hprop can dump the data with the keys encrypted or non
+encrypted, encrypt is default.
+
+For backups you should probably use encrypted backups.
+
+# hprop --stdout | gzip -9 > backup-$(date '+%Y%m%d-%H%M%S').gz
+
+Using ISO style dates are good since they sort in a senable order
+which makes it easy to pick up the last backup or prune the first.
+
+@subsection Update the master key
+
+The master key encrypts the users keys. You should change it when
+stronger encryption types are available or when changes in
+maintainence of the KDC happens (KDC admin is removed from ACL,
+removing/changing a KDC slave server, etc).
+
+The reason to change the master key is so you have a point in time
+from where if an older version of the master key is compromised, all
+changes past that point is safe to keep.
+
+Note that you don't need to change keys just to get new keys, modern
+encryption ciphers can encrypt large amounts of data before needing to
+change keys.
+
+Make sure you have propper backups before upgrade the master key.
+
+This example will dump a un-encrypted database, add a new master key
+to the list of master keys, and then import the dump into the database
+and re-encrypt it.
+
+@example
+# hprop --decrypt --stdout > kdc-backup
+# kadmin -l kstash --random
+# hpropd --stdin < kdc-backup
+@end example
+
+@node Debugging Kerberos problems, , KDC maintainence, Setting up a realm
 @section Debugging Kerberos problems
 
 To debug Kerberos client and server problems you can enable debug

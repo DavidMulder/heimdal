@@ -95,9 +95,10 @@ static int
 mem_trunc(krb5_storage *sp, off_t offset)
 {
     mem_storage *s = (mem_storage*)sp->data;
-    if((size_t)offset > s->size)
+    /* make SIZE_T_MAX to something that wont turn into -1 */
+    if(offset > (off_t)(SIZE_T_MAX >> 1) || (size_t)offset > s->size)
 	return ERANGE;
-    s->size = offset;
+    s->size = (size_t)offset;
     if ((s->ptr - s->base) > offset)
 	s->ptr = s->base + offset;
     return 0;
@@ -109,6 +110,15 @@ mem_no_trunc(krb5_storage *sp, off_t offset)
     return EINVAL;
 }
 
+static void
+mem_free(krb5_storage *sp)
+{
+    mem_storage *s = sp->data;
+    memset(s->base, 0, s->size);
+    free(s->base);
+}
+
+
 /**
  * Create a fixed size memory storage block
  *
@@ -116,10 +126,11 @@ mem_no_trunc(krb5_storage *sp, off_t offset)
  *
  * @ingroup krb5_storage
  *
- * @sa krb5_storage_mem()
+ * @sa krb5_storage_emem()
  * @sa krb5_storage_from_readonly_mem()
  * @sa krb5_storage_from_data()
  * @sa krb5_storage_from_fd()
+ * @sa krb5_storage_from_mem_copy()
  */
 
 KRB5_LIB_FUNCTION krb5_storage * KRB5_LIB_CALL
@@ -160,6 +171,7 @@ krb5_storage_from_mem(void *buf, size_t len)
  * @sa krb5_storage_from_mem()
  * @sa krb5_storage_from_readonly_mem()
  * @sa krb5_storage_from_fd()
+ * @sa krb5_storage_from_mem_copy()
  */
 
 KRB5_LIB_FUNCTION krb5_storage * KRB5_LIB_CALL
@@ -175,10 +187,11 @@ krb5_storage_from_data(krb5_data *data)
  *
  * @ingroup krb5_storage
  *
- * @sa krb5_storage_mem()
+ * @sa krb5_storage_emem()
  * @sa krb5_storage_from_mem()
  * @sa krb5_storage_from_data()
  * @sa krb5_storage_from_fd()
+ * @sa krb5_storage_from_mem_copy()
  */
 
 KRB5_LIB_FUNCTION krb5_storage * KRB5_LIB_CALL
@@ -205,5 +218,53 @@ krb5_storage_from_readonly_mem(const void *buf, size_t len)
     sp->trunc = mem_no_trunc;
     sp->free = NULL;
     sp->max_alloc = UINT_MAX/8;
+    return sp;
+}
+
+/**
+ * Create a copy of a memory and assign it to a storage block
+ *
+ * The input data buffer is copied and the orignal buffer can be freed
+ * during the life the storage.
+ *
+ * @return A krb5_storage on success, or NULL on out of memory error.
+ *
+ * @ingroup krb5_storage
+ *
+ * @sa krb5_storage_emem()
+ * @sa krb5_storage_from_mem()
+ * @sa krb5_storage_from_data()
+ * @sa krb5_storage_from_fd()
+ */
+
+krb5_storage * KRB5_LIB_FUNCTION
+krb5_storage_from_mem_copy(void *buf, size_t len)
+{
+    krb5_storage *sp = malloc(sizeof(krb5_storage));
+    mem_storage *s;
+    if(sp == NULL)
+	return NULL;
+    s = malloc(sizeof(*s));
+    if(s == NULL) {
+	free(sp);
+	return NULL;
+    }
+    sp->data = s;
+    sp->flags = 0;
+    sp->eof_code = HEIM_ERR_EOF;
+    s->base = malloc(len);
+    if (s->base == NULL) {
+	free(sp);
+	free(s);
+	return NULL;
+    }
+    memcpy(s->base, buf, len);
+    s->size = len;
+    s->ptr = s->base;
+    sp->fetch = mem_fetch;
+    sp->store = mem_store;
+    sp->seek = mem_seek;
+    sp->trunc = mem_trunc;
+    sp->free = mem_free;
     return sp;
 }

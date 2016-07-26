@@ -2,6 +2,8 @@
  * Copyright (c) 2004, PADL Software Pty Ltd.
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -176,6 +178,7 @@ _gsskrb5_set_sec_context_option
 	*minor_status = 0;
 	return GSS_S_COMPLETE;
 
+#ifndef HEIMDAL_SMALLER
     } else if (gss_oid_equal(desired_object, GSS_KRB5_SEND_TO_KDC_X)) {
 
 	if (value == NULL || value->length == 0) {
@@ -195,18 +198,16 @@ _gsskrb5_set_sec_context_option
 
 	*minor_status = 0;
 	return GSS_S_COMPLETE;
+#endif
     } else if (gss_oid_equal(desired_object, GSS_KRB5_CCACHE_NAME_X)) {
 	char *str;
 
 	maj_stat = get_string(minor_status, value, &str);
 	if (maj_stat != GSS_S_COMPLETE)
 	    return maj_stat;
-	if (str == NULL) {
-	    *minor_status = 0;
-	    return GSS_S_CALL_INACCESSIBLE_READ;
-	}
 
 	*minor_status = krb5_cc_set_default_name(context, str);
+	if (str)
 	free(str);
 	if (*minor_status)
 	    return GSS_S_FAILURE;
@@ -235,7 +236,7 @@ _gsskrb5_set_sec_context_option
 
 	krb5_us_timeofday (context, &sec, &usec);
 
-	maj_stat = set_int32(minor_status, value, sec - t);
+	maj_stat = set_int32(minor_status, value, (OM_uint32)(sec - t));
 	if (maj_stat != GSS_S_COMPLETE)
 	    return maj_stat;
 

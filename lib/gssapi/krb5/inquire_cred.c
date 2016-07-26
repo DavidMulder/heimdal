@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -84,8 +86,34 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_inquire_cred
 	    *minor_status = 0;
 	    return GSS_S_NO_CRED;
 	}
-    } else
-	acred = (gsskrb5_cred)cred_handle;
+    } else {
+	gsskrb5_cred handle;
+	
+	handle = (gsskrb5_cred)cred_handle;
+
+	if (handle->keytab)
+	    acred = handle;
+	else
+	    icred = handle;
+
+	/*
+	 * double check that the credential is still in the cache if
+	 * we have a initiator only cache.
+	 */
+
+	if (handle->usage == GSS_C_INITIATE && handle->principal != NULL) {
+	    krb5_error_code kret;
+	    krb5_ccache ccache;
+
+	    kret = krb5_cc_cache_match(context, handle->principal, &ccache);
+	    if (kret == 0) {
+		krb5_cc_close(context, ccache);
+	    } else {
+		*minor_status = kret;
+		return GSS_S_DEFECTIVE_CREDENTIAL;
+	    }
+	}
+    }
 
     if (acred)
 	HEIMDAL_MUTEX_lock(&acred->cred_id_mutex);
@@ -126,14 +154,14 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_inquire_cred
 	}
     }
     if (lifetime != NULL) {
-	OM_uint32 alife = GSS_C_INDEFINITE, ilife = GSS_C_INDEFINITE;
+	time_t aendtime = INT_MAX, iendtime = INT_MAX;
 
-	if (acred) alife = acred->lifetime;
-	if (icred) ilife = icred->lifetime;
+	if (acred) aendtime = acred->endtime;
+	if (icred) iendtime = icred->endtime;
 
 	ret = _gsskrb5_lifetime_left(minor_status,
 				     context,
-				     min(alife,ilife),
+				     min(aendtime, iendtime),
 				     lifetime);
 	if (ret)
 	    goto out;
@@ -153,13 +181,7 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_inquire_cred
         ret = gss_create_empty_oid_set(minor_status, mechanisms);
         if (ret)
 	    goto out;
-	if (acred)
-	    ret = gss_add_oid_set_member(minor_status,
-					 &acred->mechanisms->elements[0],
-					 mechanisms);
-	if (ret == GSS_S_COMPLETE && icred)
-	    ret = gss_add_oid_set_member(minor_status,
-					 &icred->mechanisms->elements[0],
+	ret = gss_add_oid_set_member(minor_status, GSS_KRB5_MECHANISM,
 					 mechanisms);
         if (ret)
 	    goto out;

@@ -39,7 +39,12 @@ RCSID("$Id$");
 #include <sys/un.h>
 #endif
 #include <hdb.h>
+#include <heim-ipc.h>
 #include <kadm5/private.h>
+
+static void terminated(void *) __attribute__((__noreturn__));
+static void usage(int) __attribute__((__noreturn__));
+static void doit(int) __attribute__((__noreturn__));
 
 static krb5_context context;
 static krb5_log_facility *log_facility;
@@ -47,7 +52,7 @@ static krb5_log_facility *log_facility;
 static struct getarg_strings addresses_str;
 krb5_addresses explicit_addresses;
 
-static sig_atomic_t exit_flag = 0;
+static krb5_keytab global_keytab = NULL;
 
 static void
 add_one_address (const char *str, int first)
@@ -66,16 +71,10 @@ add_one_address (const char *str, int first)
 }
 
 static void
-send_reply (int s,
-	    struct sockaddr *sa,
-	    int sa_size,
-	    krb5_data *ap_rep,
-	    krb5_data *rest)
+send_reply(krb5_data *ap_rep, krb5_data *rest,
+	   krb5_data *out_data)
 {
-    struct msghdr msghdr;
-    struct iovec iov[3];
-    uint16_t len, ap_rep_len;
-    u_char header[6];
+    uint16_t ap_rep_len;
     u_char *p;
 
     if (ap_rep)
@@ -83,39 +82,23 @@ send_reply (int s,
     else
 	ap_rep_len = 0;
 
-    len = 6 + ap_rep_len + rest->length;
-    p = header;
-    *p++ = (len >> 8) & 0xFF;
-    *p++ = (len >> 0) & 0xFF;
+    if (krb5_data_alloc(out_data, 6 + ap_rep_len + rest->length))
+	return;
+
+    p = out_data->data;
+    *p++ = (out_data->length >> 8) & 0xFF;
+    *p++ = (out_data->length >> 0) & 0xFF;
     *p++ = 0;
     *p++ = 1;
     *p++ = (ap_rep_len >> 8) & 0xFF;
     *p++ = (ap_rep_len >> 0) & 0xFF;
 
-    memset (&msghdr, 0, sizeof(msghdr));
-    msghdr.msg_name       = (void *)sa;
-    msghdr.msg_namelen    = sa_size;
-    msghdr.msg_iov        = iov;
-    msghdr.msg_iovlen     = sizeof(iov)/sizeof(*iov);
-#if 0
-    msghdr.msg_control    = NULL;
-    msghdr.msg_controllen = 0;
-#endif
-
-    iov[0].iov_base       = (char *)header;
-    iov[0].iov_len        = 6;
     if (ap_rep_len) {
-	iov[1].iov_base   = ap_rep->data;
-	iov[1].iov_len    = ap_rep->length;
-    } else {
-	iov[1].iov_base   = NULL;
-	iov[1].iov_len    = 0;
+	memcpy(p, ap_rep->data, ap_rep->length);
+	p += ap_rep->length;
     }
-    iov[2].iov_base       = rest->data;
-    iov[2].iov_len        = rest->length;
 
-    if (sendmsg (s, &msghdr, 0) < 0)
-	krb5_warn (context, errno, "sendmsg");
+    memcpy(p, rest->data, rest->length);
 }
 
 static int
@@ -142,12 +125,10 @@ make_result (krb5_data *data,
 
 static void
 reply_error (krb5_realm realm,
-	     int s,
-	     struct sockaddr *sa,
-	     int sa_size,
 	     krb5_error_code error_code,
 	     uint16_t result_code,
-	     const char *expl)
+	    const char *expl,
+	    krb5_data *out_data)
 {
     krb5_error_code ret;
     krb5_data error_data;
@@ -182,17 +163,15 @@ reply_error (krb5_realm realm,
 	krb5_warn (context, ret, "Could not even generate error reply");
 	return;
     }
-    send_reply (s, sa, sa_size, NULL, &error_data);
+    send_reply(NULL, &error_data, out_data);
     krb5_data_free (&error_data);
 }
 
 static void
 reply_priv (krb5_auth_context auth_context,
-	    int s,
-	    struct sockaddr *sa,
-	    int sa_size,
 	    uint16_t result_code,
-	    const char *expl)
+	   const char *expl,
+	   krb5_data *out_data)
 {
     krb5_error_code ret;
     krb5_data krb_priv_data;
@@ -220,7 +199,7 @@ reply_priv (krb5_auth_context auth_context,
 	krb5_warn (context, ret, "Could not even generate error reply");
 	return;
     }
-    send_reply (s, sa, sa_size, &ap_rep_data, &krb_priv_data);
+    send_reply(&ap_rep_data, &krb_priv_data, out_data);
     krb5_data_free (&ap_rep_data);
     krb5_data_free (&krb_priv_data);
 }
@@ -234,10 +213,8 @@ static void
 change (krb5_auth_context auth_context,
 	krb5_principal admin_principal,
 	uint16_t version,
-	int s,
-	struct sockaddr *sa,
-	int sa_size,
-	krb5_data *in_data)
+       krb5_data *in_data,
+       krb5_data *out_data)
 {
     krb5_error_code ret;
     char *client = NULL, *admin = NULL;
@@ -256,8 +233,8 @@ change (krb5_auth_context auth_context,
 	ret = krb5_copy_data(context, in_data, &pwd_data);
 	if (ret) {
 	    krb5_warn (context, ret, "krb5_copy_data");
-	    reply_priv (auth_context, s, sa, sa_size, KRB5_KPASSWD_MALFORMED,
-			"out out memory copying password");
+	    reply_priv(auth_context, KRB5_KPASSWD_MALFORMED,
+		       "out out memory copying password", out_data);
 	    return;
 	}
 	principal = admin_principal;
@@ -268,8 +245,8 @@ change (krb5_auth_context auth_context,
 					&chpw, &len);
 	if (ret) {
 	    krb5_warn (context, ret, "decode_ChangePasswdDataMS");
-	    reply_priv (auth_context, s, sa, sa_size, KRB5_KPASSWD_MALFORMED,
-			"malformed ChangePasswdData");
+	    reply_priv(auth_context, KRB5_KPASSWD_MALFORMED,
+			"malformed ChangePasswdData", out_data);
 	    return;
 	}
 
@@ -277,16 +254,15 @@ change (krb5_auth_context auth_context,
 	ret = krb5_copy_data(context, &chpw.newpasswd, &pwd_data);
 	if (ret) {
 	    krb5_warn (context, ret, "krb5_copy_data");
-	    reply_priv (auth_context, s, sa, sa_size, KRB5_KPASSWD_MALFORMED,
-			"out out memory copying password");
+	    reply_priv(auth_context, KRB5_KPASSWD_MALFORMED,
+			"out out memory copying password", out_data);
 	    goto out;
 	}
 
 	if (chpw.targname == NULL && chpw.targrealm != NULL) {
 	    krb5_warn (context, ret, "kadm5_init_with_password_ctx");
-	    reply_priv (auth_context, s, sa, sa_size,
-			KRB5_KPASSWD_MALFORMED,
-			"targrealm but not targname");
+	    reply_priv(auth_context, KRB5_KPASSWD_MALFORMED,
+			"targrealm but not targname", out_data);
 	    goto out;
 	}
 
@@ -302,9 +278,8 @@ change (krb5_auth_context auth_context,
 		    krb5_warnx (context,
 				"kadm5_init_with_password_ctx: "
 				"failed to allocate realm");
-		    reply_priv (auth_context, s, sa, sa_size,
-				KRB5_KPASSWD_SOFTERROR,
-				"failed to allocate realm");
+		    reply_priv(auth_context, KRB5_KPASSWD_SOFTERROR,
+				"failed to allocate realm", out_data);
 		    goto out;
 		}
 	    }
@@ -313,33 +288,30 @@ change (krb5_auth_context auth_context,
 		free(princ.realm);
 	    if (ret) {
 		krb5_warn(context, ret, "krb5_copy_principal");
-		reply_priv(auth_context, s, sa, sa_size,
-			   KRB5_KPASSWD_HARDERROR,
-			   "failed to allocate principal");
+		reply_priv(auth_context, KRB5_KPASSWD_HARDERROR,
+			   "failed to allocate principal", out_data);
 		goto out;
 	    }
 	} else
 	    principal = admin_principal;
     } else {
 	krb5_warnx (context, "kadm5_init_with_password_ctx: unknown proto");
-	reply_priv (auth_context, s, sa, sa_size,
-		    KRB5_KPASSWD_HARDERROR,
-		    "Unknown protocol used");
+	reply_priv(auth_context, KRB5_KPASSWD_HARDERROR,
+		    "Unknown protocol used", out_data);
 	return;
     }
 
     ret = krb5_unparse_name (context, admin_principal, &admin);
     if (ret) {
 	krb5_warn (context, ret, "unparse_name failed");
-	reply_priv (auth_context, s, sa, sa_size,
-		    KRB5_KPASSWD_HARDERROR, "out of memory error");
+	reply_priv(auth_context, KRB5_KPASSWD_HARDERROR, "out of memory error", out_data);
 	goto out;
     }
 
     conf.realm = principal->realm;
     conf.mask |= KADM5_CONFIG_REALM;
 
-    ret = kadm5_init_with_password_ctx(context,
+    ret = kadm5_s_init_with_password_ctx(context,
 				       admin,
 				       NULL,
 				       KADM5_ADMIN_SERVICE,
@@ -347,16 +319,14 @@ change (krb5_auth_context auth_context,
 				       &kadm5_handle);
     if (ret) {
 	krb5_warn (context, ret, "kadm5_init_with_password_ctx");
-	reply_priv (auth_context, s, sa, sa_size, 2,
-		    "Internal error");
+	reply_priv(auth_context, 2, "Internal error", out_data);
 	goto out;
     }
 
     ret = krb5_unparse_name(context, principal, &client);
     if (ret) {
 	krb5_warn (context, ret, "unparse_name failed");
-	reply_priv (auth_context, s, sa, sa_size,
-		    KRB5_KPASSWD_HARDERROR, "out of memory error");
+	reply_priv(auth_context, KRB5_KPASSWD_HARDERROR, "out of memory error", out_data);
 	goto out;
     }
 
@@ -372,8 +342,7 @@ change (krb5_auth_context auth_context,
 	    krb5_warnx (context,
 			"%s didn't pass password quality check with error: %s",
 			client, pwd_reason);
-	    reply_priv (auth_context, s, sa, sa_size,
-			KRB5_KPASSWD_SOFTERROR, pwd_reason);
+	    reply_priv(auth_context, KRB5_KPASSWD_SOFTERROR, pwd_reason, out_data);
 	    goto out;
 	}
 	krb5_warnx (context, "Changing password for %s", client);
@@ -384,8 +353,7 @@ change (krb5_auth_context auth_context,
 	    krb5_warn (context, ret,
 		       "Check ACL failed for %s for changing %s password",
 		       admin, client);
-	    reply_priv (auth_context, s, sa, sa_size,
-			KRB5_KPASSWD_HARDERROR, "permission denied");
+	    reply_priv(auth_context, KRB5_KPASSWD_HARDERROR, "permission denied", out_data);
 	    goto out;
 	}
 	krb5_warnx (context, "%s is changing password for %s", admin, client);
@@ -394,26 +362,26 @@ change (krb5_auth_context auth_context,
     ret = krb5_data_realloc(pwd_data, pwd_data->length + 1);
     if (ret) {
 	krb5_warn (context, ret, "malloc: out of memory");
-	reply_priv (auth_context, s, sa, sa_size, KRB5_KPASSWD_HARDERROR,
-		    "Internal error");
+	reply_priv(auth_context, KRB5_KPASSWD_HARDERROR,
+		    "Internal error", out_data);
 	goto out;
     }
     tmp = pwd_data->data;
     tmp[pwd_data->length - 1] = '\0';
 
-    ret = kadm5_s_chpass_principal_cond (kadm5_handle, principal, 1, tmp);
+    ret = kadm5_s_chpass_principal_cond (kadm5_handle, principal, 1, tmp, 0, NULL);
     krb5_free_data (context, pwd_data);
     pwd_data = NULL;
     if (ret) {
 	const char *str = krb5_get_error_message(context, ret);
 	krb5_warnx(context, "kadm5_s_chpass_principal_cond: %s", str);
-	reply_priv (auth_context, s, sa, sa_size, KRB5_KPASSWD_SOFTERROR,
-		    str ? str : "Internal error");
+	reply_priv(auth_context, KRB5_KPASSWD_SOFTERROR,
+		    str ? str : "Internal error", out_data);
 	krb5_free_error_message(context, str);
 	goto out;
     }
-    reply_priv (auth_context, s, sa, sa_size, KRB5_KPASSWD_SUCCESS,
-		"Password changed");
+    reply_priv(auth_context, KRB5_KPASSWD_SUCCESS,
+	       "Password changed", out_data);
 out:
     free_ChangePasswdDataMS(&chpw);
     if (principal != admin_principal)
@@ -425,7 +393,7 @@ out:
     if (pwd_data)
 	krb5_free_data(context, pwd_data);
     if (kadm5_handle)
-	kadm5_destroy (kadm5_handle);
+	kadm5_s_destroy (kadm5_handle);
 }
 
 static int
@@ -433,13 +401,13 @@ verify (krb5_auth_context *auth_context,
 	krb5_realm *realms,
 	krb5_keytab keytab,
 	krb5_ticket **ticket,
-	krb5_data *out_data,
 	uint16_t *version,
 	int s,
 	struct sockaddr *sa,
 	int sa_size,
 	u_char *msg,
-	size_t len)
+       size_t len,
+       krb5_data *out_data)
 {
     krb5_error_code ret;
     uint16_t pkt_len, pkt_ver, ap_req_len;
@@ -473,7 +441,7 @@ verify (krb5_auth_context *auth_context,
     if (pkt_ver != KRB5_KPASSWD_VERS_CHANGEPW &&
 	pkt_ver != KRB5_KPASSWD_VERS_SETPW) {
 	krb5_warnx (context, "Bad version (%d)", pkt_ver);
-	reply_error (NULL, s, sa, sa_size, 0, 1, "Wrong program version");
+	reply_error (NULL, 0, 1, "Wrong program version", out_data);
 	return 1;
     }
     *version = pkt_ver;
@@ -490,7 +458,7 @@ verify (krb5_auth_context *auth_context,
 		       ticket);
     if (ret) {
 	krb5_warn (context, ret, "krb5_rd_req");
-	reply_error (NULL, s, sa, sa_size, ret, 3, "Authentication failed");
+	reply_error (NULL, ret, 3, "Authentication failed", out_data);
 	return 1;
     }
 
@@ -518,23 +486,23 @@ verify (krb5_auth_context *auth_context,
 	krb5_unparse_name(context, (*ticket)->server, &str);
 	krb5_warnx (context, "client used not valid principal %s", str);
 	free(str);
-	reply_error (NULL, s, sa, sa_size, ret, 1,
-		     "Bad request");
+	reply_error (NULL, ret, 1,
+		     "Bad request", out_data);
 	goto out;
     }
 
     if (strcmp((*ticket)->server->realm, (*ticket)->client->realm) != 0) {
 	krb5_warnx (context, "server realm (%s) not same a client realm (%s)",
 		    (*ticket)->server->realm, (*ticket)->client->realm);
-	reply_error ((*ticket)->server->realm, s, sa, sa_size, ret, 1,
-		     "Bad request");
+	reply_error ((*ticket)->server->realm, ret, 1,
+		     "Bad request", out_data);
 	goto out;
     }
 
     if (!(*ticket)->ticket.flags.initial) {
 	krb5_warnx (context, "initial flag not set");
-	reply_error ((*ticket)->server->realm, s, sa, sa_size, ret, 1,
-		     "Bad request");
+	reply_error ((*ticket)->server->realm, ret, 1,
+		     "Bad request", out_data);
 	goto out;
     }
     krb_priv_data.data   = msg + 6 + ap_req_len;
@@ -548,8 +516,8 @@ verify (krb5_auth_context *auth_context,
 
     if (ret) {
 	krb5_warn (context, ret, "krb5_rd_priv");
-	reply_error ((*ticket)->server->realm, s, sa, sa_size, ret, 3,
-		     "Bad request");
+	reply_error ((*ticket)->server->realm, ret, 3,
+		     "Bad request", out_data);
 	goto out;
     }
     return 0;
@@ -559,172 +527,247 @@ out:
     return 1;
 }
 
-static void
-process (krb5_realm *realms,
-	 krb5_keytab keytab,
-	 int s,
-	 krb5_address *this_addr,
-	 struct sockaddr *sa,
-	 int sa_size,
+static krb5_error_code
+process(int s,
+	struct sockaddr *server,
+	int server_size,
+	struct sockaddr *client,
+	int client_size,
 	 u_char *msg,
-	 int len)
+	size_t len,
+	heim_idata *out_data)
 {
     krb5_error_code ret;
     krb5_auth_context auth_context = NULL;
-    krb5_data out_data;
     krb5_ticket *ticket;
-    krb5_address other_addr;
     uint16_t version;
+    krb5_realm *realms = NULL;
+    krb5_data clear_data;
+    krb5_address client_addr, server_addr;
 
+    krb5_data_zero(&clear_data);
+    memset(&client_addr, 0, sizeof(client_addr));
+    memset(&server_addr, 0, sizeof(server_addr));
 
-    krb5_data_zero (&out_data);
+    ret = krb5_sockaddr2address(context, client, &client_addr);
+    if (ret) {
+	krb5_warn(context, ret, "krb5_sockaddr2address");
+	goto out;
+    }
+    ret = krb5_sockaddr2address(context, server, &server_addr);
+    if (ret) {
+	krb5_warn(context, ret, "krb5_sockaddr2address");
+	goto out;
+    }
+
+    {
+	char cstr[200];
+	size_t ss;
+	krb5_print_address(&client_addr, cstr, sizeof(cstr), &ss);
+	krb5_warnx(context, "request from client: %s", cstr);
+    }
+
+    ret = krb5_get_default_realms(context, &realms);
+    if (ret) {
+	krb5_warn(context, ret, "krb5_get_default_realms");
+	return ret;
+    }
 
     ret = krb5_auth_con_init (context, &auth_context);
     if (ret) {
 	krb5_warn (context, ret, "krb5_auth_con_init");
-	return;
+	goto out;
     }
 
     krb5_auth_con_setflags (context, auth_context,
 			    KRB5_AUTH_CONTEXT_DO_SEQUENCE);
 
-    ret = krb5_sockaddr2address (context, sa, &other_addr);
+    if (verify(&auth_context, realms, global_keytab, &ticket,
+	       &version, s, client, client_size, msg, len, &clear_data) == 0)
+    {
+	ret = krb5_auth_con_setaddrs(context,
+				     auth_context,
+				     &server_addr,
+				     &client_addr);
     if (ret) {
 	krb5_warn (context, ret, "krb5_sockaddr2address");
 	goto out;
     }
 
-    ret = krb5_auth_con_setaddrs (context,
-				  auth_context,
-				  this_addr,
-				  &other_addr);
-    krb5_free_address (context, &other_addr);
-    if (ret) {
-	krb5_warn (context, ret, "krb5_auth_con_setaddr");
-	goto out;
-    }
+	change(auth_context, ticket->client,
+	       version, &clear_data, out_data);
 
-    if (verify (&auth_context, realms, keytab, &ticket, &out_data,
-		&version, s, sa, sa_size, msg, len) == 0) {
-	change (auth_context,
-		ticket->client,
-		version,
-		s,
-		sa, sa_size,
-		&out_data);
-	memset (out_data.data, 0, out_data.length);
 	krb5_free_ticket (context, ticket);
     }
 
 out:
-    krb5_data_free (&out_data);
+    krb5_free_address(context, &client_addr);
+    krb5_free_address(context, &server_addr);
+    if (clear_data.data)
+	memset(clear_data.data, 0, clear_data.length);
+    krb5_data_free(&clear_data);
+
     krb5_auth_con_free (context, auth_context);
+    if (realms)
+	krb5_free_host_realm(context, realms);
+    return ret;
 }
 
-static int
-doit (krb5_keytab keytab, int port)
+struct data {
+    rk_socket_t s;
+    struct sockaddr *sa;
+    struct sockaddr_storage __ss;
+    krb5_socklen_t sa_size;
+    heim_sipc service;
+    struct data *next;
+};
+
+/*
+ * Linked list to not leak memory
+ */
+static struct data *head_data = NULL;
+
+/*
+ *
+ */
+
+static void
+passwd_service(void *ctx, const heim_idata *req,
+	       const heim_icred cred,
+	       heim_ipc_complete complete,
+	       heim_sipc_call cctx)
+{
+    struct data *data = ctx;
+    heim_idata out_data;
+    krb5_error_code ret;
+    struct sockaddr *client, *server;
+    krb5_socklen_t client_size, server_size;
+
+    client = heim_ipc_cred_get_client_address(cred, &client_size);
+    heim_assert(client != NULL, "no address from client");
+
+    server = heim_ipc_cred_get_server_address(cred, &server_size);
+    heim_assert(server != NULL, "no address from server");
+
+    krb5_data_zero(&out_data);
+
+    ret = process(data->s,
+		  server, server_size,
+		  client, client_size,
+		  req->data, req->length, &out_data);
+
+    complete(cctx, ret, &out_data);
+
+    memset (out_data.data, 0, out_data.length);
+    krb5_data_free(&out_data);
+    }
+
+
+
+static void
+listen_on(krb5_address *addr, int type, int port)
 {
     krb5_error_code ret;
-    int *sockets;
-    int maxfd;
-    krb5_realm *realms;
-    krb5_addresses addrs;
-    unsigned n, i;
-    fd_set real_fdset;
-    struct sockaddr_storage __ss;
-    struct sockaddr *sa = (struct sockaddr *)&__ss;
+    struct data *data;
 
-    ret = krb5_get_default_realms(context, &realms);
-    if (ret)
-	krb5_err (context, 1, ret, "krb5_get_default_realms");
-
-    if (explicit_addresses.len) {
-	addrs = explicit_addresses;
-    } else {
-	ret = krb5_get_all_server_addrs (context, &addrs);
-	if (ret)
-	    krb5_err (context, 1, ret, "krb5_get_all_server_addrs");
-    }
-    n = addrs.len;
-
-    sockets = malloc (n * sizeof(*sockets));
-    if (sockets == NULL)
+    data = calloc(1, sizeof(*data));
+    if (data == NULL)
 	krb5_errx (context, 1, "out of memory");
-    maxfd = -1;
-    FD_ZERO(&real_fdset);
-    for (i = 0; i < n; ++i) {
-	krb5_socklen_t sa_size = sizeof(__ss);
+    
+    data->sa = (struct sockaddr *)&data->__ss;
+    data->sa_size = sizeof(data->__ss);
 
-	krb5_addr2sockaddr (context, &addrs.val[i], sa, &sa_size, port);
+    krb5_addr2sockaddr(context, addr, data->sa, &data->sa_size, port);
 
-	sockets[i] = socket (sa->sa_family, SOCK_DGRAM, 0);
-	if (sockets[i] < 0)
-	    krb5_err (context, 1, errno, "socket");
-	if (bind (sockets[i], sa, sa_size) < 0) {
+    data->s = socket(data->sa->sa_family, type, 0);
+    if (data->s < 0) {
+	krb5_warn(context, errno, "socket");
+	free(data);
+	return;
+    }
+    socket_set_nopipe(data->s, 1);
+    socket_set_reuseaddr(data->s, 1);
+#ifdef HAVE_IPV6
+    if (data->sa->sa_family == AF_INET6)
+	socket_set_ipv6only(data->s, 1);
+#endif
+
+    socket_set_ipv6only(data->s, 1);
+    socket_set_reuseaddr(data->s, 1);
+
+    if (bind(data->s, data->sa, data->sa_size) < 0) {
 	    char str[128];
 	    size_t len;
 	    int save_errno = errno;
 
-	    ret = krb5_print_address (&addrs.val[i], str, sizeof(str), &len);
+	ret = krb5_print_address (addr, str, sizeof(str), &len);
 	    if (ret)
 		strlcpy(str, "unknown address", sizeof(str));
-	    krb5_warn (context, save_errno, "bind(%s)", str);
-	    continue;
+	krb5_warn (context, save_errno, "bind(%s/%d)", str, ntohs(port));
+	rk_closesocket(data->s);
+	free(data);
+	return;
 	}
-	maxfd = max (maxfd, sockets[i]);
-	if (maxfd >= FD_SETSIZE)
-	    krb5_errx (context, 1, "fd too large");
-	FD_SET(sockets[i], &real_fdset);
-    }
-    if (maxfd == -1)
-	krb5_errx (context, 1, "No sockets!");
 
-    while(exit_flag == 0) {
-	krb5_ssize_t retx;
-	fd_set fdset = real_fdset;
-
-	retx = select (maxfd + 1, &fdset, NULL, NULL, NULL);
-	if (retx < 0) {
-	    if (errno == EINTR)
-		continue;
-	    else
-		krb5_err (context, 1, errno, "select");
+    if(type == SOCK_STREAM) {
+	if (listen(data->s, SOMAXCONN) < 0){
+	    char a_str[256];
+	    size_t len;
+	    
+	    krb5_print_address(addr, a_str, sizeof(a_str), &len);
+	    krb5_warn(context, errno, "listen %s/%d", a_str, ntohs(port));
+	    rk_closesocket(data->s);
+	    free(data);
+	    return;
 	}
-	for (i = 0; i < n; ++i)
-	    if (FD_ISSET(sockets[i], &fdset)) {
-		u_char buf[BUFSIZ];
-		socklen_t addrlen = sizeof(__ss);
 
-		retx = recvfrom(sockets[i], buf, sizeof(buf), 0,
-				sa, &addrlen);
-		if (retx < 0) {
-		    if(errno == EINTR)
-			break;
-		    else
-			krb5_err (context, 1, errno, "recvfrom");
+	ret = heim_sipc_stream_listener(data->s,
+					HEIM_SIPC_TYPE_UINT32 | HEIM_SIPC_TYPE_ONE_REQUEST,
+					passwd_service, data, &data->service);
+	if (ret)
+	    errx(1, "heim_sipc_stream_listener: %d", ret);
+    } else {
+	ret = heim_sipc_service_dgram(data->s, 0,
+				      passwd_service, data, &data->service);
+	if (ret)
+	    errx(1, "heim_sipc_service_dgram: %d", ret);
 		}
 
-		process (realms, keytab, sockets[i],
-			 &addrs.val[i],
-			 sa, addrlen,
-			 buf, retx);
+    data->next = head_data;
+    head_data = data;
 	    }
+
+static void
+doit(int port)
+{
+    krb5_error_code ret;
+    krb5_addresses addrs;
+    unsigned i;
+
+    if (explicit_addresses.len) {
+	addrs = explicit_addresses;
+    } else {
+#if defined(IPV6_PKTINFO) && defined(IP_PKTINFO)
+	ret = krb5_get_all_any_addrs(context, &addrs);
+#else
+	ret = krb5_get_all_server_addrs(context, &addrs);
+#endif
+	if (ret)
+	    krb5_err (context, 1, ret, "krb5_get_all_server_addrs");
     }
 
-    for (i = 0; i < n; ++i)
-	close(sockets[i]);
-    free(sockets);
+    for (i = 0; i < addrs.len; ++i) {
+	listen_on(&addrs.val[i], SOCK_STREAM, port);
+	listen_on(&addrs.val[i], SOCK_DGRAM, port);
+    }	
 
-    krb5_free_addresses (context, &addrs);
-    krb5_free_host_realm (context, realms);
-    krb5_free_context (context);
-    return 0;
+    heim_ipc_main();
 }
 
-static RETSIGTYPE
-sigterm(int sig)
+static void
+terminated(void *ctx)
 {
-    exit_flag = 1;
+    exit(1);
 }
 
 static const char *check_library  = NULL;
@@ -759,18 +802,31 @@ struct getargs args[] = {
 };
 int num_args = sizeof(args) / sizeof(args[0]);
 
+static void
+usage(int ret)
+{
+    arg_printusage (args, num_args, NULL, "");
+    exit (ret);
+}
+
+
 int
 main (int argc, char **argv)
 {
-    krb5_keytab keytab;
+    int optidx = 0;
     krb5_error_code ret;
     char **files;
     int port, i;
 
-    krb5_program_setup(&context, argc, argv, args, num_args, NULL);
+    setprogname (argv[0]);
 
-    if(help_flag)
-	krb5_std_usage(0, args, num_args);
+    ret = krb5_init_context (&context);
+    if (ret)
+	errx(1, "krb5_init_context failed: %d", ret);
+
+    if(getarg(args, sizeof(args) / sizeof(args[0]), argc, argv, &optidx))
+	usage(1);
+
     if(version_flag) {
 	print_version(NULL);
 	exit(0);
@@ -805,7 +861,7 @@ main (int argc, char **argv)
 	else {
 	    char *ptr;
 
-	    port = strtol (port_str, &ptr, 10);
+	    port = (int)strtol (port_str, &ptr, 10);
 	    if (port == 0 && ptr == port_str)
 		krb5_errx (context, 1, "bad port `%s'", port_str);
 	    port = htons(port);
@@ -817,7 +873,7 @@ main (int argc, char **argv)
     if(ret)
 	krb5_err(context, 1, ret, "krb5_kt_register");
 
-    ret = krb5_kt_resolve(context, keytab_str, &keytab);
+    ret = krb5_kt_resolve(context, keytab_str, &global_keytab);
     if(ret)
 	krb5_err(context, 1, ret, "%s", keytab_str);
 
@@ -853,23 +909,10 @@ main (int argc, char **argv)
 	}
     }
 
-#ifdef HAVE_SIGACTION
-    {
-	struct sigaction sa;
-
-	sa.sa_flags = 0;
-	sa.sa_handler = sigterm;
-	sigemptyset(&sa.sa_mask);
-
-	sigaction(SIGINT,  &sa, NULL);
-	sigaction(SIGTERM, &sa, NULL);
-    }
-#else
-    signal(SIGINT,  sigterm);
-    signal(SIGTERM, sigterm);
-#endif
+    heim_sipc_signal_handler(SIGINT, terminated, "SIGINT");
+    heim_sipc_signal_handler(SIGTERM, terminated, "SIGTERM");
 
     pidfile(NULL);
 
-    return doit (keytab, port);
+    doit(port);
 }

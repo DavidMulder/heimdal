@@ -44,6 +44,7 @@
 .Fl Fl cache= Ns Ar cachename
 .Xc
 .Oc
+.Op Fl -canonicalize
 .Op Fl f | Fl Fl no-forwardable
 .Oo Fl t Ar keytabname \*(Ba Xo
 .Fl Fl keytab= Ns Ar keytabname
@@ -99,6 +100,21 @@ Supported options:
 .It Fl c Ar cachename Fl Fl cache= Ns Ar cachename
 The credentials cache to put the acquired ticket in, if other than
 default.
+.It Xo
+.Fl canonicalize
+.Xc
+ask the KDC canonicalize the client name and server name. Useful with
+enterprise names, PK-INIT, and LKDC realms when the user doesn't know
+its real kerberos user name.
+.It Xo
+.Fl f ,
+.Fl -forwardable
+.Xc
+Get ticket that can be forwarded to another host.
+.It Xo
+.Fl t Ar keytabname ,
+.Fl -keytab= Ns Ar keytabname
+.Xc
 .It Fl f Fl Fl no-forwardable
 Get ticket that can be forwarded to another host, or if the negative
 flags use, don't get a forwardable flag.
@@ -167,6 +183,11 @@ Request a ticket with no addresses.
 Request an anonymous ticket (which means that the ticket will be
 issued to an anonymous principal, typically
 .Dq anonymous@REALM ) .
+.It Xo
+.Fl V ,
+.Fl -verbose
+.Xc
+Print slightly more verbose output from kinit when successful.
 .It Fl Fl enterprise
 Parse principal as a enterprise (KRB5-NT-ENTERPRISE) name. Enterprise
 names are email like principals that are stored in the name part of
@@ -220,7 +241,8 @@ Specifies the Kerberos 4 ticket file to store version 4 tickets in.
 .Xr kdestroy 1 ,
 .Xr klist 1 ,
 .Xr krb5_appdefault 3 ,
-.Xr krb5.conf 5
+.Xr krb5.conf 5 ,
+.Xr ktutil 8
 .\".Sh STANDARDS
 .\".Sh HISTORY
 .\".Sh AUTHORS

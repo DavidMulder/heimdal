@@ -35,6 +35,8 @@
 
 #include <config.h>
 
+#include <gssapi_rewrite.h>
+
 #include <krb5-types.h>
 
 #include <sys/types.h>
@@ -54,6 +56,14 @@
 #include <gssapi.h>
 #include <gssapi_mech.h>
 #include <gssapi_krb5.h>
+#include <gssapi_scram.h>
+#include <gssapi_spnego.h>
+#include <gssapi_ntlm.h>
+#include <gssapi_netlogon.h>
+#include <gssapi_spi.h>
+#include <GSSPrivate.h>
+
+#include <heimbase.h>
 
 #include "mechqueue.h"
 

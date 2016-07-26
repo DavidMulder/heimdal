@@ -62,6 +62,8 @@ struct string_list {
     struct string_list *next;
 };
 
+static int default_tag_env = TE_EXPLICIT;
+
 /* Declarations for Bison */
 #define YYMALLOC malloc
 #define YYFREE   free
@@ -239,13 +241,14 @@ struct string_list {
 ModuleDefinition: IDENTIFIER objid_opt kw_DEFINITIONS TagDefault ExtensionDefault
 			EEQUAL kw_BEGIN ModuleBody kw_END
 		{
-			checkundefined();
+			checksymbols();
 		}
 		;
 
 TagDefault	: kw_EXPLICIT kw_TAGS
+			{ default_tag_env = TE_EXPLICIT; }
 		| kw_IMPLICIT kw_TAGS
-		      { lex_error_message("implicit tagging is not supported"); }
+			{ default_tag_env = TE_IMPLICIT; }
 		| kw_AUTOMATIC kw_TAGS
 		      { lex_error_message("automatic tagging is not supported"); }
 		| /* empty */
@@ -279,6 +282,7 @@ SymbolsFromModule: referencenames kw_FROM IDENTIFIER objid_opt
 			Symbol *s = addsym(sl->string);
 			s->stype = Stype;
 			gen_template_import(s);
+			s->flags.external = 1;
 		    }
 		    add_import($3);
 		}
@@ -497,13 +501,13 @@ SequenceType	: kw_SEQUENCE '{' /* ComponentTypeLists */ ComponentTypeList '}'
 		{
 		  $$ = new_type(TSequence);
 		  $$->members = $3;
-		  $$ = new_tag(ASN1_C_UNIV, UT_Sequence, TE_EXPLICIT, $$);
+		  $$ = new_tag(ASN1_C_UNIV, UT_Sequence, default_tag_env, $$);
 		}
 		| kw_SEQUENCE '{' '}'
 		{
 		  $$ = new_type(TSequence);
 		  $$->members = NULL;
-		  $$ = new_tag(ASN1_C_UNIV, UT_Sequence, TE_EXPLICIT, $$);
+		  $$ = new_tag(ASN1_C_UNIV, UT_Sequence, default_tag_env, $$);
 		}
 		;
 
@@ -512,7 +516,7 @@ SequenceOfType	: kw_SEQUENCE size kw_OF Type
 		  $$ = new_type(TSequenceOf);
 		  $$->range = $2;
 		  $$->subtype = $4;
-		  $$ = new_tag(ASN1_C_UNIV, UT_Sequence, TE_EXPLICIT, $$);
+		  $$ = new_tag(ASN1_C_UNIV, UT_Sequence, default_tag_env, $$);
 		}
 		;
 
@@ -520,13 +524,13 @@ SetType		: kw_SET '{' /* ComponentTypeLists */ ComponentTypeList '}'
 		{
 		  $$ = new_type(TSet);
 		  $$->members = $3;
-		  $$ = new_tag(ASN1_C_UNIV, UT_Set, TE_EXPLICIT, $$);
+		  $$ = new_tag(ASN1_C_UNIV, UT_Set, default_tag_env, $$);
 		}
 		| kw_SET '{' '}'
 		{
 		  $$ = new_type(TSet);
 		  $$->members = NULL;
-		  $$ = new_tag(ASN1_C_UNIV, UT_Set, TE_EXPLICIT, $$);
+		  $$ = new_tag(ASN1_C_UNIV, UT_Set, default_tag_env, $$);
 		}
 		;
 
@@ -534,7 +538,7 @@ SetOfType	: kw_SET kw_OF Type
 		{
 		  $$ = new_type(TSetOf);
 		  $$->subtype = $3;
-		  $$ = new_tag(ASN1_C_UNIV, UT_Set, TE_EXPLICIT, $$);
+		  $$ = new_tag(ASN1_C_UNIV, UT_Set, default_tag_env, $$);
 		}
 		;
 
@@ -557,6 +561,7 @@ DefinedType	: IDENTIFIER
 		    lex_error_message ("%s is not a type\n", $1);
 		  else
 		    $$->symbol = s;
+		  s->flags.used = 1;
 		}
 		;
 
@@ -636,11 +641,28 @@ TaggedType	: Tag tagenv Type
 			$$ = new_type(TTag);
 			$$->tag = $1;
 			$$->tag.tagenv = $2;
-			if($3->type == TTag && $2 == TE_IMPLICIT) {
-				$$->subtype = $3->subtype;
-				free($3);
-			} else
+#if 1
 				$$->subtype = $3;
+#else
+			if ($2 == TE_IMPLICIT) {
+				struct type *type = $3;
+				int have_tag = 0;
+
+				while (!have_tag) {
+					if (type->type == TTag || type->type != TType) {
+						type = type->subtype;
+						have_tag = 1;
+					} else if(type->symbol && type->symbol->type) {
+						type = type->symbol->type;
+					} else {
+						have_tag = 1;
+					}
+				}
+				$$->subtype = type;
+			} else {
+				$$->subtype = $3;
+			}
+#endif
 		}
 		;
 
@@ -648,7 +670,7 @@ Tag		: '[' Class NUMBER ']'
 		{
 			$$.tagclass = $2;
 			$$.tagvalue = $3;
-			$$.tagenv = TE_EXPLICIT;
+			$$.tagenv = default_tag_env;
 		}
 		;
 
@@ -672,11 +694,11 @@ Class		: /* */
 
 tagenv		: /* */
 		{
-			$$ = TE_EXPLICIT;
+			$$ = default_tag_env;
 		}
 		| kw_EXPLICIT
 		{
-			$$ = TE_EXPLICIT;
+			$$ = default_tag_env;
 		}
 		| kw_IMPLICIT
 		{
@@ -987,11 +1009,14 @@ add_oid_to_tail(struct objid *head, struct objid *tail)
     o->next = tail;
 }
 
+static unsigned long idcounter;
+
 static Type *
 new_type (Typetype tt)
 {
     Type *t = ecalloc(1, sizeof(*t));
     t->type = tt;
+    t->id = idcounter++;
     return t;
 }
 

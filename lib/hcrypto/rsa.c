@@ -333,6 +333,14 @@ static const unsigned sha256_oid_tree[] = { 2, 16, 840, 1, 101, 3, 4, 2, 1 };
 static const AlgorithmIdentifier _signature_sha256_data = {
     { 9, rk_UNCONST(sha256_oid_tree) }, rk_UNCONST(&null_entry_oid)
 };
+static const unsigned sha384_oid_tree[] = { 2, 16, 840, 1, 101, 3, 4, 2, 2 };
+const AlgorithmIdentifier _signature_sha384_data = {
+    { 9, rk_UNCONST(sha384_oid_tree) }, rk_UNCONST(&null_entry_oid)
+};
+static const unsigned sha512_oid_tree[] = { 2, 16, 840, 1, 101, 3, 4, 2, 3 };
+const AlgorithmIdentifier _signature_sha512_data = {
+    { 9, rk_UNCONST(sha512_oid_tree) }, rk_UNCONST(&null_entry_oid)
+};
 static const unsigned md5_oid_tree[] = { 1, 2, 840, 113549, 2, 5 };
 static const AlgorithmIdentifier _signature_md5_data = {
     { 6, rk_UNCONST(md5_oid_tree) }, rk_UNCONST(&null_entry_oid)
@@ -349,7 +357,7 @@ RSA_sign(int type, const unsigned char *from, unsigned int flen,
     if (rsa->meth->rsa_priv_enc) {
 	heim_octet_string indata;
 	DigestInfo di;
-	size_t size;
+	size_t size = 0;
 	int ret;
 
 	memset(&di, 0, sizeof(di));
@@ -360,6 +368,10 @@ RSA_sign(int type, const unsigned char *from, unsigned int flen,
 	    di.digestAlgorithm = _signature_md5_data;
 	} else if (type == NID_sha256) {
 	    di.digestAlgorithm = _signature_sha256_data;
+	} else if (type == NID_sha384) {
+	    di.digestAlgorithm = _signature_sha384_data;
+	} else if (type == NID_sha512) {
+	    di.digestAlgorithm = _signature_sha512_data;
 	} else
 	    return -1;
 
@@ -422,7 +434,7 @@ RSA_verify(int type, const unsigned char *from, unsigned int flen,
 	free(data);
 	if (ret2 != 0)
 	    return -3;
-	if (ret != size) {
+	if (ret < 0 || (size_t)ret != size) {
 	    free_DigestInfo(&di);
 	    return -4;
 	}
@@ -517,11 +529,21 @@ RSA_null_method(void)
     return &rsa_null_method;
 }
 
-extern const RSA_METHOD hc_rsa_gmp_method;
-extern const RSA_METHOD hc_rsa_tfm_method;
-extern const RSA_METHOD hc_rsa_ltm_method;
-static const RSA_METHOD *default_rsa_method = &hc_rsa_ltm_method;
-
+#ifdef HAVE_CDSA
+extern const RSA_METHOD _hc_rsa_cdsa_method;
+static const RSA_METHOD *default_rsa_method = &_hc_rsa_cdsa_method;
+#elif defined(HEIM_HC_SF)
+extern const RSA_METHOD _hc_rsa_sf_method;
+static const RSA_METHOD *default_rsa_method = &_hc_rsa_sf_method;
+#elif defined(HAVE_GMP)
+extern const RSA_METHOD _hc_rsa_gmp_method;
+static const RSA_METHOD *default_rsa_method = &_hc_rsa_gmp_method;
+#elif defined(HEIM_HC_LTM)
+extern const RSA_METHOD _hc_rsa_ltm_method;
+static const RSA_METHOD *default_rsa_method = &_hc_rsa_ltm_method;
+#else
+static const RSA_METHOD *default_rsa_method = &rsa_null_method;
+#endif
 
 const RSA_METHOD *
 RSA_get_default_method(void)
@@ -585,7 +607,7 @@ int
 i2d_RSAPrivateKey(RSA *rsa, unsigned char **pp)
 {
     RSAPrivateKey data;
-    size_t size;
+    size_t size = 0;
     int ret;
 
     if (rsa->n == NULL || rsa->e == NULL || rsa->d == NULL || rsa->p == NULL ||
@@ -635,7 +657,7 @@ int
 i2d_RSAPublicKey(RSA *rsa, unsigned char **pp)
 {
     RSAPublicKey data;
-    size_t size;
+    size_t size = 0;
     int ret;
 
     memset(&data, 0, sizeof(data));

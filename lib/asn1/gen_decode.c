@@ -176,8 +176,6 @@ find_tag (const Type *t,
 	*ty  = PRIM;
 	*tag = UT_VisibleString;
 	break;
-    default:
-	abort();
     }
 }
 
@@ -242,6 +240,14 @@ decode_type (const char *name, const Type *t, int optional,
     }
     case TInteger:
 	if(t->members) {
+	    /*
+	     * This will produce a worning, how its hard to fix since:
+	     * if its enum to an NameType, we can add appriate
+	     * type-cast. If its not though, we have to figure out if
+	     * there is negative enum enum and use appropriate
+	     * signness and size on the intertype we cast the result
+	     * too.
+	     */
 	    fprintf(codefile,
 		    "{\n"
 		    "int enumint;\n");
@@ -254,7 +260,7 @@ decode_type (const char *name, const Type *t, int optional,
 	    decode_primitive ("heim_integer", name, forwstr);
 	} else if (t->range->min == INT_MIN && t->range->max == INT_MAX) {
 	    decode_primitive ("integer", name, forwstr);
-	} else if (t->range->min == 0 && t->range->max == UINT_MAX) {
+	} else if (t->range->min == 0 && (unsigned int)t->range->max == UINT_MAX) {
 	    decode_primitive ("unsigned", name, forwstr);
 	} else if (t->range->min == 0 && t->range->max == INT_MAX) {
 	    decode_primitive ("unsigned", name, forwstr);
@@ -499,6 +505,9 @@ decode_type (const char *name, const Type *t, int optional,
 		    "if (e == 0 && %s != %s) { e = ASN1_BAD_ID; }\n",
 		    typestring,
 		    is_primitive_type(t->subtype->type) ? "PRIM" : "CONS");
+	    fprintf(codefile,
+		    "if (e == 0 && %s_datalen == ASN1_INDEFINITE) { e = ASN1_GOT_INDEFINITE; }\n",
+		    tmpstr);
 	}
 
 	if(optional) {
@@ -525,7 +534,9 @@ decode_type (const char *name, const Type *t, int optional,
 	else
 	    fprintf(codefile,
 		    "if (%s_datalen > len) { e = ASN1_OVERRUN; %s; }\n"
-		    "len = %s_datalen;\n", tmpstr, forwstr, tmpstr);
+		    "len = %s_datalen;\n",
+		    tmpstr, forwstr,
+		    tmpstr);
 	if (asprintf (&tname, "%s_Tag", tmpstr) < 0 || tname == NULL)
 	    errx(1, "malloc");
 	decode_type (name, t->subtype, 0, forwstr, tname, ide, depth + 1);
@@ -620,10 +631,11 @@ decode_type (const char *name, const Type *t, int optional,
 	} else {
 	    fprintf(codefile,
 		    "else {\n"
+		    "(%s)->element = ASN1_CHOICE_INVALID;\n"
 		    "e = ASN1_PARSE_ERROR;\n"
 		    "%s;\n"
 		    "}\n",
-		    forwstr);
+		    name, forwstr);
 	}
 	break;
     }
@@ -654,8 +666,6 @@ decode_type (const char *name, const Type *t, int optional,
     case TOID:
 	decode_primitive ("oid", name, forwstr);
 	break;
-    default :
-	abort ();
     }
     return 0;
 }
@@ -724,8 +734,6 @@ generate_type_decode (const Symbol *s)
 		 "return e;\n",
 		 s->gen_name);
 	break;
-    default:
-	abort ();
     }
     fprintf (codefile, "}\n\n");
 }

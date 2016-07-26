@@ -329,11 +329,11 @@ krb5_kt_default(krb5_context context, krb5_keytab *id)
  * keytab in `keyprocarg' (the default if == NULL) into `*key'.
  *
  * @param context a Keberos context.
- * @param keyprocarg
- * @param principal
- * @param vno
- * @param enctype
- * @param key
+ * @param keyprocarg key proc argument
+ * @param principal principal to find
+ * @param vno its kvno to search for
+ * @param enctype the encrypt to search for
+ * @param key return key, free with krb5_free_keyblock()
  *
  * @return Return an error code or 0, see krb5_get_error_message().
  *
@@ -511,13 +511,14 @@ krb5_kt_destroy(krb5_context context,
 static krb5_boolean
 compare_aliseses(krb5_context context,
 		 krb5_keytab_entry *entry,
+		 krb5_error_code (*cmp)(krb5_context, krb5_const_principal, krb5_const_principal),
 		 krb5_const_principal principal)
 {
     unsigned int i;
     if (entry->aliases == NULL)
 	return FALSE;
     for (i = 0; i < entry->aliases->len; i++)
-	if (krb5_principal_compare(context, &entry->aliases->val[i], principal))
+	if (cmp(context, &entry->aliases->val[i], principal))
 	    return TRUE;
     return FALSE;
 }
@@ -545,10 +546,17 @@ krb5_kt_compare(krb5_context context,
 		krb5_kvno vno,
 		krb5_enctype enctype)
 {
-    if(principal != NULL &&
-       !(krb5_principal_compare(context, entry->principal, principal) ||
-	 compare_aliseses(context, entry, principal)))
+    if(principal != NULL) {
+      krb5_error_code (*cmp)(krb5_context, krb5_const_principal, krb5_const_principal) = 
+	krb5_principal_compare;
+
+      if (principal->name.name_type == KRB5_NT_GSS_HOSTBASED_SERVICE)
+	cmp = krb5_principal_compare_any_realm;
+
+      if (!cmp(context, entry->principal, principal) ||
+	  compare_aliseses(context, entry, cmp, principal))
 	return FALSE;
+    }
     if(vno && vno != entry->vno)
 	return FALSE;
     if(enctype && enctype != entry->keyblock.keytype)
@@ -569,6 +577,7 @@ _krb5_kt_principal_not_found(krb5_context context,
 
     krb5_unparse_name_fixed (context, principal, princ, sizeof(princ));
     krb5_kt_get_full_name (context, id, &kt_name);
+    if (enctype)
     krb5_enctype_to_string(context, enctype, &enctype_str);
 
     if (kvno)
@@ -584,6 +593,7 @@ _krb5_kt_principal_not_found(krb5_context context,
 			    kt_name ? kt_name : "unknown keytab",
 			    enctype_str ? enctype_str : "unknown enctype");
     free(kt_name);
+    if (enctype_str)
     free(enctype_str);
     return ret;
 }
@@ -648,9 +658,10 @@ krb5_kt_get_entry(krb5_context context,
 	krb5_kt_free_entry(context, &tmp);
     }
     krb5_kt_end_seq_get (context, id, &cursor);
-    if (entry->vno == 0)
+    if (entry->vno == 0) {
 	return _krb5_kt_principal_not_found(context, KRB5_KT_NOTFOUND,
 					    id, principal, enctype, kvno);
+    }
     return 0;
 }
 
@@ -759,6 +770,7 @@ krb5_kt_next_entry(krb5_context context,
 		   krb5_keytab_entry *entry,
 		   krb5_kt_cursor *cursor)
 {
+    memset(entry, 0, sizeof(*entry));
     if(id->next_entry == NULL) {
 	krb5_set_error_message(context, HEIM_ERR_OPNOTSUPP,
 			       N_("next_entry is not supported in the %s "
@@ -818,7 +830,7 @@ krb5_kt_add_entry(krb5_context context,
 			       id->prefix);
 	return KRB5_KT_NOWRITE;
     }
-    entry->timestamp = time(NULL);
+    entry->timestamp = (uint32_t)time(NULL);
     return (*id->add)(context, id,entry);
 }
 

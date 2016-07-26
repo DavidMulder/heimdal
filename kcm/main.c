@@ -33,7 +33,9 @@
 
 #include "kcm_locl.h"
 
-RCSID("$Id$");
+#ifdef __APPLE__
+#include <sandbox.h>
+#endif
 
 sig_atomic_t exit_flag = 0;
 
@@ -41,22 +43,29 @@ krb5_context kcm_context = NULL;
 
 const char *service_name = "org.h5l.kcm";
 
-static RETSIGTYPE
-sigterm(int sig)
+static void
+terminated(void *ctx)
 {
-    exit_flag = 1;
+    exit(0);
 }
 
-static RETSIGTYPE
-sigusr1(int sig)
+static void
+sigusr1(void *ctx)
 {
     kcm_debug_ccache(kcm_context);
 }
 
-static RETSIGTYPE
-sigusr2(int sig)
+static void
+sigusr2(void *ctx)
 {
     kcm_debug_events(kcm_context);
+}
+
+static void
+timeout_handler(void)
+{
+    kcm_write_dump(kcm_context);
+    exit(0);
 }
 
 int
@@ -78,33 +87,30 @@ main(int argc, char **argv)
 	struct sigaction sa;
 
 	sa.sa_flags = 0;
-	sa.sa_handler = sigterm;
-	sigemptyset(&sa.sa_mask);
-
-	sigaction(SIGINT, &sa, NULL);
-	sigaction(SIGTERM, &sa, NULL);
-
-	sa.sa_handler = sigusr1;
-	sigaction(SIGUSR1, &sa, NULL);
-
-	sa.sa_handler = sigusr2;
-	sigaction(SIGUSR2, &sa, NULL);
-
 	sa.sa_handler = SIG_IGN;
+	sigemptyset(&sa.sa_mask);
 	sigaction(SIGPIPE, &sa, NULL);
     }
 #else
-    signal(SIGINT, sigterm);
-    signal(SIGTERM, sigterm);
-    signal(SIGUSR1, sigusr1);
-    signal(SIGUSR2, sigusr2);
     signal(SIGPIPE, SIG_IGN);
 #endif
+
+    heim_sipc_signal_handler(SIGINT, terminated, "SIGINT");
+    heim_sipc_signal_handler(SIGTERM, terminated, "SIGTERM");
+    heim_sipc_signal_handler(SIGUSR1, sigusr1, NULL);
+    heim_sipc_signal_handler(SIGUSR2, sigusr2, NULL);
+#ifdef SIGXCPU
+    heim_sipc_signal_handler(SIGXCPU, terminated, "CPU time limit exceeded");
+#endif
+
+
 #ifdef SUPPORT_DETACH
     if (detach_from_console)
 	daemon(0, 0);
 #endif
-    pidfile(NULL);
+    kcm_session_setup_handler();
+
+    kcm_read_dump(kcm_context);
 
     if (launchd_flag) {
 	heim_sipc mach;
@@ -113,6 +119,26 @@ main(int argc, char **argv)
 	heim_sipc un;
 	heim_sipc_service_unix(service_name, kcm_service, NULL, &un);
     }
+
+#ifdef __APPLE__
+    {
+	char *errorstring;
+	ret = sandbox_init("kcm", SANDBOX_NAMED, &errorstring);
+	if (ret)
+	    errx(1, "sandbox_init failed: %d: %s", ret, errorstring);
+    }
+#endif /* __APPLE__ */
+
+    heim_sipc_set_timeout_handler(timeout_handler);
+
+    /*
+     * If we have didn't get a time or, and it was non zero,
+     * lets set the timeout
+     */
+    if (kcm_timeout < 0)
+	kcm_timeout = 15;
+    if (kcm_timeout != 0)
+	heim_sipc_timeout(kcm_timeout);
 
     heim_ipc_main();
 

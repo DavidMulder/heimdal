@@ -48,7 +48,7 @@
  *   on certificate and no private key.
  * - PEM-FILE
  *   Same as FILE, defaulting to PEM encoded certificates.
- * - PEM-FILE
+ * - DER-FILE
  *   Same as FILE, defaulting to DER encoded certificates.
  * - PKCS11
  * - PKCS12
@@ -60,7 +60,7 @@
  */
 
 struct hx509_certs_data {
-    unsigned int ref;
+    struct heim_base_uniq base;
     struct hx509_keyset_ops *ops;
     void *ops_data;
 };
@@ -93,6 +93,18 @@ _hx509_ks_register(hx509_context context, struct hx509_keyset_ops *ops)
     context->ks_ops = val;
     context->ks_num_ops++;
 }
+
+/*
+ * Free function
+ */
+
+static void
+dealloc_cert(void *ptr)
+{
+    hx509_certs c = ptr;
+    c->ops->free(c, c->ops_data);
+}
+
 
 /**
  * Open or creates a new hx509 certificate store.
@@ -148,17 +160,18 @@ hx509_certs_init(hx509_context context,
 	return ENOENT;
     }
     free(type);
-    c = calloc(1, sizeof(*c));
+
+    c = heim_uniq_alloc(sizeof(*c), "hx509-certs", dealloc_cert);
     if (c == NULL) {
 	hx509_clear_error_string(context);
 	return ENOMEM;
     }
+
     c->ops = ops;
-    c->ref = 1;
 
     ret = (*ops->init)(context, c, &c->ops_data, flags, residue, lock);
     if (ret) {
-	free(c);
+	heim_release(c);
 	return ret;
     }
 
@@ -202,14 +215,7 @@ hx509_certs_store(hx509_context context,
 hx509_certs
 hx509_certs_ref(hx509_certs certs)
 {
-    if (certs == NULL)
-	return NULL;
-    if (certs->ref == 0)
-	_hx509_abort("certs refcount == 0 on ref");
-    if (certs->ref == UINT_MAX)
-	_hx509_abort("certs refcount == UINT_MAX on ref");
-    certs->ref++;
-    return certs;
+    return heim_retain(certs);
 }
 
 /**
@@ -223,14 +229,8 @@ hx509_certs_ref(hx509_certs certs)
 void
 hx509_certs_free(hx509_certs *certs)
 {
-    if (*certs) {
-	if ((*certs)->ref == 0)
-	    _hx509_abort("cert refcount == 0 on free");
-	if (--(*certs)->ref > 0)
-	    return;
-
-	(*(*certs)->ops->free)(*certs, (*certs)->ops_data);
-	free(*certs);
+    if (certs && *certs) {
+	heim_release(*certs);
 	*certs = NULL;
     }
 }
@@ -437,10 +437,10 @@ hx509_ci_print_names(hx509_context context, void *ctx, hx509_cert c)
 
     cert = _hx509_get_cert(c);
 
-    _hx509_name_from_Name(&cert->tbsCertificate.subject, &n);
+    hx509_name_from_Name(&cert->tbsCertificate.subject, &n);
     hx509_name_to_string(n, &s);
     hx509_name_free(&n);
-    _hx509_name_from_Name(&cert->tbsCertificate.issuer, &n);
+    hx509_name_from_Name(&cert->tbsCertificate.issuer, &n);
     hx509_name_to_string(n, &i);
     hx509_name_free(&n);
     fprintf(ctx, "subject: %s\nissuer: %s\n", s, i);
@@ -504,10 +504,12 @@ hx509_certs_find(hx509_context context,
 
     *r = NULL;
 
-    _hx509_query_statistic(context, 0, q);
+    if (certs->ops->query) {
+	ret = (*certs->ops->query)(context, certs, certs->ops_data, q, r);
+	if (ret != HX509_UNIMPLEMENTED_OPERATION)
+	    return ret;
+    }
 
-    if (certs->ops->query)
-	return (*certs->ops->query)(context, certs, certs->ops_data, q, r);
 
     ret = hx509_certs_start_seq(context, certs, &cursor);
     if (ret)
@@ -565,8 +567,6 @@ hx509_certs_filter(hx509_context context,
     hx509_cursor cursor;
     hx509_cert c;
     int ret, found = 0;
-
-    _hx509_query_statistic(context, 0, q);
 
     ret = hx509_certs_init(context, "MEMORY:filter-certs", 0,
 			   NULL, result);
@@ -749,6 +749,7 @@ hx509_certs_info(hx509_context context,
 void
 _hx509_pi_printf(int (*func)(void *, const char *), void *ctx,
 		 const char *fmt, ...)
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 3, 4))
 {
     va_list ap;
     char *str;

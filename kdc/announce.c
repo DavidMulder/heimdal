@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 Apple Inc.  All Rights Reserved.
+ * Copyright (c) 2008, 2009 Apple Inc.  All Rights Reserved.
  *
  * Export of this software from the United States of America may require
  * a specific license from the United States Government.  It is the
@@ -40,8 +40,11 @@
 #include <dns_sd.h>
 #include <err.h>
 
-static krb5_kdc_configuration *announce_config;
-static krb5_context announce_context;
+#include "kdc_locl.h"
+
+#ifndef __APPLE_TARGET_EMBEDDED__
+
+static heim_array_t (*announce_get_realms)(void);
 
 struct entry {
     DNSRecordRef recordRef;
@@ -58,6 +61,7 @@ struct entry {
 static struct entry *g_entries = NULL;
 static CFStringRef g_hostname = NULL;
 static DNSServiceRef g_dnsRef = NULL;
+static dispatch_source_t g_restart_timer = NULL;
 static SCDynamicStoreRef g_store = NULL;
 static dispatch_queue_t g_queue = NULL;
 
@@ -97,18 +101,22 @@ CFString2utf8(CFStringRef string)
 static void
 retry_timer(void)
 {
-    dispatch_source_t s;
     dispatch_time_t t;
 
-    s = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,
-			       0, 0, g_queue);
+    heim_assert(g_dnsRef == NULL, "called create when a connection already existed");
+    
+    if (g_restart_timer)
+	return;
+
+    g_restart_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, g_queue);
     t = dispatch_time(DISPATCH_TIME_NOW, 5ull * NSEC_PER_SEC);
-    dispatch_source_set_timer(s, t, 0, NSEC_PER_SEC);
-    dispatch_source_set_event_handler(s, ^{
+    dispatch_source_set_timer(g_restart_timer, t, 0, NSEC_PER_SEC);
+    dispatch_source_set_event_handler(g_restart_timer, ^{
 	    create_dns_sd();
-	    dispatch_release(s);
+	    dispatch_release(g_restart_timer);
+	    g_restart_timer = NULL;
 	});
-    dispatch_resume(s);
+    dispatch_resume(g_restart_timer);
 }
 
 /*
@@ -119,7 +127,8 @@ static void
 create_dns_sd(void)
 {
     DNSServiceErrorType error;
-    dispatch_source_t s;
+
+    heim_assert(g_dnsRef == NULL, "called create when a connection already existed");
 
     error = DNSServiceCreateConnection(&g_dnsRef);
     if (error) {
@@ -127,31 +136,15 @@ create_dns_sd(void)
 	return;
     }
 
-    dispatch_suspend(g_queue);
-
-    s = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ,
-			       DNSServiceRefSockFD(g_dnsRef),
-			       0, g_queue);
-
-    dispatch_source_set_event_handler(s, ^{
-	    DNSServiceErrorType ret = DNSServiceProcessResult(g_dnsRef);
-	    /* on error tear down and set timer to recreate */
-	    if (ret != kDNSServiceErr_NoError && ret != kDNSServiceErr_Transient) {
-		dispatch_source_cancel(s);
-	    }
-	});
-
-    dispatch_source_set_cancel_handler(s, ^{
+    error = DNSServiceSetDispatchQueue(g_dnsRef, g_queue);
+    if (error) {
 	    destroy_dns_sd();
 	    retry_timer();
-	    dispatch_release(s);
-	});
-
-    dispatch_resume(s);
+	return ;
+    }
 
     /* Do the first update ourself */
     update_all(g_store, NULL, NULL);
-    dispatch_resume(g_queue);
 }
 
 static void
@@ -207,9 +200,13 @@ static void
 dnsCallback(DNSServiceRef sdRef __attribute__((unused)),
 	    DNSRecordRef RecordRef __attribute__((unused)),
 	    DNSServiceFlags flags __attribute__((unused)),
-	    DNSServiceErrorType errorCode __attribute__((unused)),
+	    DNSServiceErrorType errorCode,
 	    void *context __attribute__((unused)))
 {
+    if (errorCode == kDNSServiceErr_ServiceNotRunning) {
+	destroy_dns_sd();
+	retry_timer();
+    }
 }
 
 #ifdef REGISTER_SRV_RR
@@ -302,6 +299,7 @@ static void
 register_srv_realms(CFStringRef host)
 {
     krb5_error_code ret;
+    heim_array_t array;
     char *hostname;
     size_t i;
 
@@ -311,19 +309,15 @@ register_srv_realms(CFStringRef host)
     if (hostname == NULL)
 	return;
 
-    for(i = 0; i < announce_config->num_db; i++) {
-	char **realms, **r;
+    array = announce_get_realms();
 
-	if (announce_config->db[i]->hdb_get_realms == NULL)
-	    continue;
+    heim_array_iterate(array, ^(heim_object_t item) {
+	    char *r = heim_string_copy_utf8(item);
+	    register_srv(r, hostname, 88);
+	    free(r);
+	});
 
-	ret = (announce_config->db[i]->hdb_get_realms)(announce_context, &realms);
-	if (ret == 0) {
-	    for (r = realms; r && *r; r++)
-		register_srv(*r, hostname, 88);
-	    krb5_free_host_realm(announce_context, realms);
-	}
-    }
+    heim_release(array);
 
     free(hostname);
 }
@@ -335,6 +329,9 @@ update_dns(void)
     DNSServiceErrorType error;
     struct entry **e = &g_entries;
     char *hostname;
+
+    if (g_hostname == NULL)
+	return;
 
     hostname = CFString2utf8(g_hostname);
     if (hostname == NULL)
@@ -362,7 +359,7 @@ update_dns(void)
 	    size_t len;
 
 	    len = strlen(update->realm);
-	    asprintf(&dnsdata, "%c%s", (int)len, update->realm);
+	    asprintf(&dnsdata, "%c%s", (unsigned char)len, update->realm);
 	    if (dnsdata == NULL)
 		errx(1, "malloc");
 
@@ -370,8 +367,10 @@ update_dns(void)
 	    if (name == NULL)
 		errx(1, "malloc");
 
-	    if (update->recordRef)
+	    if (update->recordRef) {
 		DNSServiceRemoveRecord(g_dnsRef, update->recordRef, 0);
+		update->recordRef = NULL;
+	    }
 
 	    error = DNSServiceRegisterRecord(g_dnsRef,
 					     &update->recordRef,
@@ -420,9 +419,10 @@ update_entries(SCDynamicStoreRef store, const char *realm, int flags)
 static void
 update_all(SCDynamicStoreRef store, CFArrayRef changedKeys, void *info)
 {
+    heim_array_t array;
     struct entry *e;
     CFStringRef host;
-    int i, flags = 0;
+    int flags = 0;
 
     LOG("something changed, running update");
 
@@ -444,20 +444,15 @@ update_all(SCDynamicStoreRef store, CFArrayRef changedKeys, void *info)
     for (e = g_entries; e != NULL; e = e->next)
 	e->flags &= ~(F_EXISTS|F_PUSH);
 
-    for(i = 0; i < announce_config->num_db; i++) {
-	krb5_error_code ret;
-	char **realms, **r;
+    array = announce_get_realms();
 
-	if (announce_config->db[i]->hdb_get_realms == NULL)
-	    continue;
+    heim_array_iterate(array, ^(heim_object_t item, int *stop) {
+	    char *r = heim_string_copy_utf8(item);
+	    update_entries(store, r, flags);
+	    free(r);
+	});
 
-	ret = (announce_config->db[i]->hdb_get_realms)(announce_context, announce_config->db[i], &realms);
-	if (ret == 0) {
-	    for (r = realms; r && *r; r++)
-		update_entries(store, *r, flags);
-	    krb5_free_host_realm(announce_context, realms);
-	}
-    }
+    heim_release(array);
 
     update_dns();
 
@@ -527,18 +522,37 @@ register_notification(void)
 }
 #endif
 
+#endif /* __APPLE_TARGET_EMBEDDED__ */
+
+
+
 void
-bonjour_announce(krb5_context context, krb5_kdc_configuration *config)
+bonjour_announce(heim_array_t (*get_realms)(void))
 {
+#ifndef __APPLE_TARGET_EMBEDDED__
 #if defined(__APPLE__) && defined(HAVE_GCD)
+    announce_get_realms = get_realms;
+
     g_queue = dispatch_queue_create("com.apple.kdc_announce", NULL);
     if (!g_queue)
 	errx(1, "dispatch_queue_create");
 
     g_store = register_notification();
-    announce_config = config;
-    announce_context = context;
+	
+#if defined(HAVE_GCD) && defined(HAVE_NOTIFY_H)
+    /*
+     * On KDC change notifications, lets re-announce configuration
+     */
+    {
+	int token;
+	notify_register_dispatch("com.apple.kdc.update", &token, g_queue, ^(int t) {
+		update_all(g_store, NULL, NULL);
+	    });
+    }
+#endif
 
     create_dns_sd();
 #endif
+#endif /* __APPLE_TARGET_EMBEDDED__ */
+
 }

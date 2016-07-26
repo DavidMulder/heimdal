@@ -505,11 +505,11 @@ krb5_get_in_cred(krb5_context context,
 				   &rep,
 				   creds,
 				   key,
-				   keyseed,
 				   KRB5_KU_AS_REP_ENC_PART,
 				   NULL,
 				   nonce,
 				   flags,
+				   NULL,
 				   decrypt_proc,
 				   decryptarg);
     }

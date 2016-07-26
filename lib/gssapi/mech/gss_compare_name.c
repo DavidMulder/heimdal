@@ -2,6 +2,8 @@
  * Copyright (c) 2005 Doug Rabson
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -29,10 +31,10 @@
 #include "mech_locl.h"
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_compare_name(OM_uint32 *minor_status,
-    const gss_name_t name1_arg,
-    const gss_name_t name2_arg,
-    int *name_equal)
+gss_compare_name(OM_uint32 *__nonnull minor_status,
+    __nonnull const gss_name_t name1_arg,
+    __nonnull const gss_name_t name2_arg,
+    int *__nonnull name_equal)
 {
 	struct _gss_name *name1 = (struct _gss_name *) name1_arg;
 	struct _gss_name *name2 = (struct _gss_name *) name2_arg;
@@ -60,7 +62,7 @@ gss_compare_name(OM_uint32 *minor_status,
 
 			major_status = _gss_find_mn(minor_status, name2,
 						    mn1->gmn_mech_oid, &mn2);
-			if (major_status == GSS_S_COMPLETE) {
+			if (major_status == GSS_S_COMPLETE && mn2) {
 				return (mn1->gmn_mech->gm_compare_name(
 						minor_status,
 						mn1->gmn_name,

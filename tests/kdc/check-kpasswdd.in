@@ -31,9 +31,9 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF 
 # SUCH DAMAGE. 
 
-top_builddir="@top_builddir@"
 env_setup="@env_setup@"
-objdir="@objdir@"
+confdir="@confdir@"
+testdir="@testdir@"
 
 . ${env_setup}
 
@@ -51,13 +51,15 @@ R2=TEST2.H5L.SE
 port=@port@
 pwport=@pwport@
 
+logfile=${testdir}/messages.log
+
 kadmin="${kadmin} -l -r $R"
 kdc="${kdc} --addresses=localhost -P $port"
 kpasswdd="${kpasswdd} --addresses=localhost -p $pwport"
 
 server=host/datan.test.h5l.se
-cache="FILE:${objdir}/cache.krb5"
-keytabfile=${objdir}/server.keytab
+cache="FILE:${testdir}/cache.krb5"
+keytabfile=${testdir}/server.keytab
 keytab="FILE:${keytabfile}"
 
 kinit="${kinit} -c $cache ${afs_no_afslog}"
@@ -65,15 +67,17 @@ klist="${klist} -c $cache"
 kgetcred="${kgetcred} -c $cache"
 kdestroy="${kdestroy} -c $cache ${afs_no_unlog}"
 
-KRB5_CONFIG="${objdir}/krb5.conf"
+KRB5_CONFIG="${confdir}/krb5.conf"
 export KRB5_CONFIG
 
-rm -f ${keytabfile}
-rm -f current-db*
-rm -f out-*
-rm -f mkey.file*
+mkdir ${testdir}
 
-> messages.log
+rm -f ${testdir}/${keytabfile}
+rm -f ${testdir}/current-db*
+rm -f ${testdir}/out-*
+rm -f ${testdir}/mkey.file*
+
+>  ${logfile}
 
 echo "Creating database for $R"
 ${kadmin} \
@@ -99,13 +103,13 @@ echo "Doing database check for ${R} ${R2}"
 ${kadmin} check ${R} || exit 1
 ${kadmin} check ${R2} || exit 1
 
-echo foo > ${objdir}/foopassword
+echo foo > ${testdir}/foopassword
 
 echo Starting kdc
 env ${HEIM_MALLOC_DEBUG} ${kdc} &
 kdcpid=$!
 
-sh ${wait_kdc}
+sh ${wait_kdc} KDC ${logfile}
 if [ "$?" != 0 ] ; then
     kill -9 ${kdcpid}
     exit 1
@@ -119,12 +123,12 @@ trap "kill -9 ${kdcpid} ${kpasswddpid}; echo signal killing kdc; exit \$ec;" EXI
 
 ec=0
 
-echo "Getting client initial tickets"; > messages.log
-${kinit} --password-file=${objdir}/foopassword foo@$R || \
+echo "Getting client initial tickets"; > ${logfile}
+${kinit} --password-file=${testdir}/foopassword foo@$R || \
 	{ ec=1 ; eval "${testfailed}"; }
-echo "Getting tickets"; > messages.log
+echo "Getting tickets"; > ${logfile}
 ${kgetcred} ${server}@${R} || { ec=1 ; eval "${testfailed}"; }
-echo "Listing tickets"; > messages.log
+echo "Listing tickets"; > ${logfile}
 ${klist} > /dev/null || { ec=1 ; eval "${testfailed}"; }
 ${test_ap_req} ${server}@${R} ${keytab} ${cache} || \
 	{ ec=1 ; eval "${testfailed}"; }
@@ -150,15 +154,15 @@ ${rkpty} cpw.tmp env ${kpasswd} foo@${R} || \
 
 rm cpw.tmp
 
-echo ${pw} > ${objdir}/barpassword
+echo ${pw} > ${testdir}/barpassword
 
 
-echo "Getting client initial tickets for ${R}"; > messages.log
-${kinit} --password-file=${objdir}/barpassword foo@$R || \
+echo "Getting client initial tickets for ${R}"; > ${logfile}
+${kinit} --password-file=${testdir}/barpassword foo@$R || \
 	{ ec=1 ; eval "${testfailed}"; }
-echo "Getting tickets"; > messages.log
+echo "Getting tickets"; > ${logfile}
 ${kgetcred} ${server}@${R} || { ec=1 ; eval "${testfailed}"; }
-echo "Listing tickets"; > messages.log
+echo "Listing tickets"; > ${logfile}
 ${klist} > /dev/null || { ec=1 ; eval "${testfailed}"; }
 ${test_ap_req} ${server}@${R} ${keytab} ${cache} || \
 	{ ec=1 ; eval "${testfailed}"; }
@@ -177,14 +181,14 @@ send ${pw}\n
 expect Success
 EOF
 
-${rkpty} cpw.tmp ../../kpasswd/kpasswd bar@${R2} || \
+${rkpty} cpw.tmp ${kpasswd} bar@${R2} || \
 	{ ec=$? ; eval "${testfailed}"; }
 
 rm cpw.tmp
 
 
-echo "Getting client initial tickets for ${R2}"; > messages.log
-${kinit} --password-file=${objdir}/barpassword bar@${R2} || \
+echo "Getting client initial tickets for ${R2}"; > ${logfile}
+${kinit} --password-file=${testdir}/barpassword bar@${R2} || \
 	{ ec=1 ; eval "${testfailed}"; }
 ${kdestroy}
 

@@ -34,9 +34,9 @@
 # $Id$
 #
 
-top_builddir="@top_builddir@"
+env_setup="@env_setup@"
 
-. ${top_builddir}/tests/bin/setup-env
+. ${env_setup}
 
 list=`${kdc} --builtin-hdb | sed 's/^builtin hdb backends: //'`
 oldIFS="$IFS"

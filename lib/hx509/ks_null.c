@@ -33,6 +33,7 @@
 
 #include "hx_locl.h"
 
+#ifdef HEIM_KS_NULL
 
 static int
 null_init(hx509_context context,
@@ -90,8 +91,12 @@ struct hx509_keyset_ops keyset_null = {
     null_iter_end
 };
 
+#endif
+
 void
 _hx509_ks_null_register(hx509_context context)
 {
+#ifdef HEIM_KS_NULL
     _hx509_ks_register(context, &keyset_null);
+#endif
 }

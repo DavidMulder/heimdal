@@ -63,8 +63,8 @@ verify_req_hash(krb5_context context,
 		const Kx509Request *req,
 		krb5_keyblock *key)
 {
-    unsigned char digest[SHA_DIGEST_LENGTH];
-    HMAC_CTX ctx;
+    unsigned char digest[CC_SHA_DIGEST_LENGTH];
+    CCHmacContext ctx;
 
     if (req->pk_hash.length != sizeof(digest)) {
 	krb5_set_error_message(context, KRB5KDC_ERR_PREAUTH_FAILED,
@@ -73,16 +73,12 @@ verify_req_hash(krb5_context context,
 	return KRB5KDC_ERR_PREAUTH_FAILED;
     }
 
-    HMAC_CTX_init(&ctx);
-    HMAC_Init_ex(&ctx,
-		 key->keyvalue.data, key->keyvalue.length,
-		 EVP_sha1(), NULL);
-    if (sizeof(digest) != HMAC_size(&ctx))
-	krb5_abortx(context, "runtime error, hmac buffer wrong size in kx509");
-    HMAC_Update(&ctx, version_2_0, sizeof(version_2_0));
-    HMAC_Update(&ctx, req->pk_key.data, req->pk_key.length);
-    HMAC_Final(&ctx, digest, 0);
-    HMAC_CTX_cleanup(&ctx);
+    CCHmacInit(&ctx, kCCHmacAlgSHA1,
+	       key->keyvalue.data, key->keyvalue.length)
+    CCHmacUpdate(&ctx, version_2_0, sizeof(version_2_0));
+    CCHmacUpdate(&ctx, req->pk_key.data, req->pk_key.length);
+    CCHmacFinal(&ctx, digest);
+    memset(&ctx, 0, sizeof(ctx));
 
     if (memcmp(req->pk_hash.data, digest, sizeof(digest)) != 0) {
 	krb5_set_error_message(context, KRB5KDC_ERR_PREAUTH_FAILED,
@@ -98,35 +94,33 @@ calculate_reply_hash(krb5_context context,
 		     Kx509Response *rep)
 {
     krb5_error_code ret;
-    HMAC_CTX ctx;
+    CCHmacContext ctx;
 
-    HMAC_CTX_init(&ctx);
-
-    HMAC_Init_ex(&ctx, key->keyvalue.data, key->keyvalue.length,
-		 EVP_sha1(), NULL);
-    ret = krb5_data_alloc(rep->hash, HMAC_size(&ctx));
+    CCHmacInit(&ctx, kCCHmacAlgSHA1,
+	       key->keyvalue.data, key->keyvalue.length);
+    ret = krb5_data_alloc(rep->hash, CC_SHA_DIGEST_LENGTH);
     if (ret) {
-	HMAC_CTX_cleanup(&ctx);
+	memset(&ctx, 0, sizeof(ctx));
 	krb5_set_error_message(context, ENOMEM, "malloc: out of memory");
 	return ENOMEM;
     }
 
-    HMAC_Update(&ctx, version_2_0, sizeof(version_2_0));
+    CCHmacUpdate(&ctx, version_2_0, sizeof(version_2_0));
     if (rep->error_code) {
 	int32_t t = *rep->error_code;
 	do {
 	    unsigned char p = (t & 0xff);
-	    HMAC_Update(&ctx, &p, 1);
+	    CCHmacUpdate(&ctx, &p, 1);
 	    t >>= 8;
 	} while (t);
     }
     if (rep->certificate)
-	HMAC_Update(&ctx, rep->certificate->data, rep->certificate->length);
+	CCHmacUpdate(&ctx, rep->certificate->data, rep->certificate->length);
     if (rep->e_text)
-	HMAC_Update(&ctx, (unsigned char *)*rep->e_text, strlen(*rep->e_text));
+	CCHmacUpdate(&ctx, (unsigned char *)*rep->e_text, strlen(*rep->e_text));
 
-    HMAC_Final(&ctx, rep->hash->data, 0);
-    HMAC_CTX_cleanup(&ctx);
+    CCHmacFinal(&ctx, rep->hash->data);
+    memset(&ctx, 0, sizeof(ctx));
 
     return 0;
 }

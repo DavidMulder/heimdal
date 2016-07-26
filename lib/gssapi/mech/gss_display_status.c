@@ -136,26 +136,17 @@ supplementary_error(OM_uint32 v)
 
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_display_status(OM_uint32 *minor_status,
+gss_display_status(OM_uint32 *__nonnull minor_status,
     OM_uint32 status_value,
     int status_type,
-    const gss_OID mech_type,
-    OM_uint32 *message_content,
-    gss_buffer_t status_string)
+    __nullable const gss_OID mech_type,
+    OM_uint32 *__nonnull message_content,
+    __nonnull gss_buffer_t status_string)
 {
 	OM_uint32 major_status;
 
 	_mg_buffer_zero(status_string);
 	*message_content = 0;
-
-	major_status = _gss_mg_get_error(mech_type, status_type,
-					 status_value, status_string);
-	if (major_status == GSS_S_COMPLETE) {
-
-	    *message_content = 0;
-	    *minor_status = 0;
-	    return GSS_S_COMPLETE;
-	}
 
 	*minor_status = 0;
 	switch (status_type) {
@@ -184,6 +175,14 @@ gss_display_status(OM_uint32 *minor_status,
 		gss_buffer_desc oid;
 		char *buf = NULL;
 		int e;
+
+		major_status = _gss_mg_get_error(mech_type, status_value,
+						 status_string);
+		if (major_status == GSS_S_COMPLETE) {
+			*message_content = 0;
+			*minor_status = 0;
+			return GSS_S_COMPLETE;
+		}
 
 		maj_junk = gss_oid_to_str(&min_junk, mech_type, &oid);
 		if (maj_junk != GSS_S_COMPLETE) {

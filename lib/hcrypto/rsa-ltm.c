@@ -33,6 +33,8 @@
 
 #include <config.h>
 
+#ifdef HEIM_HC_LTM
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <krb5-types.h>
@@ -41,6 +43,8 @@
 #include <rsa.h>
 
 #include <roken.h>
+
+#include <CommonCrypto/CommonRandomSPI.h>
 
 #include "tommath.h"
 
@@ -173,7 +177,8 @@ ltm_rsa_public_encrypt(int flen, const unsigned char* from,
     padlen = size - flen - 3;
 
     *p++ = 2;
-    if (RAND_bytes(p, padlen) != 1) {
+
+    if (CCRandomCopyBytes(kCCRandomDefault, p, padlen) != 0) {
 	mp_clear_multi(&e, &n, &enc, &dec, NULL);
 	free(p0);
 	return -4;
@@ -502,6 +507,24 @@ mpz2BN(mp_int *s)
     return bn;
 }
 
+static int
+random_num(mp_int *num, size_t len)
+{
+    unsigned char *p;
+
+    len = (len + 7) / 8;
+    p = malloc(len);
+    if (p == NULL)
+	return 1;
+    if (CCRandomCopyBytes(kCCRandomDefault, p, len) != 0) {
+	free(p);
+	return 1;
+    }
+    mp_read_unsigned_bin(num, p, len);
+    free(p);
+    return 0;
+}
+
 #define CHECK(f, v) if ((f) != (v)) { goto out; }
 
 static int
@@ -608,7 +631,7 @@ ltm_rsa_finish(RSA *rsa)
     return 1;
 }
 
-const RSA_METHOD hc_rsa_ltm_method = {
+const RSA_METHOD _hc_rsa_ltm_method = {
     "hcrypto ltm RSA",
     ltm_rsa_public_encrypt,
     ltm_rsa_public_decrypt,
@@ -628,5 +651,7 @@ const RSA_METHOD hc_rsa_ltm_method = {
 const RSA_METHOD *
 RSA_ltm_method(void)
 {
-    return &hc_rsa_ltm_method;
+    return &_hc_rsa_ltm_method;
 }
+
+#endif /* HEIM_HC_LTM */

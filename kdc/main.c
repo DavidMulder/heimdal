@@ -38,21 +38,22 @@
 #include <util.h>
 #endif
 
+#ifdef __APPLE__
+#include <sandbox.h>
+
+int sandbox_flag = 1;
+#endif
+
 #ifdef HAVE_CAPNG
 #include <cap-ng.h>
 #endif
 
-sig_atomic_t exit_flag = 0;
+static void terminated(void *ctx) __attribute__((noreturn));
+
 
 #ifdef SUPPORT_DETACH
 int detach_from_console = -1;
 #endif
-
-static RETSIGTYPE
-sigterm(int sig)
-{
-    exit_flag = sig;
-}
 
 /*
  * Allow dropping root bit, since heimdal reopens the database all the
@@ -101,13 +102,50 @@ switch_environment(void)
 #endif
 }
 
+static krb5_context context;
+static krb5_kdc_configuration *config;
+
+static heim_array_t
+get_realms(void)
+{
+    heim_array_t array;
+    char **realms, **r;
+    unsigned int i;
+    int ret;
+
+    array = heim_array_create();
+
+    for(i = 0; i < config->num_db; i++) {
+
+	if (config->db[i]->hdb_get_realms == NULL)
+	    continue;
+	
+	ret = (config->db[i]->hdb_get_realms)(context, config->db[i], &realms);
+	if (ret == 0) {
+	    for (r = realms; r && *r; r++) {
+		heim_string_t s = heim_string_create(*r);
+		if (s)
+		    heim_array_append_value(array, s);
+		heim_release(s);
+	    }
+	    krb5_free_host_realm(context, realms);
+	}
+    }
+
+    return array;
+}
+
+static void
+terminated(void *ctx)
+{
+    kdc_log(context, config, 0, "Terminated: %s", (char *)ctx);
+    exit(1);
+}
 
 int
 main(int argc, char **argv)
 {
     krb5_error_code ret;
-    krb5_context context;
-    krb5_kdc_configuration *config;
 
     setprogname(argv[0]);
 
@@ -123,47 +161,48 @@ main(int argc, char **argv)
 
     config = configure(context, argc, argv);
 
+#ifdef SIGPIPE
 #ifdef HAVE_SIGACTION
     {
 	struct sigaction sa;
 
 	sa.sa_flags = 0;
-	sa.sa_handler = sigterm;
 	sigemptyset(&sa.sa_mask);
 
-	sigaction(SIGINT, &sa, NULL);
-	sigaction(SIGTERM, &sa, NULL);
-#ifdef SIGXCPU
-	sigaction(SIGXCPU, &sa, NULL);
-#endif
-
 	sa.sa_handler = SIG_IGN;
-#ifdef SIGPIPE
 	sigaction(SIGPIPE, &sa, NULL);
-#endif
     }
 #else
-    signal(SIGINT, sigterm);
-    signal(SIGTERM, sigterm);
-#ifdef SIGXCPU
-    signal(SIGXCPU, sigterm);
-#endif
-#ifdef SIGPIPE
     signal(SIGPIPE, SIG_IGN);
 #endif
-#endif
+#endif /* SIGPIPE */
+
+
+
 #ifdef SUPPORT_DETACH
     if (detach_from_console)
 	daemon(0, 0);
 #endif
 #ifdef __APPLE__
-    bonjour_announce(context, config);
-#endif
+    if (sandbox_flag) {
+	char *errorstring;
+	ret = sandbox_init("kdc", SANDBOX_NAMED, &errorstring);
+	if (ret)
+	    errx(1, "sandbox_init failed: %d: %s", ret, errorstring);
+    }
+    bonjour_announce(get_realms);
+#endif /* __APPLE__ */
     pidfile(NULL);
 
     switch_environment();
 
-    loop(context, config);
-    krb5_free_context(context);
-    return 0;
+    setup_listeners(context, config, listen_on_ipc, listen_on_network);
+
+    heim_sipc_signal_handler(SIGINT, terminated, "SIGINT");
+    heim_sipc_signal_handler(SIGTERM, terminated, "SIGTERM");
+#ifdef SIGXCPU
+    heim_sipc_signal_handler(SIGXCPU, terminated, "CPU time limit exceeded");
+#endif
+
+    heim_ipc_main();
 }

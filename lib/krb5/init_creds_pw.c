@@ -3,7 +3,7 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
- * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ * Portions Copyright (c) 2009 - 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,8 +34,15 @@
  */
 
 #include "krb5_locl.h"
+#include <pkinit_asn1.h>
 
-typedef struct krb5_get_init_creds_ctx {
+struct pa_info_data {
+    krb5_enctype etype;
+    krb5_salt salt;
+    krb5_data *s2kparams;
+};
+
+struct krb5_init_creds_context_data {
     KDCOptions flags;
     krb5_creds cred;
     krb5_addresses *addrs;
@@ -61,11 +68,23 @@ typedef struct krb5_get_init_creds_ctx {
     krb5_pk_init_ctx pk_init_ctx;
     int ic_flags;
 
+    char *kdc_hostname;
+    char *sitename;
+    krb5_uuid delegated_uuid;
+    char *delegated_signing_identity;
+
     int used_pa_types;
-#define  USED_PKINIT	1
-#define  USED_PKINIT_W2K	2
-#define  USED_ENC_TS_GUESS	4
+
 #define  USED_ENC_TS_INFO	8
+#define  USED_ENC_TS_RENEG	16
+    struct {
+	unsigned int change_password:1;
+	unsigned int allow_enc_pa_rep:1;
+	unsigned int allow_save_as_reply_key:1;
+	unsigned int delegated_uuid:1;
+    } runflags;
+    
+    struct pa_info_data paid;
 
     METHOD_DATA md;
     KRB_ERROR error;
@@ -74,16 +93,26 @@ typedef struct krb5_get_init_creds_ctx {
 
     krb5_prompter_fct prompter;
     void *prompter_data;
+    int warned_user;
 
     struct pa_info_data *ppaid;
 
-} krb5_get_init_creds_ctx;
+    struct krb5_fast_state fast_state;
+    krb5_keyblock *as_reply_key;
 
+    /* current and available pa mechansm in this exchange */
+    struct pa_auth_mech *pa_mech;
+    heim_array_t available_pa_mechs;
+    const char *pa_used;
 
-struct pa_info_data {
-    krb5_enctype etype;
-    krb5_salt salt;
-    krb5_data *s2kparams;
+#ifdef PKINIT
+    hx509_cert client_cert;
+    krb5_data *pku2u_assertion;
+#endif
+    
+    struct {
+	struct timeval run_time;
+    } stats;
 };
 
 static void
@@ -92,6 +121,7 @@ free_paid(krb5_context context, struct pa_info_data *ppaid)
     krb5_free_salt(context, ppaid->salt);
     if (ppaid->s2kparams)
 	krb5_free_data(context, ppaid->s2kparams);
+    memset(ppaid, 0, sizeof(*ppaid));
 }
 
 static krb5_error_code KRB5_CALLCONV
@@ -104,7 +134,15 @@ default_s2k_func(krb5_context context, krb5_enctype type,
     krb5_data password;
     krb5_data opaque;
 
-    _krb5_debug(context, 5, "krb5_get_init_creds: using default_s2k_func");
+    if (_krb5_have_debug(context, 5)) {
+	char *str = NULL;
+	ret = krb5_enctype_to_string(context, type, &str);
+	if (ret)
+	    return ret;
+
+	_krb5_debugx(context, 5, "krb5_get_init_creds: using default_s2k_func: %s (%d)", str, (int)type);
+	free(str);
+    }
 
     password.data = rk_UNCONST(keyseed);
     password.length = strlen(keyseed);
@@ -140,6 +178,13 @@ free_init_creds_ctx(krb5_context context, krb5_init_creds_context ctx)
 	memset(ctx->password, 0, strlen(ctx->password));
 	free(ctx->password);
     }
+    /*
+     * FAST state 
+     */
+    _krb5_fast_free(context, &ctx->fast_state);
+    if (ctx->as_reply_key)
+	krb5_free_keyblock(context, ctx->as_reply_key);
+
     krb5_data_free(&ctx->req_buffer);
     krb5_free_cred_contents(context, &ctx->cred);
     free_METHOD_DATA(&ctx->md);
@@ -147,20 +192,31 @@ free_init_creds_ctx(krb5_context context, krb5_init_creds_context ctx)
     free_EncKDCRepPart(&ctx->enc_part);
     free_KRB_ERROR(&ctx->error);
     free_AS_REQ(&ctx->as_req);
-    if (ctx->ppaid) {
-	free_paid(context, ctx->ppaid);
-	free(ctx->ppaid);
-    }
+
+    heim_release(ctx->available_pa_mechs);
+    heim_release(ctx->pa_mech);
+    ctx->pa_mech = NULL;
+#ifdef PKINIT
+    if (ctx->client_cert)
+	hx509_cert_free(ctx->client_cert);
+    if (ctx->pku2u_assertion)
+	krb5_free_data(context, ctx->pku2u_assertion);
+#endif
+    if (ctx->kdc_hostname)
+	free(ctx->kdc_hostname);
+    if (ctx->sitename)
+	free(ctx->sitename);
+    free_paid(context, &ctx->paid);
     memset(ctx, 0, sizeof(*ctx));
 }
 
-static int
+static krb5_deltat
 get_config_time (krb5_context context,
 		 const char *realm,
 		 const char *name,
 		 int def)
 {
-    int ret;
+    krb5_deltat ret;
 
     ret = krb5_config_get_time (context, NULL,
 				"realms",
@@ -186,7 +242,7 @@ init_cred (krb5_context context,
 	   krb5_get_init_creds_opt *options)
 {
     krb5_error_code ret;
-    int tmp;
+    krb5_deltat tmp;
     krb5_timestamp now;
 
     krb5_timeofday (context, &now);
@@ -251,29 +307,24 @@ report_expiration (krb5_context context,
  * @param ctx The krb5_init_creds_context check for expiration.
  */
 
-static krb5_error_code
-process_last_request(krb5_context context,
+krb5_error_code
+krb5_process_last_request(krb5_context context,
 		     krb5_get_init_creds_opt *options,
 		     krb5_init_creds_context ctx)
 {
-    krb5_const_realm realm;
     LastReq *lr;
-    krb5_boolean reported = FALSE;
-    krb5_timestamp sec;
-    time_t t;
     size_t i;
 
     /*
      * First check if there is a API consumer.
      */
 
-    realm = krb5_principal_get_realm (context, ctx->cred.client);
     lr = &ctx->enc_part.last_req;
 
     if (options && options->opt_private && options->opt_private->lr.func) {
 	krb5_last_req_entry **lre;
 
-	lre = calloc(lr->len + 1, sizeof(**lre));
+	lre = calloc(lr->len + 1, sizeof(*lre));
 	if (lre == NULL) {
 	    krb5_set_error_message(context, ENOMEM,
 				   N_("malloc: out of memory", ""));
@@ -295,14 +346,42 @@ process_last_request(krb5_context context,
 	free(lre);
     }
 
-    /*
-     * Now check if we should prompt the user
+    return krb5_init_creds_warn_user(context, ctx);
+}
+
+/**
+ * Warn the user using prompter in the krb5_init_creds_context about
+ * possible password and account expiration.
+ *
+ * @param context a Kerberos 5 context.
+ * @param ctx a krb5_init_creds_context context.
+ *
+ * @return 0 for success, or an Kerberos 5 error code, see krb5_get_error_message().
+ * @ingroup krb5_credential
      */
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_init_creds_warn_user(krb5_context context,
+			  krb5_init_creds_context ctx)
+{
+    krb5_timestamp sec;
+    krb5_const_realm realm;
+    LastReq *lr;
+    unsigned i;
+    time_t t;
 
     if (ctx->prompter == NULL)
         return 0;
 
+    if (ctx->warned_user)
+	return 0;
+
+    ctx->warned_user = 1;
+
     krb5_timeofday (context, &sec);
+
+    realm = krb5_principal_get_realm (context, ctx->cred.client);
+    lr = &ctx->enc_part.last_req;
 
     t = sec + get_config_time (context,
 			       realm,
@@ -311,33 +390,25 @@ process_last_request(krb5_context context,
 
     for (i = 0; i < lr->len; ++i) {
 	if (lr->val[i].lr_value <= t) {
-	    switch (abs(lr->val[i].lr_type)) {
+	    switch (lr->val[i].lr_type) {
 	    case LR_PW_EXPTIME :
 		report_expiration(context, ctx->prompter,
 				  ctx->prompter_data,
 				  "Your password will expire at ",
 				  lr->val[i].lr_value);
-		reported = TRUE;
 		break;
 	    case LR_ACCT_EXPTIME :
 		report_expiration(context, ctx->prompter,
 				  ctx->prompter_data,
 				  "Your account will expire at ",
 				  lr->val[i].lr_value);
-		reported = TRUE;
+		break;
+	    default:
 		break;
 	    }
 	}
     }
 
-    if (!reported
-	&& ctx->enc_part.key_expiration
-	&& *ctx->enc_part.key_expiration <= t) {
-        report_expiration(context, ctx->prompter,
-			  ctx->prompter_data,
-			  "Your password/account will expire at ",
-			  *ctx->enc_part.key_expiration);
-    }
     return 0;
 }
 
@@ -466,6 +537,7 @@ get_init_creds_common(krb5_context context,
 	ctx->flags.request_anonymous = options->anonymous;
     if (default_opt)
         krb5_get_init_creds_opt_free(context, default_opt);
+
     return 0;
  out:
     if (default_opt)
@@ -543,6 +615,7 @@ change_password (krb5_context context,
 	ret = (*prompter) (context, data, NULL, "Changing password",
 			   2, prompts);
 	if (ret) {
+	    ret = KRB5_LIBOS_PWDINTR;
 	    memset (buf1, 0, sizeof(buf1));
 	    memset (buf2, 0, sizeof(buf2));
 	    goto out;
@@ -557,16 +630,21 @@ change_password (krb5_context context,
     ret = krb5_set_password (context,
 			     &cpw_cred,
 			     buf1,
-			     client,
+			     NULL,
 			     &result_code,
 			     &result_code_string,
 			     &result_string);
     if (ret)
 	goto out;
-    if (asprintf(&p, "%s: %.*s\n",
-		 result_code ? "Error" : "Success",
+
+    if (result_code == 0) {
+	p = strdup("Success");
+    } else if (asprintf(&p, "Failed: %.*s %.*s: %d\n",
+			(int)result_code_string.length,
+			result_code_string.length > 0 ? (char*)result_code_string.data : "",
 		 (int)result_string.length,
-		 result_string.length > 0 ? (char*)result_string.data : "") < 0)
+			result_string.length > 0 ? (char*)result_string.data : "",
+			result_code) < 0)
     {
 	ret = ENOMEM;
 	goto out;
@@ -575,15 +653,15 @@ change_password (krb5_context context,
     /* return the result */
     (*prompter) (context, data, NULL, p, 0, NULL);
 
-    free (p);
     if (result_code == 0) {
 	strlcpy (newpw, buf1, newpw_sz);
 	ret = 0;
     } else {
 	ret = ENOTTY;
 	krb5_set_error_message(context, ret,
-			       N_("failed changing password", ""));
+			       N_("failed changing password: %s", ""), p);
     }
+    free (p);
 
 out:
     memset (buf1, 0, sizeof(buf1));
@@ -630,7 +708,7 @@ init_as_req (krb5_context context,
 	krb5_set_error_message(context, ret, N_("malloc: out of memory", ""));
 	goto fail;
     }
-    a->req_body.sname = malloc(sizeof(*a->req_body.sname));
+    a->req_body.sname = calloc(1, sizeof(*a->req_body.sname));
     if (a->req_body.sname == NULL) {
 	ret = ENOMEM;
 	krb5_set_error_message(context, ret, N_("malloc: out of memory", ""));
@@ -718,7 +796,6 @@ init_as_req (krb5_context context,
     return ret;
 }
 
-
 static krb5_error_code
 set_paid(struct pa_info_data *paid, krb5_context context,
 	 krb5_enctype etype,
@@ -770,6 +847,10 @@ pa_etype_info2(krb5_context context,
 	goto out;
     for (j = 0; j < asreq->req_body.etype.len; j++) {
 	for (i = 0; i < e.len; i++) {
+
+	    if (krb5_enctype_valid(context, e.val[i].etype) != 0)
+		continue;
+
 	    if (asreq->req_body.etype.val[j] == e.val[i].etype) {
 		krb5_salt salt;
 		if (e.val[i].salt == NULL)
@@ -819,6 +900,10 @@ pa_etype_info(krb5_context context,
 	goto out;
     for (j = 0; j < asreq->req_body.etype.len; j++) {
 	for (i = 0; i < e.len; i++) {
+
+	    if (krb5_enctype_valid(context, e.val[i].etype) != 0)
+		continue;
+
 	    if (asreq->req_body.etype.val[j] == e.val[i].etype) {
 		krb5_salt salt;
 		salt.salttype = KRB5_PW_SALT;
@@ -861,6 +946,9 @@ pa_pw_or_afs3_salt(krb5_context context,
     krb5_error_code ret;
     if (paid->etype == KRB5_ENCTYPE_NULL)
 	return NULL;
+    if (krb5_enctype_valid(context, paid->etype) != 0)
+	return NULL;
+
     ret = set_paid(paid, context,
 		   paid->etype,
 		   paid->salt.salttype,
@@ -872,55 +960,6 @@ pa_pw_or_afs3_salt(krb5_context context,
     return paid;
 }
 
-
-struct pa_info {
-    krb5_preauthtype type;
-    struct pa_info_data *(*salt_info)(krb5_context,
-				      const krb5_principal,
-				      const AS_REQ *,
-				      struct pa_info_data *,
-				      heim_octet_string *);
-};
-
-static struct pa_info pa_prefs[] = {
-    { KRB5_PADATA_ETYPE_INFO2, pa_etype_info2 },
-    { KRB5_PADATA_ETYPE_INFO, pa_etype_info },
-    { KRB5_PADATA_PW_SALT, pa_pw_or_afs3_salt },
-    { KRB5_PADATA_AFS3_SALT, pa_pw_or_afs3_salt }
-};
-
-static PA_DATA *
-find_pa_data(const METHOD_DATA *md, unsigned type)
-{
-    size_t i;
-    if (md == NULL)
-	return NULL;
-    for (i = 0; i < md->len; i++)
-	if (md->val[i].padata_type == type)
-	    return &md->val[i];
-    return NULL;
-}
-
-static struct pa_info_data *
-process_pa_info(krb5_context context,
-		const krb5_principal client,
-		const AS_REQ *asreq,
-		struct pa_info_data *paid,
-		METHOD_DATA *md)
-{
-    struct pa_info_data *p = NULL;
-    size_t i;
-
-    for (i = 0; p == NULL && i < sizeof(pa_prefs)/sizeof(pa_prefs[0]); i++) {
-	PA_DATA *pa = find_pa_data(md, pa_prefs[i].type);
-	if (pa == NULL)
-	    continue;
-	paid->salt.salttype = (krb5_salttype)pa_prefs[i].type;
-	p = (*pa_prefs[i].salt_info)(context, client, asreq,
-				     paid, &pa->padata_value);
-    }
-    return p;
-}
 
 static krb5_error_code
 make_pa_enc_timestamp(krb5_context context, METHOD_DATA *md,
@@ -992,6 +1031,8 @@ add_enc_ts_padata(krb5_context context,
     krb5_enctype *ep;
     size_t i;
 
+    memset(&salt2, 0, sizeof(salt2));
+
     if(salt == NULL) {
 	/* default to standard salt */
 	ret = krb5_get_pw_salt (context, client, &salt2);
@@ -1009,7 +1050,7 @@ add_enc_ts_padata(krb5_context context,
     for (i = 0; i < netypes; ++i) {
 	krb5_keyblock *key;
 
-	_krb5_debug(context, 5, "krb5_get_init_creds: using ENC-TS with enctype %d", enctypes[i]);
+	_krb5_debugx(context, 5, "krb5_get_init_creds: using ENC-TS with enctype %d", enctypes[i]);
 
 	ret = (*keyproc)(context, enctypes[i], keyseed,
 			 *salt, s2kparams, &key);
@@ -1029,14 +1070,18 @@ static krb5_error_code
 pa_data_to_md_ts_enc(krb5_context context,
 		     const AS_REQ *a,
 		     const krb5_principal client,
-		     krb5_get_init_creds_ctx *ctx,
+		     krb5_init_creds_context ctx,
 		     struct pa_info_data *ppaid,
 		     METHOD_DATA *md)
 {
-    if (ctx->keyproc == NULL || ctx->keyseed == NULL)
+    if (ctx->keyproc == NULL || ctx->keyseed == NULL) {
+	_krb5_debugx(context, 5, "krb5_get_init_creds: no keyproc or keyseed");
 	return 0;
+    }
 
     if (ppaid) {
+	_krb5_debugx(context, 5, "krb5_get_init_creds: pa-info found, using %d", (int)ppaid->etype);
+
 	add_enc_ts_padata(context, md, client,
 			  ctx->keyproc, ctx->keyseed,
 			  &ppaid->etype, 1,
@@ -1044,7 +1089,7 @@ pa_data_to_md_ts_enc(krb5_context context,
     } else {
 	krb5_salt salt;
 
-	_krb5_debug(context, 5, "krb5_get_init_creds: pa-info not found, guessing salt");
+	_krb5_debugx(context, 5, "krb5_get_init_creds: pa-info not found, guessing salt");
 
 	/* make a v5 salted pa-data */
 	add_enc_ts_padata(context, md, client,
@@ -1066,7 +1111,7 @@ pa_data_to_md_ts_enc(krb5_context context,
 static krb5_error_code
 pa_data_to_key_plain(krb5_context context,
 		     const krb5_principal client,
-		     krb5_get_init_creds_ctx *ctx,
+		     krb5_init_creds_context ctx,
 		     krb5_salt salt,
 		     krb5_data *s2kparams,
 		     krb5_enctype etype,
@@ -1085,7 +1130,7 @@ pa_data_to_md_pkinit(krb5_context context,
 		     const AS_REQ *a,
 		     const krb5_principal client,
 		     int win2k,
-		     krb5_get_init_creds_ctx *ctx,
+		     krb5_init_creds_context ctx,
 		     METHOD_DATA *md)
 {
     if (ctx->pk_init_ctx == NULL)
@@ -1106,9 +1151,950 @@ pa_data_to_md_pkinit(krb5_context context,
 }
 
 static krb5_error_code
-pa_data_add_pac_request(krb5_context context,
-			krb5_get_init_creds_ctx *ctx,
-			METHOD_DATA *md)
+pkinit_configure(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx)
+{
+    if (ctx->pk_init_ctx == NULL)
+	return HEIM_ERR_PA_CANT_CONTINUE;
+
+    return 0;
+    }
+
+static krb5_error_code
+pkinit_step(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx, PA_DATA *pa, const AS_REQ *a,
+	    const AS_REP *rep, const krb5_krbhst_info *hi, METHOD_DATA *in_md, METHOD_DATA *out_md)
+{
+    krb5_error_code ret;
+
+    if (rep == NULL) {
+	ret = pa_data_to_md_pkinit(context, a, ctx->cred.client, 0, ctx, out_md);
+	if (ret == 0)
+	    ret = HEIM_ERR_PA_CONTINUE_NEEDED;
+    } else {
+	ret = _krb5_pk_rd_pa_reply(context,
+				   a->req_body.realm,
+				   ctx->pk_init_ctx,
+				   rep->enc_part.etype,
+				   hi,
+				   ctx->pk_nonce,
+				   &ctx->req_buffer,
+				   pa,
+				   &ctx->fast_state.reply_key);
+	if (ret == 0)
+	    ctx->runflags.allow_save_as_reply_key = 1;
+    }
+    return ret;
+}
+
+static krb5_error_code
+pkinit_step_win(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx, PA_DATA *pa, const AS_REQ *a,
+		const AS_REP *rep, const krb5_krbhst_info *hi, METHOD_DATA *in_md, METHOD_DATA *out_md)
+{
+    krb5_error_code ret;
+
+    if (rep == NULL) {
+	ret = pa_data_to_md_pkinit(context, a, ctx->cred.client, 1, ctx, out_md);
+	if (ret == 0)
+	    ret = HEIM_ERR_PA_CONTINUE_NEEDED;
+    } else {
+	ret = _krb5_pk_rd_pa_reply(context,
+				   a->req_body.realm,
+				   ctx->pk_init_ctx,
+				   rep->enc_part.etype,
+				   hi,
+				   ctx->pk_nonce,
+				   &ctx->req_buffer,
+				   pa,
+				   &ctx->fast_state.reply_key);
+	if (ret == 0)
+	    ctx->runflags.allow_save_as_reply_key = 1;
+    }
+    return ret;
+    }
+
+static void
+pkinit_release(void *pa_ctx)
+{
+}
+
+krb5_error_code
+_krb5_make_pa_enc_challange(krb5_context context,
+			    krb5_crypto crypto,
+			    krb5_key_usage usage,
+			    METHOD_DATA *md)
+{
+    PA_ENC_TS_ENC p;
+    unsigned char *buf;
+    size_t buf_size;
+    size_t len = 0;
+    EncryptedData encdata;
+    krb5_error_code ret;
+    int32_t usec;
+    int usec2;
+
+    krb5_us_timeofday (context, &p.patimestamp, &usec);
+    usec2         = usec;
+    p.pausec      = &usec2;
+
+    ASN1_MALLOC_ENCODE(PA_ENC_TS_ENC, buf, buf_size, &p, &len, ret);
+	if (ret)
+	    return ret;
+    if(buf_size != len)
+	krb5_abortx(context, "internal error in ASN.1 encoder");
+
+    ret = krb5_encrypt_EncryptedData(context,
+				     crypto,
+				     usage,
+				     buf,
+				     len,
+				     0,
+				     &encdata);
+    free(buf);
+    if (ret)
+	return ret;
+
+    ASN1_MALLOC_ENCODE(EncryptedData, buf, buf_size, &encdata, &len, ret);
+    free_EncryptedData(&encdata);
+    if (ret)
+	return ret;
+    if(buf_size != len)
+	krb5_abortx(context, "internal error in ASN.1 encoder");
+
+    ret = krb5_padata_add(context, md, KRB5_PADATA_ENCRYPTED_CHALLENGE, buf, len);
+    if (ret)
+	free(buf);
+    return ret;
+}
+
+krb5_error_code
+_krb5_validate_pa_enc_challange(krb5_context context,
+				krb5_crypto crypto,
+				krb5_key_usage usage,
+				EncryptedData *enc_data,
+				const char *peer_name)
+{
+    krb5_error_code ret;
+    krb5_data ts_data;
+    PA_ENC_TS_ENC p;
+    time_t timestamp;
+    int32_t usec;
+    size_t size;
+
+    ret = krb5_decrypt_EncryptedData(context, crypto, usage, enc_data, &ts_data);
+    if (ret)
+	return ret;
+
+    ret = decode_PA_ENC_TS_ENC(ts_data.data,
+			       ts_data.length,
+			       &p,
+			       &size);
+    krb5_data_free(&ts_data);
+    if(ret){
+	ret = KRB5KDC_ERR_PREAUTH_FAILED;
+	_krb5_debugx(context, 5, "Failed to decode PA-ENC-TS_ENC - %s", peer_name);
+	goto out;
+ 	}
+
+    krb5_us_timeofday(context, &timestamp, &usec);
+
+    if (krb5_time_abs(timestamp, p.patimestamp) > context->max_skew) {
+	char client_time[100];
+
+	krb5_format_time(context, p.patimestamp,
+			 client_time, sizeof(client_time), TRUE);
+	
+	ret = KRB5KRB_AP_ERR_SKEW;
+	_krb5_debugx(context, 0, "Too large time skew, "
+		     "client time %s is out by %u > %d seconds -- %s",
+		     client_time,
+		     (unsigned)krb5_time_abs(timestamp, p.patimestamp),
+		     (int)context->max_skew,
+		     peer_name);
+    } else {
+	ret = 0;
+    }
+
+ out:
+    free_PA_ENC_TS_ENC(&p);
+
+    return ret;
+    }
+
+
+static struct pa_info_data *
+process_pa_info(krb5_context, const krb5_principal, const AS_REQ *, struct pa_info_data *, METHOD_DATA *);
+
+
+static krb5_error_code
+enc_chal_step(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx, PA_DATA *pa, const AS_REQ *a,
+	      const AS_REP *rep, const krb5_krbhst_info *hi, METHOD_DATA *in_md, METHOD_DATA *out_md)
+{
+    struct pa_info_data paid, *ppaid;
+    krb5_keyblock challengekey;
+    krb5_data pepper1, pepper2;
+    krb5_crypto crypto = NULL;
+    krb5_enctype aenctype;
+    krb5_error_code ret;
+
+    memset(&paid, 0, sizeof(paid));
+
+    if (rep == NULL)
+	paid.etype = KRB5_ENCTYPE_NULL;
+    else
+	paid.etype = rep->enc_part.etype;
+    ppaid = process_pa_info(context, ctx->cred.client, a, &paid, in_md);
+
+    /*
+     * If we don't have ppaid, ts because the KDC have not sent any
+     * salt info, lets to the first roundtrip so the KDC have a chance
+     * to send any.
+     */
+    if (ppaid == NULL) {
+	_krb5_debugx(context, 5, "no ppaid found");
+	return HEIM_ERR_PA_CONTINUE_NEEDED;
+    }
+    if (ppaid->etype == ETYPE_NULL) {
+	return HEIM_ERR_PA_CANT_CONTINUE;
+    }
+
+    if (ctx->fast_state.reply_key)
+	krb5_free_keyblock(context, ctx->fast_state.reply_key);
+
+    ret = pa_data_to_key_plain(context, ctx->cred.client, ctx,
+			       ppaid->salt, ppaid->s2kparams, ppaid->etype,
+			       &ctx->fast_state.reply_key);
+    free_paid(context, &paid);
+    if (ret) {
+	_krb5_debugx(context, 5, "enc-chal: failed to build key");
+	return ret;
+    }
+
+    ret = krb5_crypto_init(context, ctx->fast_state.reply_key, 0, &crypto);
+    if (ret)
+	return ret;
+	
+    krb5_crypto_getenctype(context, ctx->fast_state.armor_crypto, &aenctype);
+    
+    pepper1.data = rep ? "kdcchallengearmor" : "clientchallengearmor";
+    pepper1.length = strlen(pepper1.data);
+    pepper2.data = "challengelongterm";
+    pepper2.length = strlen(pepper2.data);
+
+    ret = krb5_crypto_fx_cf2(context, ctx->fast_state.armor_crypto, crypto,
+			     &pepper1, &pepper2, aenctype,
+			     &challengekey);
+    krb5_crypto_destroy(context, crypto);
+    if (ret)
+	return ret;
+
+    ret = krb5_crypto_init(context, &challengekey, 0, &crypto);
+    krb5_free_keyblock_contents(context, &challengekey);
+    if (ret)
+	return ret;
+
+    if (rep) {
+	EncryptedData enc_data;
+	size_t size;
+
+	if (ret) {
+	    _krb5_debugx(context, 5, "enc-chal: failed to create reply key");
+	    return ret;
+	}
+
+	_krb5_debugx(context, 5, "ENC_CHAL rep key");
+
+	if (ctx->fast_state.strengthen_key == NULL) {
+	    krb5_crypto_destroy(context, crypto);
+	    _krb5_debugx(context, 5, "ENC_CHAL w/o strengthen_key");
+	    return KRB5_KDCREP_MODIFIED;
+	}
+
+	if (pa == NULL) {
+	    krb5_crypto_destroy(context, crypto);
+	    _krb5_debugx(context, 0, "KDC response missing");
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = decode_EncryptedData(pa->padata_value.data,
+				   pa->padata_value.length,
+				   &enc_data,
+				   &size);
+	if (ret) {
+	    ret = KRB5KRB_AP_ERR_BAD_INTEGRITY;
+	    _krb5_debugx(context, 5, "Failed to decode ENC_CHAL KDC reply");
+	    return ret;
+	}
+
+	ret = _krb5_validate_pa_enc_challange(context, crypto,
+					      KRB5_KU_ENC_CHALLENGE_KDC,
+					      &enc_data,
+					      "KDC");
+	free_EncryptedData(&enc_data);
+	krb5_crypto_destroy(context, crypto);
+
+	return ret;
+
+    } else {
+
+	ret = _krb5_make_pa_enc_challange(context, crypto, 
+					  KRB5_KU_ENC_CHALLENGE_CLIENT,
+					  out_md);
+	krb5_crypto_destroy(context, crypto);
+	if (ret) {
+	    _krb5_debugx(context, 5, "enc-chal: failed build enc challange");
+	    return ret;
+	}
+
+	return HEIM_ERR_PA_CONTINUE_NEEDED;
+    }
+}
+
+#ifdef __APPLE_PRIVATE__
+
+/*
+ * SRP
+ */
+
+#include <corecrypto/ccsrp.h>
+#include <corecrypto/ccsrp_gp.h>
+#include <corecrypto/ccdh.h>
+#include <corecrypto/ccsha2.h>
+#include <corecrypto/ccpbkdf2.h>
+#include <CommonCrypto/CommonRandomSPI.h>
+
+/*
+ * ordered in preference
+ */
+static const struct _krb5_srp_group {
+    enum KRB5_SRP_GROUP group;
+    ccdh_const_gp_t (*gp)(void);
+    const struct ccdigest_info *(*di)(void);
+    const heim_oid *oid;
+} srpgroups[] = {
+    {
+	KRB5_SRP_GROUP_RFC5054_4096_PBKDF2_SHA512,
+	ccsrp_gp_rfc5054_4096,
+	ccsha512_di,
+	&asn1_oid_id_pkinit_kdf_ah_sha512
+    }
+};
+
+/*
+ *
+ */
+
+const struct _krb5_srp_group *
+_krb5_srp_validate_group(KRB5_SRP_GROUP group)
+{
+    size_t n;
+
+    for (n = 0; n < sizeof(srpgroups)/sizeof(srpgroups[0]); n++)
+	if (srpgroups[n].group == group)
+	    return &srpgroups[n];
+
+    return NULL;
+}
+
+
+size_t
+_krb5_srp_pkisize(const struct _krb5_srp_group *group)
+{
+    return ccdh_gp_prime_size(group->gp());
+}
+
+size_t
+_krb5_srp_keysize(const struct _krb5_srp_group *group)
+{
+    return group->di()->output_size;
+}
+
+struct _krb5_srp *
+_krb5_srp_create(const struct _krb5_srp_group *group)
+{
+    const struct ccdigest_info *di = group->di();
+    ccsrp_const_gp_t gp = group->gp();
+    ccsrp_ctx * srp;
+    
+    srp = malloc(ccsrp_sizeof_srp(di, gp));
+    if (srp == NULL)
+	return NULL;
+
+    ccsrp_ctx_init(srp, di, gp);
+    
+    return (struct _krb5_srp *)srp;
+}
+
+krb5_error_code
+_krb5_srp_create_pa(krb5_context context, 
+		    const struct _krb5_srp_group *group,
+		    krb5_const_principal principal,
+		    const char *password,
+		    const KRB5_SRP_PA *spa,
+		    krb5_data *verifier)
+{
+    krb5_error_code ret;
+    char *username;
+    ccsrp_ctx *srpctx;
+    krb5_data key;
+
+    ret = krb5_data_alloc(verifier, _krb5_srp_pkisize(group));
+    if (ret)
+	return ret;
+
+    ret = krb5_unparse_name_flags(context, principal, KRB5_PRINCIPAL_UNPARSE_NO_REALM, &username);
+    if (ret) {
+	krb5_data_free(verifier);
+	return ret;
+    }
+
+    ret = krb5_data_alloc(&key, _krb5_srp_keysize(group));
+    if (ret) {
+	free(username);
+	krb5_data_free(verifier);
+	return ret;
+    }
+
+    ret = ccpbkdf2_hmac(group->di(),
+			strlen(password), password,
+			spa->salt.length, spa->salt.data,
+			spa->iterations, _krb5_srp_keysize(group),
+			key.data);
+    if (ret) {
+	free(username);
+	krb5_data_free(verifier);
+	return ret;
+    }
+    
+    srpctx = (ccsrp_ctx *)_krb5_srp_create(group);
+    if (srpctx == NULL) {
+	krb5_data_free(verifier);
+	krb5_data_free(&key);
+	krb5_xfree(username);
+	return ENOMEM;
+    }
+
+    ret = ccsrp_generate_verifier(srpctx, username,
+				  key.length, key.data,
+				  spa->salt.length, spa->salt.data,
+				  verifier->data);
+    krb5_data_free(&key);
+    krb5_xfree(srpctx);
+    krb5_xfree(username);
+    if (ret)
+	return EINVAL;
+
+    return 0;
+}
+
+krb5_error_code
+_krb5_srp_reply_key(krb5_context context,
+		    const struct _krb5_srp_group *srpgroup,
+		    krb5_enctype enctype,
+		    const void *session_key,
+		    size_t session_key_length,
+		    krb5_const_principal client,
+		    krb5_data *req_buffer,
+		    krb5_data *announce,
+		    krb5_keyblock *reply_key)
+{
+    AlgorithmIdentifier ai;
+		    
+    ai.algorithm = *srpgroup->oid;
+    ai.parameters = NULL;
+
+    return _krb5_pk_kdf(context,
+			&ai,
+			session_key,
+			session_key_length,
+			client,
+			NULL,
+			enctype,
+			req_buffer,
+			announce,
+			NULL,
+			reply_key);
+}
+
+
+
+/*
+ * Client only bits below
+ */
+
+enum KRB5_SRP_STATE {
+    KRB5_SRP_STATE_FIRST = 0,
+    KRB5_SRP_STATE_INIT,
+    KRB5_SRP_STATE_SERVER_CHALLENGE,
+    KRB5_SRP_STATE_SERVER_VERIFIER,
+    KRB5_SRP_STATE_DONE
+};
+
+typedef struct srp_state_data {
+    enum KRB5_SRP_STATE state;
+    const struct _krb5_srp_group *group;
+    ccsrp_ctx *srp;
+    size_t keylength;
+    size_t pkilength;
+    krb5_data key;
+    krb5_data announce;
+    KRB5_SRP_PA spa;
+} *srp_state_t;
+
+static krb5_error_code
+srp_configure(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx)
+{
+    srp_state_t state = pa_ctx;
+
+    if (ctx->password == NULL)
+	return HEIM_ERR_PA_CANT_CONTINUE;
+
+    state->state = KRB5_SRP_STATE_INIT;
+    state->group = NULL;
+
+    return 0;
+}
+
+static krb5_error_code
+srp_step(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx, PA_DATA *pa, const AS_REQ *a,
+	 const AS_REP *rep, const krb5_krbhst_info *hi, METHOD_DATA *in_md, METHOD_DATA *out_md)
+{
+    srp_state_t state = pa_ctx;
+    krb5_error_code ret;
+
+    if (pa == NULL) {
+	_krb5_debugx(context, 0, "KDC didn't return any SRP pa data");
+	state->state = KRB5_SRP_STATE_DONE;
+	return HEIM_ERR_PA_CANT_CONTINUE;
+    }
+
+    if (state->state == KRB5_SRP_STATE_INIT) {
+	KRB5_SRP_PA_ANNOUNCE sa;
+	KRB5_SRP_PA *spa = NULL;
+	KRB5_SRP_PA_INIT ci;
+	krb5_data data;
+	size_t size, n;
+
+	memset(&ci, 0, sizeof(ci));
+
+	ret = decode_KRB5_SRP_PA_ANNOUNCE(pa->padata_value.data, pa->padata_value.length, &sa, &size);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = krb5_data_copy(&state->announce, pa->padata_value.data, pa->padata_value.length);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_ANNOUNCE(&sa);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	/* pick first group KDC sends, the list is validated by mixing it into the kdf */
+	for (n = 0; n < sa.groups.len; n++) {
+	    state->group = _krb5_srp_validate_group(sa.groups.val[n].group);
+	    if (state->group != NULL) {
+		spa = &sa.groups.val[n];
+		break;
+	    }
+	}
+	if (spa == NULL) {
+	    _krb5_debugx(context, 0, "KDC didn't send a good SRP group for us, sent %u group(s)",
+			 (unsigned)sa.groups.len);
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_ANNOUNCE(&sa);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = copy_KRB5_SRP_PA(spa, &state->spa);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_ANNOUNCE(&sa);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	state->srp = (ccsrp_ctx *)_krb5_srp_create(state->group);
+	if (state->srp == NULL) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_ANNOUNCE(&sa);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+	state->keylength = _krb5_srp_keysize(state->group);
+	state->pkilength = _krb5_srp_pkisize(state->group);
+
+	ret = krb5_data_alloc(&state->key, state->keylength);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_ANNOUNCE(&sa);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = ccpbkdf2_hmac(state->group->di(),
+			    strlen(ctx->password), ctx->password,
+			    spa->salt.length, spa->salt.data,
+			    spa->iterations, state->keylength,
+			    state->key.data);
+	free_KRB5_SRP_PA_ANNOUNCE(&sa);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = krb5_data_alloc(&ci.a, state->pkilength);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	/*
+	 *
+	 */
+	ci.group = state->group->group;
+
+	ccsrp_client_start_authentication(state->srp, ccDevRandomGetRngState(), ci.a.data);
+
+	ASN1_MALLOC_ENCODE(KRB5_SRP_PA_INIT, data.data, data.length, &ci, &size, ret);
+	free_KRB5_SRP_PA_INIT(&ci);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+	heim_assert(data.length == size, "ASN1.1 Internal error");
+
+	ret = krb5_padata_add(context, out_md, KRB5_PADATA_SRP, data.data, data.length);
+	if (ret) {
+	    free(data.data);
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	state->state = KRB5_SRP_STATE_SERVER_CHALLENGE;
+
+	return HEIM_ERR_PA_CONTINUE_NEEDED;
+
+    } else if (state->state == KRB5_SRP_STATE_SERVER_CHALLENGE) {
+	KRB5_SRP_PA_SERVER_CHALLENGE sc;
+	KRB5_SRP_PA_CLIENT_RESPONSE cr;
+	krb5_principal principal = NULL;
+	krb5_data data;
+	char *username;
+	size_t size;
+	 
+	memset(&cr, 0, sizeof(cr));
+
+	ret = decode_KRB5_SRP_PA_SERVER_CHALLENGE(pa->padata_value.data, pa->padata_value.length, &sc, &size);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+	
+	if (sc.length != state->pkilength) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_SERVER_CHALLENGE(&sc);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+	heim_assert(a->req_body.cname != NULL, "should not get here since we could not have found the hdb entry otherwise");
+	
+	ret = _krb5_principalname2krb5_principal(context, &principal,
+						 *a->req_body.cname,
+						 a->req_body.realm);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_SERVER_CHALLENGE(&sc);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+
+	ret = krb5_unparse_name_flags(context, principal, KRB5_PRINCIPAL_UNPARSE_NO_REALM, &username);
+	krb5_free_principal(context, principal);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_SERVER_CHALLENGE(&sc);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = krb5_data_alloc(&cr, state->keylength);
+	if (ret) {
+	    free(username);
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_SERVER_CHALLENGE(&sc);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+	
+	_krb5_debugx(context, 5, "ccsrp client start for user: %s", username);
+
+	ret = ccsrp_client_process_challenge(state->srp, username,
+					     state->key.length,
+					     state->key.data,
+					     state->spa.salt.length,
+					     state->spa.salt.data,
+					     sc.data, cr.data);
+	free_KRB5_SRP_PA_SERVER_CHALLENGE(&sc);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_CLIENT_RESPONSE(&cr);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ASN1_MALLOC_ENCODE(KRB5_SRP_PA_CLIENT_RESPONSE, data.data, data.length, &cr, &size, ret);
+	free_KRB5_SRP_PA_CLIENT_RESPONSE(&cr);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+	heim_assert(data.length == size, "ASN.1 internal error");
+
+	ret = krb5_padata_add(context, out_md, KRB5_PADATA_SRP, data.data, data.length);
+	if (ret) {
+	    free(data.data);
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	state->state = KRB5_SRP_STATE_SERVER_VERIFIER;
+	return HEIM_ERR_PA_CONTINUE_NEEDED;
+
+    } else if (state->state == KRB5_SRP_STATE_SERVER_VERIFIER) {
+	KRB5_SRP_PA_SERVER_VERIFIER sv;
+	krb5_principal client = NULL;
+	size_t size;
+	bool boolres;
+
+	if (rep == NULL) {
+	    _krb5_debugx(context, 0, "KDC didn't return an AS-REP in last step of verifier");
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = decode_KRB5_SRP_PA_SERVER_VERIFIER(pa->padata_value.data, pa->padata_value.length, &sv, &size);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	if (sv.length != state->keylength) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    free_KRB5_SRP_PA_SERVER_VERIFIER(&sv);
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+	
+	boolres = ccsrp_client_verify_session(state->srp, sv.data);
+	free_KRB5_SRP_PA_SERVER_VERIFIER(&sv);
+	if (!boolres) {
+	    _krb5_debugx(context, 0, "Failed to validate the KDC");
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	if (ctx->fast_state.reply_key)
+	    krb5_free_keyblock(context, ctx->fast_state.reply_key);
+
+	ctx->fast_state.reply_key = calloc(1, sizeof(*ctx->fast_state.reply_key));
+	if (ctx->fast_state.reply_key == NULL) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = _krb5_principalname2krb5_principal(context, &client,
+						 rep->cname, rep->crealm);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = _krb5_srp_reply_key(context,
+				  state->group,
+				  rep->enc_part.etype,
+				  ccsrp_ctx_K(state->srp),
+				  state->keylength,
+				  client,
+				  &ctx->req_buffer,
+				  &state->announce,
+				  ctx->fast_state.reply_key);
+	krb5_free_principal(context, client);
+	if (ret) {
+	    state->state = KRB5_SRP_STATE_DONE;
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ctx->runflags.allow_save_as_reply_key = 1;
+
+	state->state = KRB5_SRP_STATE_DONE;
+
+	return 0;
+
+    } else if (state->state == KRB5_SRP_STATE_DONE) {
+	/* Called too many files */
+	return HEIM_ERR_PA_CANT_CONTINUE;
+    }
+
+    krb5_abortx(context, "internal state machine error");
+}
+
+static void
+srp_release(void *pa_ctx)
+{
+    srp_state_t state = pa_ctx;
+    free(state->srp);
+    krb5_data_free(&state->announce);
+    krb5_data_free(&state->key);
+    free_KRB5_SRP_PA(&state->spa);
+}
+
+#endif
+
+struct enc_ts_context {
+    int used_pa_types;
+#define  USED_ENC_TS_GUESS	4
+#define  USED_ENC_TS_INFO	8
+#define  USED_ENC_TS_RENEG	16
+    krb5_principal user;
+};
+
+static krb5_error_code
+enc_ts_restart(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx)
+{
+    struct enc_ts_context *pactx = (struct enc_ts_context *)pa_ctx;
+    pactx->used_pa_types = 0;
+    krb5_free_principal(context, pactx->user);
+    pactx->user = NULL;
+    return 0;
+}
+
+static krb5_error_code
+enc_ts_step(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx, PA_DATA *pa,
+	    const AS_REQ *a, 
+	    const AS_REP *rep,
+	    const krb5_krbhst_info *hi,
+	    METHOD_DATA *in_md, METHOD_DATA *out_md)
+{
+    struct enc_ts_context *pactx = (struct enc_ts_context *)pa_ctx;
+    struct pa_info_data paid, *ppaid;
+    krb5_error_code ret;
+    const char *state;
+    unsigned flag;
+
+    /*
+     * Keep track of the user we used so that we can restart
+     * authentication when we get referals.
+     */
+
+    if (pactx->user && !krb5_principal_compare(context, pactx->user, ctx->cred.client)) {
+	pactx->used_pa_types = 0;
+	krb5_free_principal(context, pactx->user);
+	pactx->user = NULL;
+    }
+
+    if (pactx->user == NULL) {
+	ret = krb5_copy_principal(context, ctx->cred.client, &pactx->user);
+	if (ret)
+	    return ret;
+    }
+
+    memset(&paid, 0, sizeof(paid));
+
+    if (rep == NULL)
+	paid.etype = KRB5_ENCTYPE_NULL;
+    else
+	paid.etype = rep->enc_part.etype;
+
+    ppaid = process_pa_info(context, ctx->cred.client, a, &paid, in_md);
+
+    if (rep) {
+	/*
+	 * Some KDC's don't send salt info in the reply when there is
+	 * success pre-auth happned before, so use cached copy (or
+	 * even better, if there is just one pre-auth, save reply-key).
+	 */
+	if (ppaid == NULL && ctx->paid.etype != KRB5_ENCTYPE_NULL) {
+	    ppaid = &ctx->paid;
+
+	} else if (ppaid == NULL) {
+	    _krb5_debugx(context, 0, "no paid when building key, build a default salt structure ?");
+	    return HEIM_ERR_PA_CANT_CONTINUE;
+	}
+
+	ret = pa_data_to_key_plain(context, ctx->cred.client, ctx,
+				   ppaid->salt, ppaid->s2kparams, rep->enc_part.etype,
+				   &ctx->fast_state.reply_key);
+	free_paid(context, &paid);
+	return ret;
+    }
+
+    /*
+     * If we don't have ppaid, ts because the KDC have not sent any
+     * salt info, lets to the first roundtrip so the KDC have a chance
+     * to send any.
+     *
+     * Don't bother guessing, it sounds like a good idea until you run
+     * into KDCs that are doing failed auth counting based on the
+     * ENC_TS tries.
+     *
+     * Stashing the salt for the next run is a diffrent issue and
+     * could be considered in the future.
+     */
+
+    if (ppaid == NULL) {
+	_krb5_debugx(context, 5,
+		     "TS-ENC: waiting for KDC to set pw-salt/etype_info{,2}");
+	return HEIM_ERR_PA_CONTINUE_NEEDED;
+    }
+    if (ppaid->etype == ETYPE_NULL) {
+	free_paid(context, &paid);
+	_krb5_debugx(context, 5,
+		     "TS-ENC: kdc proposes enctype NULL ?");
+	return HEIM_ERR_PA_CANT_CONTINUE;
+    }
+
+    /*
+     * We have to allow the KDC to re-negotiate the PA-TS data
+     * once, this is since the in the case of a windows read only
+     * KDC that doesn't have the keys simply guesses what the
+     * master is supposed to support. In the case where this
+     * breaks in when the RO-KDC is a newer version the the RW-KDC
+     * and the RO-KDC announced a enctype that the older doesn't
+     * support.
+     */
+    if (pactx->used_pa_types & USED_ENC_TS_INFO) {
+	flag = USED_ENC_TS_RENEG;
+	state = "reneg";
+    } else {
+	flag = USED_ENC_TS_INFO;
+	state = "info";
+    }
+    
+    if (pactx->used_pa_types & flag) {
+	free_paid(context, &paid);
+	krb5_set_error_message(context, KRB5_GET_IN_TKT_LOOP,
+			       "Already tried ENC-TS-%s, looping", state);
+	return KRB5_GET_IN_TKT_LOOP;
+    }
+    
+    pactx->used_pa_types |= flag;
+
+    free_paid(context, &ctx->paid);
+    ctx->paid = *ppaid;
+    
+
+    ret = pa_data_to_md_ts_enc(context, a, ctx->cred.client, ctx, ppaid, out_md);
+    if (ret)
+	return ret;
+
+    return HEIM_ERR_PA_CONTINUE_NEEDED;
+}
+
+static void
+enc_ts_release(void *pa_ctx)
+{
+    struct enc_ts_context *pactx = (struct enc_ts_context *)pa_ctx;
+
+    if (pactx->user)
+	krb5_free_principal(NULL, pactx->user);
+	
+}
+
+static krb5_error_code
+pa_pac_step(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx, PA_DATA *pa, const AS_REQ *a,
+	    const AS_REP *rep, const krb5_krbhst_info *hi,
+	    METHOD_DATA *in_md, METHOD_DATA *out_md)
 {
     size_t len = 0, length;
     krb5_error_code ret;
@@ -1129,14 +2115,515 @@ pa_data_add_pac_request(krb5_context context,
 		       &req, &len, ret);
     if (ret)
 	return ret;
-    if(len != length)
-	krb5_abortx(context, "internal error in ASN.1 encoder");
+    heim_assert(len == length, "internal error in ASN.1 encoder");
 
-    ret = krb5_padata_add(context, md, KRB5_PADATA_PA_PAC_REQUEST, buf, len);
+    ret = krb5_padata_add(context, out_md, KRB5_PADATA_PA_PAC_REQUEST, buf, len);
     if (ret)
 	free(buf);
 
     return 0;
+}
+
+static krb5_error_code
+pa_pku2u_name_step(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx, PA_DATA *pa, const AS_REQ *a,
+		   const AS_REP *rep, const krb5_krbhst_info *hi,
+		   METHOD_DATA *in_md, METHOD_DATA *out_md)
+{
+#ifdef PKINIT
+    if (ctx->pku2u_assertion) {
+	krb5_error_code ret;
+	krb5_data data;
+
+	ret = krb5_data_copy(&data,
+			     ctx->pku2u_assertion->data,
+			     ctx->pku2u_assertion->length);
+	if (ret)
+	    return ret;
+        ret = krb5_padata_add(context, out_md, KRB5_PADATA_PKU2U_NAME, 
+			      data.data, data.length);
+	if (ret) {
+	    krb5_data_free(&data);
+	    return ret;
+	}
+    }
+#endif
+    return 0;
+}
+
+static krb5_error_code
+pa_enc_pa_rep_step(krb5_context context, krb5_init_creds_context ctx, void *pa_ctx, PA_DATA *pa, const AS_REQ *a,
+		   const AS_REP *rep, const krb5_krbhst_info *hi,
+		   METHOD_DATA *in_md, METHOD_DATA *out_md)
+{
+#ifdef PKINIT
+    if (ctx->runflags.allow_enc_pa_rep)
+        return krb5_padata_add(context, out_md, KRB5_PADATA_REQ_ENC_PA_REP, NULL, 0);
+#endif
+    return 0;
+}
+
+static krb5_error_code
+pa_fx_cookie_step(krb5_context context,
+		  krb5_init_creds_context ctx,
+		  void *pa_ctx,
+		  PA_DATA *pa,
+		  const AS_REQ *a,
+		  const AS_REP *rep,
+		  const krb5_krbhst_info *hi,
+		  METHOD_DATA *in_md,
+		  METHOD_DATA *out_md)
+{
+    krb5_error_code ret;
+    void *cookie;
+    PA_DATA *pad;
+    int idx = 0;
+
+    pad = krb5_find_padata(in_md->val, in_md->len, KRB5_PADATA_FX_COOKIE, &idx);
+    if (pad == NULL)
+	return 0;
+
+    cookie = malloc(pad->padata_value.length);
+    if (cookie == NULL)
+	return ENOMEM;
+
+    memcpy(cookie, pad->padata_value.data, pad->padata_value.length);
+
+    ret = krb5_padata_add(context, out_md, KRB5_PADATA_FX_COOKIE, cookie, pad->padata_value.length);
+    if (ret)
+	free(cookie);
+    else {
+	_krb5_debugx(context, 5, "Mirrored FX-COOKIE to KDC");
+    }	
+
+    return ret;
+}
+
+
+
+
+typedef struct pa_info_data *(*pa_salt_info_f)(krb5_context, const krb5_principal, const AS_REQ *, struct pa_info_data *, heim_octet_string *);
+typedef krb5_error_code (*pa_configure_f)(krb5_context, krb5_init_creds_context, void *);
+typedef krb5_error_code (*pa_restart_f)(krb5_context, krb5_init_creds_context, void *);
+typedef krb5_error_code (*pa_step_f)(krb5_context, krb5_init_creds_context, void *, PA_DATA *, const AS_REQ *, const AS_REP *, const krb5_krbhst_info *, METHOD_DATA *, METHOD_DATA *);
+typedef void            (*pa_release_f)(void *);
+
+struct patype {
+    int type;
+    char *name;
+    int flags;
+#define PA_F_ANNOUNCE		1
+#define PA_F_CONFIG		2
+#define PA_F_FAST		4 /* available inside FAST */
+#define PA_F_NOT_FAST		8 /* only available without FAST */
+    size_t pa_ctx_size;
+    pa_salt_info_f salt_info;
+    /**
+     * Return 0 if the PA-mechanism is available and optionally set pa_ctx pointer to non-NULL.
+     */
+    pa_configure_f configure;
+    /**
+     * Return 0 if the PA-mechanism can be restarted (time skew, referrals, etc)
+     */
+    pa_restart_f restart;
+    /**
+     * Return 0 if the when complete, KRB5_KDC_ERR_MORE_PREAUTH_DATA_REQUIRED if more steps are require
+     */
+    pa_step_f step;
+    pa_release_f release;
+} patypes[] = {
+    {
+	KRB5_PADATA_PK_AS_REP,
+	"PKINIT(IETF)",
+	PA_F_FAST | PA_F_NOT_FAST,
+	0,
+	NULL,
+	pkinit_configure,
+	NULL,
+	pkinit_step,
+	pkinit_release
+    },
+    {
+	KRB5_PADATA_PK_AS_REP_19,
+	"PKINIT(win)",
+	PA_F_FAST | PA_F_NOT_FAST,
+	0,
+	NULL,
+	pkinit_configure,
+	NULL,
+	pkinit_step_win,
+	pkinit_release
+    },
+#ifdef __APPLE_PRIVATE__
+    {
+	KRB5_PADATA_SRP,
+	"SRP",
+	PA_F_FAST | PA_F_NOT_FAST,
+	sizeof(struct srp_state_data),
+	NULL,
+	srp_configure,
+	NULL,
+	srp_step,
+	srp_release
+    },
+#endif
+    {
+	KRB5_PADATA_ENCRYPTED_CHALLENGE,
+	"ENCRYPTED_CHALLENGE",
+	PA_F_FAST,
+	0,
+	NULL,
+	NULL,
+	NULL,
+	enc_chal_step,
+	NULL
+    },
+    {
+	KRB5_PADATA_ENC_TIMESTAMP,
+	"ENCRYPTED_TIMESTAMP",
+	PA_F_NOT_FAST,
+	sizeof(struct enc_ts_context),
+	NULL,
+	NULL,
+	enc_ts_restart,
+	enc_ts_step,
+	enc_ts_release
+    },
+    {
+	KRB5_PADATA_PA_PAC_REQUEST,
+	"PA_PAC_REQUEST",
+	PA_F_CONFIG,
+	0,
+	NULL,
+	NULL,
+	NULL,
+	pa_pac_step,
+	NULL
+    },
+    {
+	KRB5_PADATA_PKU2U_NAME,
+	"PKU2U-NAME",
+	PA_F_CONFIG,
+	0,
+	NULL,
+	NULL,
+	NULL,
+	pa_pku2u_name_step,
+	NULL
+    },
+    {
+	KRB5_PADATA_REQ_ENC_PA_REP,
+	"REQ-ENC-PA-REP",
+	PA_F_CONFIG,
+	0,
+	NULL,
+	NULL,
+	NULL,
+	pa_enc_pa_rep_step,
+	NULL
+    },
+    {
+	KRB5_PADATA_FX_COOKIE,
+	"FX-COOKIE",
+	PA_F_CONFIG,
+	0,
+	NULL,
+	NULL,
+	NULL,
+	pa_fx_cookie_step,
+	NULL
+    },
+#define patype_salt(n, f) { KRB5_PADATA_##n, #n, 0, 0, f, NULL, NULL, NULL, NULL }
+    patype_salt(ETYPE_INFO2, pa_etype_info2),
+    patype_salt(ETYPE_INFO, pa_etype_info),
+    patype_salt(PW_SALT, pa_pw_or_afs3_salt),
+    patype_salt(AFS3_SALT, pa_pw_or_afs3_salt),
+#undef patype_salt
+    /* below are just for pretty printing */
+#define patype_info(n) { KRB5_PADATA_##n, #n, 0, 0, NULL, NULL, NULL, NULL, NULL }
+    patype_info(AUTHENTICATION_SET),
+    patype_info(AUTH_SET_SELECTED),
+    patype_info(FX_FAST),
+    patype_info(FX_ERROR),
+    patype_info(PKINIT_KX),
+    patype_info(PK_AS_REQ)
+#undef patype_info
+};
+
+static const char *
+get_pa_type_name(int type)
+{
+    size_t n;
+    for (n = 0; n < sizeof(patypes)/sizeof(patypes[0]); n++) 
+	if (type == patypes[n].type)
+	    return patypes[n].name;
+    return "unknown";
+}
+
+/*
+ *
+ */
+
+struct pa_auth_mech {
+    struct heim_base_uniq base;
+    struct patype *patype;
+    heim_object_t next; /* when doing authentication sets */
+    char pactx[1];
+};
+
+/*
+ *
+ */
+
+static struct pa_info_data *
+process_pa_info(krb5_context context,
+		const krb5_principal client,
+		const AS_REQ *asreq,
+		struct pa_info_data *paid,
+		METHOD_DATA *md)
+{
+    struct pa_info_data *p = NULL;
+    PA_DATA *pa;
+    size_t i;
+
+    if (md == NULL)
+	return NULL;
+
+    for (i = 0; p == NULL && i < sizeof(patypes)/sizeof(patypes[0]); i++) {
+	int idx = 0;
+
+	if (patypes[i].salt_info == NULL)
+	    continue;
+
+	pa = krb5_find_padata(md->val, md->len, patypes[i].type, &idx);
+	if (pa == NULL)
+	    continue;
+
+	paid->salt.salttype = (krb5_salttype)patypes[i].type;
+	p = patypes[i].salt_info(context, client, asreq, paid, &pa->padata_value);
+    }
+    return p;
+}
+
+static void
+pa_announce(krb5_context context,
+	    int types,
+	    krb5_init_creds_context ctx,
+	    METHOD_DATA *in_md,
+	    METHOD_DATA *out_md)
+{
+    size_t n;
+
+    for (n = 0; n < sizeof(patypes)/sizeof(patypes[0]); n++) {
+	if ((patypes[n].flags & types) == 0)
+	    continue;
+
+	if (patypes[n].step)
+	    patypes[n].step(context, ctx, NULL, NULL, NULL, NULL, NULL, in_md, out_md);
+	else
+	    krb5_padata_add(context, out_md, patypes[n].type, NULL, 0);
+    }
+}
+
+
+static void
+mech_release(void *ctx)
+{
+    struct pa_auth_mech *pa_mech = ctx;
+    if (pa_mech->patype->release)
+	pa_mech->patype->release((void *)&pa_mech->pactx[0]);
+}
+
+static struct pa_auth_mech *
+pa_mech_create(krb5_context context, krb5_init_creds_context ctx, int pa_type)
+{
+    struct pa_auth_mech *pa_mech;
+    struct patype *patype = NULL;
+    size_t n;
+
+    for (n = 0; patype == NULL && n < sizeof(patypes)/sizeof(patypes[0]); n++) {
+	if (patypes[n].type == pa_type)
+	    patype = &patypes[n];
+    }
+    if (patype == NULL)
+	return NULL;
+
+    pa_mech = heim_uniq_alloc(sizeof(*pa_mech) - 1 + patype->pa_ctx_size, "heim-pa-mech-ctx", mech_release);
+    if (pa_mech == NULL)
+	return NULL;
+
+    pa_mech->patype = patype;
+
+    if (pa_mech->patype->configure) {
+	krb5_error_code ret;
+
+	ret = pa_mech->patype->configure(context, ctx, &pa_mech->pactx[0]);
+	if (ret) {
+	    heim_release(pa_mech);
+	    return NULL;
+	}
+    }
+
+    _krb5_debugx(context, 5, "Adding PA mech: %s", patype->name);
+
+    return pa_mech;
+}
+
+static void
+pa_mech_add(krb5_context context, krb5_init_creds_context ctx, int pa_type)
+{
+    struct pa_auth_mech *mech;
+
+    mech = pa_mech_create(context, ctx, pa_type);
+    if (mech) {
+	heim_array_append_value(ctx->available_pa_mechs, mech);
+	heim_release(mech);
+    }
+}
+
+static krb5_error_code
+pa_configure(krb5_context context,
+	     krb5_init_creds_context ctx,
+	     METHOD_DATA *in_md)
+{
+    ctx->available_pa_mechs = heim_array_create();
+
+    if ((ctx->keyproc || ctx->keyseed || ctx->prompter) && !ctx->pk_init_ctx) {
+	pa_mech_add(context, ctx, KRB5_PADATA_SRP);
+	pa_mech_add(context, ctx, KRB5_PADATA_ENCRYPTED_CHALLENGE);
+	pa_mech_add(context, ctx, KRB5_PADATA_ENC_TIMESTAMP);
+    }
+
+    if (ctx->pk_init_ctx) {
+	pa_mech_add(context, ctx, KRB5_PADATA_PK_AS_REP);
+	pa_mech_add(context, ctx, KRB5_PADATA_PK_AS_REP_19);
+    }
+
+    /* XXX setup context based on KDC reply */
+
+    return 0;
+}
+	     
+static krb5_error_code
+pa_restart(krb5_context context,
+	   krb5_init_creds_context ctx)
+{
+    krb5_error_code ret = HEIM_ERR_PA_CANT_CONTINUE;
+
+    if (ctx->pa_mech && ctx->pa_mech->patype->restart)
+	ret = ctx->pa_mech->patype->restart(context, ctx, (void *)&ctx->pa_mech->pactx[0]);
+
+    return ret;
+}
+
+
+static krb5_error_code
+pa_step(krb5_context context,
+	krb5_init_creds_context ctx,
+	const AS_REQ *a,
+	const AS_REP *rep,
+	const krb5_krbhst_info *hi,
+	METHOD_DATA *in_md,
+	METHOD_DATA *out_md)
+{
+    krb5_error_code ret;
+    PA_DATA *pa = NULL;
+    int idx;
+
+    //heim_assert(in_md != NULL, "pa_step w/o input padata");
+
+ next:
+    do {
+	if (ctx->pa_mech == NULL) {
+	    size_t len = heim_array_get_length(ctx->available_pa_mechs);
+	    if (len == 0) {
+		_krb5_debugx(context, 0, "no more available_pa_mechs to try");
+		return HEIM_ERR_NO_MORE_PA_MECHS;
+	    }
+
+	    ctx->pa_mech = heim_array_copy_value(ctx->available_pa_mechs, 0);
+	    heim_array_delete_value(ctx->available_pa_mechs, 0);
+	}
+
+	if (ctx->fast_state.armor_crypto) {
+	    if ((ctx->pa_mech->patype->flags & PA_F_FAST) == 0) {
+		_krb5_debugx(context, 0, "pa-mech %s dropped under FAST (not supported)",
+			     ctx->pa_mech->patype->name);
+		heim_release(ctx->pa_mech);
+		ctx->pa_mech = NULL;
+		continue;
+	    }
+	} else {
+	    if ((ctx->pa_mech->patype->flags & PA_F_NOT_FAST) == 0) {
+		_krb5_debugx(context, 0, "dropped pa-mech %s since not running under FAST",
+			     ctx->pa_mech->patype->name);
+		heim_release(ctx->pa_mech);
+		ctx->pa_mech = NULL;
+		continue;
+	    }
+	}
+
+	_krb5_debugx(context, 0, "pa-mech trying: %s, searching for %d",
+		     ctx->pa_mech->patype->name, ctx->pa_mech->patype->type);
+
+	idx = 0;
+	if (in_md)
+	    pa = krb5_find_padata(in_md->val, in_md->len, ctx->pa_mech->patype->type, &idx);
+	else
+	    pa = NULL;
+
+    } while (ctx->pa_mech == NULL);
+
+    _krb5_debugx(context, 5, "Stepping pa-mech: %s", ctx->pa_mech->patype->name);
+
+    ret = ctx->pa_mech->patype->step(context, ctx, (void *)&ctx->pa_mech->pactx[0], pa, a, rep, hi, in_md, out_md);
+    _krb5_debug(context, 10, ret, "PA type %s returned %d", ctx->pa_mech->patype->name, ret);
+    if (ret == 0) {
+	struct pa_auth_mech *next_pa = ctx->pa_mech->next;
+
+	if (next_pa) {
+	    _krb5_debugx(context, 5, "Next PA type in set is: %s",
+			 next_pa->patype->name);
+	    ret = HEIM_ERR_PA_CONTINUE_NEEDED;
+	} else if (rep == NULL) {
+	    _krb5_debugx(context, 5, "PA %s done, but no ticket in sight!!!",
+			 ctx->pa_mech->patype->name);
+	    ret = HEIM_ERR_PA_CANT_CONTINUE;
+	} else {
+	    ctx->pa_used = ctx->pa_mech->patype->name;
+	}
+
+	heim_retain(next_pa);
+	heim_release(ctx->pa_mech);
+	ctx->pa_mech = next_pa;
+    }
+
+    if (ret == HEIM_ERR_PA_CANT_CONTINUE) {
+	_krb5_debugx(context, 5, "Dropping PA type %s", ctx->pa_mech->patype->name);
+	heim_release(ctx->pa_mech);
+	ctx->pa_mech = NULL;
+	goto next;
+    } else if (ret == HEIM_ERR_PA_CONTINUE_NEEDED) {
+	_krb5_debugx(context, 5, "Continue needed for %s", ctx->pa_mech->patype->name);
+    } else if (ret != 0) {
+	_krb5_debugx(context, 5, "Other error from mech %s: %d", ctx->pa_mech->patype->name, ret);
+	heim_release(ctx->pa_mech);
+	ctx->pa_mech = NULL;
+    }
+
+    return ret;
+}
+
+static void
+log_kdc_pa_types(krb5_context context, METHOD_DATA *in_md)
+{
+    if (_krb5_have_debug(context, 5)) {
+	unsigned i;
+	_krb5_debugx(context, 5, "KDC sent %d patypes", in_md->len);
+	for (i = 0; i < in_md->len; i++)
+	    _krb5_debugx(context, 5, "KDC sent PA-DATA type: %d (%s)",
+			 in_md->val[i].padata_type,
+			 get_pa_type_name(in_md->val[i].padata_type));
+    }
 }
 
 /*
@@ -1146,12 +2633,11 @@ pa_data_add_pac_request(krb5_context context,
 static krb5_error_code
 process_pa_data_to_md(krb5_context context,
 		      const krb5_creds *creds,
+		      int first,
 		      const AS_REQ *a,
-		      krb5_get_init_creds_ctx *ctx,
+		      krb5_init_creds_context ctx,
 		      METHOD_DATA *in_md,
-		      METHOD_DATA **out_md,
-		      krb5_prompter_fct prompter,
-		      void *prompter_data)
+		      METHOD_DATA **out_md)
 {
     krb5_error_code ret;
 
@@ -1163,79 +2649,29 @@ process_pa_data_to_md(krb5_context context,
     (*out_md)->len = 0;
     (*out_md)->val = NULL;
 
-    if (_krb5_have_debug(context, 5)) {
-	unsigned i;
-	_krb5_debug(context, 5, "KDC send %d patypes", in_md->len);
-	for (i = 0; i < in_md->len; i++)
-	    _krb5_debug(context, 5, "KDC send PA-DATA type: %d", in_md->val[i].padata_type);
+    log_kdc_pa_types(context, in_md);
+
+    if (!first) {
+	ret = pa_step(context, ctx, a, NULL, NULL, in_md, *out_md);
+	if (ret == HEIM_ERR_PA_CONTINUE_NEEDED) {
+	    _krb5_debugx(context, 0, "pamech need more stepping");
+	} else if (ret == 0) {
+	    _krb5_debugx(context, 0, "pamech done step");
+	} else {
+	    return ret;
+	}
     }
 
     /*
-     * Make sure we don't sent both ENC-TS and PK-INIT pa data, no
-     * need to expose our password protecting our PKCS12 key.
+     * Send announcement (what we support) and configuration (user
+     * introduced behavior change)
      */
 
-    if (ctx->pk_init_ctx) {
+    pa_announce(context, PA_F_ANNOUNCE|PA_F_CONFIG, ctx, in_md, *out_md);
 
- 	_krb5_debug(context, 5, "krb5_get_init_creds: "
-		    "prepareing PKINIT padata (%s)",
- 		    (ctx->used_pa_types & USED_PKINIT_W2K) ? "win2k" : "ietf");
-
- 	if (ctx->used_pa_types & USED_PKINIT_W2K) {
- 	    krb5_set_error_message(context, KRB5_GET_IN_TKT_LOOP,
- 				   "Already tried pkinit, looping");
- 	    return KRB5_GET_IN_TKT_LOOP;
- 	}
-
-	ret = pa_data_to_md_pkinit(context, a, creds->client,
-				   (ctx->used_pa_types & USED_PKINIT),
-				   ctx, *out_md);
-	if (ret)
-	    return ret;
-
-	if (ctx->used_pa_types & USED_PKINIT)
-	    ctx->used_pa_types |= USED_PKINIT_W2K;
- 	else
- 	    ctx->used_pa_types |= USED_PKINIT;
-
-    } else if (in_md->len != 0) {
-	struct pa_info_data *paid, *ppaid;
- 	unsigned flag;
-
-	paid = calloc(1, sizeof(*paid));
-
-	paid->etype = KRB5_ENCTYPE_NULL;
-	ppaid = process_pa_info(context, creds->client, a, paid, in_md);
-
- 	if (ppaid)
- 	    flag = USED_ENC_TS_INFO;
- 	else
- 	    flag = USED_ENC_TS_GUESS;
-
- 	if (ctx->used_pa_types & flag) {
- 	    if (ppaid)
- 		free_paid(context, ppaid);
- 	    krb5_set_error_message(context, KRB5_GET_IN_TKT_LOOP,
- 				   "Already tried ENC-TS-%s, looping",
- 				   flag == USED_ENC_TS_INFO ? "info" : "guess");
- 	    return KRB5_GET_IN_TKT_LOOP;
- 	}
-
-	pa_data_to_md_ts_enc(context, a, creds->client, ctx, ppaid, *out_md);
-
-	ctx->used_pa_types |= flag;
-
-	if (ppaid) {
-	    if (ctx->ppaid) {
-		free_paid(context, ctx->ppaid);
-		free(ctx->ppaid);
-	    }
-	    ctx->ppaid = ppaid;
-	} else
-	    free(paid);
-    }
-
-    pa_data_add_pac_request(context, ctx, *out_md);
+    /*
+     *
+     */
 
     if ((*out_md)->len == 0) {
 	free(*out_md);
@@ -1247,7 +2683,7 @@ process_pa_data_to_md(krb5_context context,
 
 static krb5_error_code
 process_pa_data_to_key(krb5_context context,
-		       krb5_get_init_creds_ctx *ctx,
+		       krb5_init_creds_context ctx,
 		       krb5_creds *creds,
 		       AS_REQ *a,
 		       AS_REP *rep,
@@ -1257,9 +2693,11 @@ process_pa_data_to_key(krb5_context context,
     struct pa_info_data paid, *ppaid = NULL;
     krb5_error_code ret;
     krb5_enctype etype;
-    PA_DATA *pa;
 
     memset(&paid, 0, sizeof(paid));
+
+    if (rep->padata)
+	log_kdc_pa_types(context, rep->padata);
 
     etype = rep->enc_part.etype;
 
@@ -1268,60 +2706,54 @@ process_pa_data_to_key(krb5_context context,
 	ppaid = process_pa_info(context, creds->client, a, &paid,
 				rep->padata);
     }
-    if (ppaid == NULL)
-	ppaid = ctx->ppaid;
     if (ppaid == NULL) {
-	ret = krb5_get_pw_salt (context, creds->client, &paid.salt);
+	if (ctx->paid.etype == KRB5_ENCTYPE_NULL) {
+	    ctx->paid.etype = etype;
+	    ctx->paid.s2kparams = NULL;
+	    ret = krb5_get_pw_salt (context, creds->client, &ctx->paid.salt);
 	if (ret)
 	    return ret;
-	paid.etype = etype;
-	paid.s2kparams = NULL;
-	ppaid = &paid;
-    }
-
-    pa = NULL;
-    if (rep->padata) {
-	int idx = 0;
-	pa = krb5_find_padata(rep->padata->val,
-			      rep->padata->len,
-			      KRB5_PADATA_PK_AS_REP,
-			      &idx);
-	if (pa == NULL) {
-	    idx = 0;
-	    pa = krb5_find_padata(rep->padata->val,
-				  rep->padata->len,
-				  KRB5_PADATA_PK_AS_REP_19,
-				  &idx);
 	}
+	ppaid = &ctx->paid;
     }
-    if (pa && ctx->pk_init_ctx) {
-#ifdef PKINIT
-	_krb5_debug(context, 5, "krb5_get_init_creds: using PKINIT");
 
-	ret = _krb5_pk_rd_pa_reply(context,
-				   a->req_body.realm,
-				   ctx->pk_init_ctx,
-				   etype,
-				   hi,
-				   ctx->pk_nonce,
-				   &ctx->req_buffer,
-				   pa,
-				   key);
-#else
-	ret = EINVAL;
-	krb5_set_error_message(context, ret, N_("no support for PKINIT compiled in", ""));
-#endif
-    } else if (ctx->keyseed) {
- 	_krb5_debug(context, 5, "krb5_get_init_creds: using keyproc");
-	ret = pa_data_to_key_plain(context, creds->client, ctx,
-				   ppaid->salt, ppaid->s2kparams, etype, key);
+    ret = pa_step(context, ctx, a, rep, hi, rep->padata, NULL);
+    if (ret == HEIM_ERR_PA_CONTINUE_NEEDED) {
+	_krb5_debugx(context, 0, "In final stretch and pa require more stepping ?");
+	return ret;
+    } else if (ret == 0) {
+	_krb5_debugx(context, 0, "final pamech done step");
+	goto out;
     } else {
-	ret = EINVAL;
-	krb5_set_error_message(context, ret, N_("No usable pa data type", ""));
+	return ret;
     }
-
+ out:
     free_paid(context, &paid);
     return ret;
+}
+
+/*
+ *
+ */
+
+static krb5_error_code
+capture_lkdc_domain(krb5_context context,
+		    krb5_init_creds_context ctx)
+{
+    size_t len;
+
+    len = strlen(_krb5_wellknown_lkdc);
+
+    if (ctx->kdc_hostname != NULL ||
+	strncmp(ctx->cred.client->realm, _krb5_wellknown_lkdc, len) != 0 ||
+	ctx->cred.client->realm[len] != ':')
+	return 0;
+
+    ctx->kdc_hostname = strdup(&ctx->cred.client->realm[len + 1]);
+
+    _krb5_debugx(context, 5, "krb5_get_init_creds: setting LKDC hostname to: %s",
+		ctx->kdc_hostname);
+    return 0;
 }
 
 /**
@@ -1331,8 +2763,8 @@ process_pa_data_to_key(krb5_context context,
  * @param client The Kerberos principal to get the credential for, if
  *     NULL is given, the default principal is used as determined by
  *     krb5_get_default_principal().
- * @param prompter
- * @param prompter_data
+ * @param prompter prompter to use if needed
+ * @param prompter_data data passed to prompter function
  * @param start_time the time the ticket should start to be valid or 0 for now.
  * @param options a options structure, can be NULL for default options.
  * @param rctx A new allocated free with krb5_init_creds_free().
@@ -1377,11 +2809,103 @@ krb5_init_creds_init(krb5_context context,
     ctx->prompter = prompter;
     ctx->prompter_data = prompter_data;
 
+    /* pick up hostname from LKDC realm name */
+    ret = capture_lkdc_domain(context, ctx);
+    if (ret) {
+	free_init_creds_ctx(context, ctx);
+	return ret;
+    }
+
+    ctx->runflags.allow_enc_pa_rep = 1;
+
+    ctx->fast_state.flags |= KRB5_FAST_AS_REQ;
+
     *rctx = ctx;
 
     return ret;
 }
 
+/**
+ * Set the KDC hostname for the initial request, it will not be
+ * considered in referrals to another KDC.
+ *
+ * @param context a Kerberos 5 context.
+ * @param ctx a krb5_init_creds_context context.
+ * @param hostname the hostname for the KDC of realm
+ *
+ * @return 0 for success, or an Kerberos 5 error code, see krb5_get_error_message().
+ * @ingroup krb5_credential
+ */
+
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_init_creds_set_kdc_hostname(krb5_context context,
+				 krb5_init_creds_context ctx,
+				 const char *hostname)
+{
+    if (ctx->kdc_hostname)
+	free(ctx->kdc_hostname);
+    ctx->kdc_hostname = strdup(hostname);
+    if (ctx->kdc_hostname == NULL)
+	return krb5_enomem(context);
+    return 0;
+}
+
+/**
+ * Set the sitename for the request
+ *
+ */
+
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_init_creds_set_sitename(krb5_context context,
+			     krb5_init_creds_context ctx,
+			     const char *sitename)
+{
+    if (ctx->sitename)
+	free(ctx->sitename);
+    ctx->sitename = strdup(sitename);
+    if (ctx->sitename == NULL)
+	return krb5_enomem(context);
+    return 0;
+}
+
+/**
+ * Set source app information to be used for this context
+ *
+ * @param context a Kerberos 5 context.
+ * @param ctx a krb5_init_creds_context context.
+ * @param uuid uuid of delegated app
+ *
+ * @return 0 for success, or an Kerberos 5 error code, see krb5_get_error_message().
+ * @ingroup krb5_credential
+ */
+
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_init_creds_set_source_app(krb5_context context,
+			       krb5_init_creds_context ctx,
+			       krb5_uuid uuid,
+			       const char *signingIdentity)
+{
+    ctx->runflags.delegated_uuid = 1;
+    memcpy(ctx->delegated_uuid, uuid, sizeof(krb5_uuid));
+
+    if (ctx->delegated_signing_identity) {
+	free(ctx->delegated_signing_identity);
+	ctx->delegated_signing_identity = NULL;
+    }
+    if (signingIdentity)
+	ctx->delegated_signing_identity = strdup(signingIdentity);
+	
+    _krb5_debugx(context, 5, "krb5_init_creds_set_source_app: %s "
+		 "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+		 signingIdentity,
+		 uuid[0],uuid[1],uuid[2],uuid[3],uuid[4],uuid[5],uuid[6],uuid[7],
+		 uuid[8],uuid[9],uuid[10],uuid[11],uuid[12],uuid[13],uuid[14],uuid[15]);
+
+    return 0;
+}
+
+
+    
 /**
  * Sets the service that the is requested. This call is only neede for
  * special initial tickets, by default the a krbtgt is fetched in the default realm.
@@ -1440,7 +2964,33 @@ krb5_init_creds_set_service(krb5_context context,
  * Sets the password that will use for the request.
  *
  * @param context a Kerberos 5 context.
- * @param ctx ctx krb5_init_creds_context context.
+ * @param ctx a krb5_init_creds_context context.
+ * @param cert client cert
+ *
+ * @return 0 for success, or an Kerberos 5 error code, see krb5_get_error_message().
+ * @ingroup krb5_credential
+ */
+
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_init_creds_set_pkinit_client_cert(krb5_context context,
+				       krb5_init_creds_context ctx,
+				       struct hx509_cert_data *cert)
+{
+#ifdef PKINIT
+    if (ctx->client_cert)
+	hx509_cert_free(ctx->client_cert);
+    ctx->client_cert = hx509_cert_ref(cert);
+    return 0;
+#else
+    return EINVAL;
+#endif
+}
+
+/**
+ * Sets the password that will use for the request.
+ *
+ * @param context a Kerberos 5 context.
+ * @param ctx krb5_init_creds_context context.
  * @param password the password to use.
  *
  * @return 0 for success, or an Kerberos 5 error code, see krb5_get_error_message().
@@ -1484,9 +3034,11 @@ keytab_key_proc(krb5_context context, krb5_enctype enctype,
     krb5_keytab real_keytab;
     krb5_keytab_entry entry;
 
-    if(keytab == NULL)
-	krb5_kt_default(context, &real_keytab);
-    else
+    if (keytab == NULL) {
+	ret = krb5_kt_default(context, &real_keytab);
+	if (ret)
+	    return ret;
+    } else
 	real_keytab = keytab;
 
     ret = krb5_kt_get_entry (context, real_keytab, principal,
@@ -1526,7 +3078,8 @@ krb5_init_creds_set_keytab(krb5_context context,
     krb5_enctype *etypes = NULL;
     krb5_error_code ret;
     size_t netypes = 0;
-    int kvno = 0;
+    int kvno = 0, found = 0;
+    unsigned n;
 
     a = malloc(sizeof(*a));
     if (a == NULL) {
@@ -1559,6 +3112,8 @@ krb5_init_creds_set_keytab(krb5_context context,
 	if (!krb5_principal_compare(context, entry.principal, ctx->cred.client))
 	    goto next;
 
+	found = 1;
+
 	/* check if we ahve this kvno already */
 	if (entry.vno > kvno) {
 	    /* remove old list of etype */
@@ -1574,10 +3129,27 @@ krb5_init_creds_set_keytab(krb5_context context,
 	if (krb5_enctype_valid(context, entry.keyblock.keytype) != 0)
 	    goto next;
 
+	/*
+	 * If user already provided a enctype list, use that as an
+	 * additonal filter.
+	 */
+	if (ctx->etypes) {
+	    for (n = 0; ctx->etypes[n] != ETYPE_NULL; n++) {
+		if (ctx->etypes[n] == entry.keyblock.keytype)
+		    break;
+	    }
+	    if (ctx->etypes[n] == ETYPE_NULL)
+		goto next;
+	}
+
+
 	/* add enctype to supported list */
 	ptr = realloc(etypes, sizeof(etypes[0]) * (netypes + 2));
-	if (ptr == NULL)
-	    goto next;
+	if (ptr == NULL) {
+	    free(etypes);
+	    ret = krb5_enomem(context);
+	    goto out;
+	}
 
 	etypes = ptr;
 	etypes[netypes] = entry.keyblock.keytype;
@@ -1592,11 +3164,52 @@ krb5_init_creds_set_keytab(krb5_context context,
 	if (ctx->etypes)
 	    free(ctx->etypes);
 	ctx->etypes = etypes;
+    } else if (ctx->etypes) {
+	/*
+	 * User asked for enctype, but we didn't find that in for the
+	 * lastest kvno that we had in the keytab.
+	 */
+	found = 0;
     }
 
  out:
-    return 0;
+    if (!found) {
+	if (ret == 0)
+	    ret = KRB5_KT_NOTFOUND;
+	_krb5_kt_principal_not_found(context, ret, keytab, ctx->cred.client, 0, 0);
+    }
+
+    return ret;
 }
+
+krb5_error_code KRB5_LIB_FUNCTION
+_krb5_init_creds_set_pku2u(krb5_context context,
+			   krb5_init_creds_context ctx,
+			   krb5_data *data)
+{
+#ifdef PKINIT
+    krb5_error_code ret;
+
+    ctx->ic_flags |= KRB5_INIT_CREDS_PKU2U;
+    ctx->flags = int2KDCOptions(0);
+
+    if (ctx->pku2u_assertion)
+	krb5_free_data(context, ctx->pku2u_assertion);
+
+    if (data) {
+	ret = krb5_copy_data(context, data, &ctx->pku2u_assertion);
+	if (ret)
+	    return ret;
+    } else {
+	ctx->pku2u_assertion = NULL;
+    }
+
+    return 0;
+#else
+    return EINVAL;
+#endif
+}
+
 
 static krb5_error_code KRB5_CALLCONV
 keyblock_key_proc(krb5_context context, krb5_enctype enctype,
@@ -1618,6 +3231,149 @@ krb5_init_creds_set_keyblock(krb5_context context,
     return 0;
 }
 
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_init_creds_set_fast_ccache(krb5_context context,
+				krb5_init_creds_context ctx,
+				krb5_ccache fast_ccache)
+{
+    krb5_creds *cred = NULL;
+    krb5_error_code ret;
+    krb5_data data;
+
+    ret = _krb5_get_krbtgt(context, fast_ccache, NULL, &cred);
+    if (ret)
+	return ret;
+
+    ret = krb5_cc_get_config(context, fast_ccache, cred->server,
+			     "fast_avail", &data);
+    krb5_free_creds(context, cred);
+    if (ret == 0) {
+	ctx->fast_state.armor_ccache = fast_ccache;
+	ctx->fast_state.flags |= KRB5_FAST_REQUIRED;
+    } else {
+	krb5_set_error_message(context, EINVAL, N_("FAST not available for the KDC in the armor ccache", ""));
+	return EINVAL;
+    }
+    return 0;
+}
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_init_creds_set_fast_ap_armor_service(krb5_context context,
+					  krb5_init_creds_context ctx,
+					  krb5_const_principal armor_service)
+{
+    krb5_error_code ret;
+
+    if (ctx->fast_state.armor_service)
+	krb5_free_principal(context, ctx->fast_state.armor_service);
+    if (armor_service) {
+	ret = krb5_copy_principal(context, armor_service, &ctx->fast_state.armor_service);
+	if (ret)
+	    return ret;
+    } else {
+	ctx->fast_state.armor_service = NULL;
+    }
+    ctx->fast_state.flags |= KRB5_FAST_AP_ARMOR_SERVICE;
+    return 0;
+}
+
+static krb5_error_code
+validate_pkinit_fx(krb5_context context,
+		   krb5_init_creds_context ctx,
+		   AS_REP *rep,
+		   krb5_keyblock *ticket_sessionkey)
+{
+    krb5_crypto reply_crypto = NULL, kxkey_crypto = NULL;
+    krb5_keyblock kxkey, sessionkey;
+    krb5_error_code ret;
+    EncryptedData ed;
+    krb5_data data, pepper1, pepper2;
+    PA_DATA *pa = NULL;
+    size_t size;
+    int idx = 0;
+
+    krb5_keyblock_zero(&sessionkey);
+    krb5_keyblock_zero(&kxkey);
+
+    if (rep->padata)
+	pa = krb5_find_padata(rep->padata->val, rep->padata->len, KRB5_PADATA_PKINIT_KX, &idx);
+    
+    if (pa == NULL) {
+	if (ctx->flags.request_anonymous && ctx->pk_init_ctx) {
+	    /* XXX handle the case where pkinit is not used */
+	    krb5_set_error_message(context, KRB5_KDCREP_MODIFIED, N_("Requested anonymous with PKINIT and KDC didn't set PKINIT_KX", ""));
+	    return KRB5_KDCREP_MODIFIED;
+	}
+
+	return 0;
+    }
+
+    heim_assert(ctx->fast_state.reply_key != NULL, "must have a reply key at this stage");
+
+    ret = krb5_crypto_init(context, ctx->fast_state.reply_key, 0, &reply_crypto);
+    if (ret)
+	goto out;
+
+    ret = decode_EncryptedData(pa->padata_value.data,
+			       pa->padata_value.length,
+			       &ed, &size);
+    if (ret)
+	goto out;
+    
+    ret = krb5_decrypt_EncryptedData(context,
+				     reply_crypto,
+				     KRB5_KU_PA_PKINIT_KX,
+				     &ed,
+				     &data);
+    free_EncryptedData(&ed);
+    if (ret)
+	goto out;
+
+    ret = decode_EncryptionKey(data.data, data.length, &kxkey, &size);
+    if (ret)
+	goto out;
+
+    ret = krb5_crypto_init(context, &kxkey, 0, &kxkey_crypto);
+    if (ret)
+	goto out;
+
+    pepper1.data = "PKINIT";
+    pepper1.length = strlen(pepper1.data);
+
+    /*
+     * MIT uses KEYEXCHANGE, RFC-6112 say KeyExchange, use what MIT
+     * uses since that is what we agreed to on <kitten@ietf.org>.
+     */
+    pepper2.data = "KEYEXCHANGE";
+    pepper2.length = strlen(pepper2.data);
+
+    ret = krb5_crypto_fx_cf2(context, kxkey_crypto, reply_crypto,
+			     &pepper1, &pepper2, kxkey.keytype,
+			     &sessionkey);
+    if (ret)
+	goto out;
+
+    if (sessionkey.keytype != ticket_sessionkey->keytype ||
+	krb5_data_ct_cmp(&sessionkey.keyvalue, &ticket_sessionkey->keyvalue) != 0)
+    {
+	ret = KRB5_KDCREP_MODIFIED;
+	krb5_set_error_message(context, ret, N_("PKINIT-KX session key doesn't match", ""));
+	goto out;
+    }
+
+    ctx->ic_flags |= KRB5_INIT_CREDS_PKINIT_KX_VALID;
+
+ out:
+    krb5_free_keyblock_contents(context, &kxkey);
+    krb5_free_keyblock_contents(context, &sessionkey);
+    if (reply_crypto)
+	krb5_crypto_destroy(context, reply_crypto);
+    if (kxkey_crypto)
+	krb5_crypto_destroy(context, kxkey_crypto);
+
+    return ret;
+}
+
 /**
  * The core loop if krb5_get_init_creds() function family. Create the
  * packets and have the caller send them off to the KDC.
@@ -1630,6 +3386,8 @@ krb5_init_creds_set_keyblock(krb5_context context,
  * @param in input data from KDC, first round it should be reset by krb5_data_zer().
  * @param out reply to KDC.
  * @param hostinfo KDC address info, first round it can be NULL.
+ * @param realm realm is a pointer the realm to send the packet, it have the
+ *        lifetime the next call to krb5_init_creds_step() or krb5_init_creds_free().
  * @param flags status of the round, if
  *        KRB5_INIT_CREDS_STEP_FLAG_CONTINUE is set, continue one more round.
  *
@@ -1645,21 +3403,50 @@ krb5_init_creds_step(krb5_context context,
 		     krb5_data *in,
 		     krb5_data *out,
 		     krb5_krbhst_info *hostinfo,
+		     krb5_realm *realm,
 		     unsigned int *flags)
 {
+    struct timeval start_time, end_time;
+    krb5_data checksum_data;
     krb5_error_code ret;
     size_t len = 0;
     size_t size;
+    AS_REQ req2;
+    int first = 0;
+
+    gettimeofday(&start_time, NULL);
 
     krb5_data_zero(out);
+    krb5_data_zero(&checksum_data);
+    
+    if (realm)
+	*realm = NULL;
 
     if (ctx->as_req.req_body.cname == NULL) {
+
+#ifdef PKINIT
+	if (ctx->pk_init_ctx && ctx->client_cert)
+	    _krb5_pk_set_user_id(context, ctx->pk_init_ctx, ctx->client_cert);
+#endif
+
 	ret = init_as_req(context, ctx->flags, &ctx->cred,
 			  ctx->addrs, ctx->etypes, &ctx->as_req);
 	if (ret) {
 	    free_init_creds_ctx(context, ctx);
 	    return ret;
 	}
+	if (ctx->fast_state.flags & KRB5_FAST_REQUIRED)
+	    ;
+	else if (ctx->fast_state.flags & KRB5_FAST_AP_ARMOR_SERVICE)
+	    /* Check with armor service if there is FAST */;
+	else
+	    ctx->fast_state.flags |= KRB5_FAST_DISABLED;
+
+
+	/* XXX should happen after we get back reply from KDC */
+	pa_configure(context, ctx, NULL);
+
+	first = 1;
     }
 
 #define MAX_PA_COUNTER 10
@@ -1672,7 +3459,7 @@ krb5_init_creds_step(krb5_context context,
     }
     ctx->pa_counter++;
 
-    _krb5_debug(context, 5, "krb5_get_init_creds: loop %d", ctx->pa_counter);
+    _krb5_debugx(context, 5, "krb5_get_init_creds: loop %d", ctx->pa_counter);
 
     /* Lets process the input packet */
     if (in && in->length) {
@@ -1680,12 +3467,32 @@ krb5_init_creds_step(krb5_context context,
 
 	memset(&rep, 0, sizeof(rep));
 
-	_krb5_debug(context, 5, "krb5_get_init_creds: processing input");
+	_krb5_debugx(context, 5, "krb5_get_init_creds: processing input");
 
 	ret = decode_AS_REP(in->data, in->length, &rep.kdc_rep, &size);
 	if (ret == 0) {
-	    krb5_keyblock *key = NULL;
 	    unsigned eflags = EXTRACT_TICKET_AS_REQ | EXTRACT_TICKET_TIMESYNC;
+	    krb5_enctype userEnctype = 0;
+	    krb5_data data;
+
+	    /*
+	     * Unwrap AS-REP
+	     */
+	    ASN1_MALLOC_ENCODE(Ticket, data.data, data.length,
+			       &rep.kdc_rep.ticket, &size, ret);
+	    if (ret)
+		goto out;
+	    heim_assert(data.length == size, "ASN.1 internal error");
+
+	    ret = _krb5_fast_unwrap_kdc_rep(context, ctx->nonce, &data,
+					    &ctx->fast_state, &rep.kdc_rep);
+	    krb5_data_free(&data);
+	    if (ret)
+		goto out;
+
+	    /*
+	     * Now check and extract the ticket
+	     */
 
 	    if (ctx->flags.canonicalize) {
 		eflags |= EXTRACT_TICKET_ALLOW_SERVER_MISMATCH;
@@ -1695,41 +3502,89 @@ krb5_init_creds_step(krb5_context context,
 		eflags |= EXTRACT_TICKET_ALLOW_CNAME_MISMATCH;
 
 	    ret = process_pa_data_to_key(context, ctx, &ctx->cred,
-					 &ctx->as_req, &rep.kdc_rep, hostinfo, &key);
+					 &ctx->as_req, &rep.kdc_rep,
+					 hostinfo, &ctx->fast_state.reply_key);
 	    if (ret) {
 		free_AS_REP(&rep.kdc_rep);
 		goto out;
 	    }
 
-	    _krb5_debug(context, 5, "krb5_get_init_creds: extracting ticket");
+	    userEnctype = ctx->fast_state.reply_key->keytype;
+
+	    if (ctx->fast_state.strengthen_key) {
+		krb5_keyblock result;
+
+		_krb5_debugx(context, 5, "krb5_get_init_creds: FAST strengthen_key");
+
+		ret = _krb5_fast_cf2(context,
+				     ctx->fast_state.strengthen_key,
+				     "strengthenkey", 
+				     ctx->fast_state.reply_key,
+				     "replykey",
+				     &result,
+				     NULL);
+	    if (ret) {
+		free_AS_REP(&rep.kdc_rep);
+		goto out;
+	    }
+
+		ctx->runflags.allow_save_as_reply_key = 1;
+
+		krb5_free_keyblock_contents(context, ctx->fast_state.reply_key);
+		*ctx->fast_state.reply_key = result;
+	    }
+
+	    _krb5_debugx(context, 5, "krb5_get_init_creds: extracting ticket");
 
 	    ret = _krb5_extract_ticket(context,
 				       &rep,
 				       &ctx->cred,
-				       key,
-				       NULL,
+				       ctx->fast_state.reply_key,
 				       KRB5_KU_AS_REP_ENC_PART,
 				       NULL,
 				       ctx->nonce,
 				       eflags,
+				       &ctx->req_buffer,
 				       NULL,
 				       NULL);
-	    krb5_free_keyblock(context, key);
-
-	    *flags = 0;
 
 	    if (ret == 0)
 		ret = copy_EncKDCRepPart(&rep.enc_part, &ctx->enc_part);
+	    if (ret == 0)
+		ret = validate_pkinit_fx(context, ctx, &rep.kdc_rep, &ctx->cred.session);
+
+	    _krb5_stat_ASREQ(context,
+			     userEnctype,
+			     ctx->fast_state.reply_key->keytype,
+			     ctx->pa_used ? ctx->pa_used : "unknown",
+			     !!(ctx->fast_state.flags & KRB5_FAST_AS_REQ));
+
+
+	    if (ctx->runflags.allow_save_as_reply_key) {
+		ctx->as_reply_key = ctx->fast_state.reply_key;
+		ctx->fast_state.reply_key = NULL;
+	    } else {
+		krb5_free_keyblock(context, ctx->fast_state.reply_key);
+		ctx->fast_state.reply_key = NULL;
+	    }
+	    ctx->ic_flags |= KRB5_INIT_CREDS_DONE;
+	    *flags = 0;
 
 	    free_AS_REP(&rep.kdc_rep);
 	    free_EncASRepPart(&rep.enc_part);
 
+	    gettimeofday(&end_time, NULL);
+	    timevalsub(&end_time, &start_time);
+	    timevaladd(&ctx->stats.run_time, &end_time);
+
+	    _krb5_debugx(context, 1, "krb5_get_init_creds: wc: %lld.%06d",
+			 (long long) ctx->stats.run_time.tv_sec, ctx->stats.run_time.tv_usec);
 	    return ret;
 
 	} else {
 	    /* let's try to parse it as a KRB-ERROR */
 
-	    _krb5_debug(context, 5, "krb5_get_init_creds: got an error");
+	    _krb5_debugx(context, 5, "krb5_get_init_creds: got an KRB-ERROR from KDC");
 
 	    free_KRB_ERROR(&ctx->error);
 
@@ -1737,36 +3592,83 @@ krb5_init_creds_step(krb5_context context,
 	    if(ret && in->length && ((char*)in->data)[0] == 4)
 		ret = KRB5KRB_AP_ERR_V4_REPLY;
 	    if (ret) {
-		_krb5_debug(context, 5, "krb5_get_init_creds: failed to read error");
+		_krb5_debugx(context, 5, "krb5_get_init_creds: failed to read error");
 		goto out;
 	    }
 
-	    ret = krb5_error_from_rd_error(context, &ctx->error, &ctx->cred);
-
-	    _krb5_debug(context, 5, "krb5_get_init_creds: KRB-ERROR %d", ret);
-
 	    /*
-	     * If no preauth was set and KDC requires it, give it one
-	     * more try.
+	     * Unwrap method-data, if there is any,
+	     * fast_unwrap_error() below might replace it with a
+	     * wrapped version if we are using FAST.
 	     */
-
-	    if (ret == KRB5KDC_ERR_PREAUTH_REQUIRED) {
 
 	        free_METHOD_DATA(&ctx->md);
 	        memset(&ctx->md, 0, sizeof(ctx->md));
 
 		if (ctx->error.e_data) {
-		    ret = decode_METHOD_DATA(ctx->error.e_data->data,
+		krb5_error_code ret2;
+
+		ret2 = decode_METHOD_DATA(ctx->error.e_data->data,
 					     ctx->error.e_data->length,
 					     &ctx->md,
 					     NULL);
+		if (ret2) {
+		    /*
+		     * Just ignore any error, the error will be pushed
+		     * out from krb5_error_from_rd_error() if there
+		     * was one.
+		     */
+		    _krb5_debug(context, 5, ret2, N_("Failed to decode METHOD-DATA", ""));
+		}
+	    }
+
+	    /*
+	     * Unwrap KRB-ERROR, we are always calling this so that
+	     * FAST can tell us if your peer KDC suddenly dropped FAST
+	     * wrapping and its really an attacker's packet (or a bug
+	     * in the KDC).
+	     */
+	    ret = _krb5_fast_unwrap_error(context, &ctx->fast_state,
+					  &ctx->md, &ctx->error);
 		    if (ret)
-			krb5_set_error_message(context, ret,
-					       N_("Failed to decode METHOD-DATA", ""));
-		} else {
+		goto out;
+
+	    /*
+	     *
+	     */
+
+	    ret = krb5_error_from_rd_error(context, &ctx->error, &ctx->cred);
+
+	    /* log the failure */
+	    if (_krb5_have_debug(context, 5)) {
+		const char *str = krb5_get_error_message(context, ret);
+		_krb5_debugx(context, 5, "krb5_get_init_creds: KRB-ERROR %d/%s", ret, str);
+		krb5_free_error_message(context, str);
+	    }
+
+	    /*
+	     * Handle special error codes
+	     */
+
+	    if (ret == KRB5KDC_ERR_PREAUTH_REQUIRED
+		|| ret == KRB5_KDC_ERR_MORE_PREAUTH_DATA_REQUIRED
+		|| ret == KRB5KDC_ERR_ETYPE_NOSUPP)
+	    {
+		/*
+		 * If no preauth was set and KDC requires it, give it one
+		 * more try.
+		 *
+		 * If the KDC returned KRB5KDC_ERR_ETYPE_NOSUPP, just loop
+		 * one more time since that might mean we are dealing with
+		 * a Windows KDC that is confused about what enctypes are
+		 * available.
+		 */
+
+		if (ctx->md.len == 0) {
 		    krb5_set_error_message(context, ret,
 					   N_("Preauth required but no preauth "
 					      "options send by KDC", ""));
+		    goto out;
 		}
 	    } else if (ret == KRB5KRB_AP_ERR_SKEW && context->kdc_sec_offset == 0) {
 		/*
@@ -1777,31 +3679,157 @@ krb5_init_creds_step(krb5_context context,
 		if (context->kdc_sec_offset)
 		    ret = 0;
 
-		_krb5_debug(context, 10, "init_creds: err skew updateing kdc offset to %d",
+		_krb5_debugx(context, 10, "init_creds: err skew updateing kdc offset to %d",
 			    context->kdc_sec_offset);
+		if (ret)
+		    goto out;
 
-		ctx->used_pa_types = 0;
+		pa_restart(context, ctx);
+
+		first = 1;
 
 	    } else if (ret == KRB5_KDC_ERR_WRONG_REALM && ctx->flags.canonicalize) {
 	        /* client referal to a new realm */
+		char *ref_realm;
 
 		if (ctx->error.crealm == NULL) {
 		    krb5_set_error_message(context, ret,
 					   N_("Got a client referral, not but no realm", ""));
 		    goto out;
 		}
-		_krb5_debug(context, 5,
-			    "krb5_get_init_creds: got referal to realm %s",
-			    *ctx->error.crealm);
+		ref_realm = *ctx->error.crealm;
+
+		_krb5_debugx(context, 5, "krb5_get_init_creds: referral to realm %s",
+			    ref_realm);
+
+		/*
+		 * If its a krbtgt, lets updat the requested krbtgt too
+		 */
+		if (krb5_principal_is_krbtgt(context, ctx->cred.server)) {
+
+		    free(ctx->cred.server->name.name_string.val[1]);
+		    ctx->cred.server->name.name_string.val[1] = strdup(ref_realm);
+		    if (ctx->cred.server->name.name_string.val[1] == NULL) {
+			ret = ENOMEM;
+			goto out;
+		    }
+
+		    free_PrincipalName(ctx->as_req.req_body.sname);
+		    ret = _krb5_principal2principalname(ctx->as_req.req_body.sname, ctx->cred.server);
+		    if (ret)
+			goto out;
+		}
+
+		free(ctx->as_req.req_body.realm);
+		ret = copy_Realm(&ref_realm, &ctx->as_req.req_body.realm);
+		if (ret)
+		    goto out;
 
 		ret = krb5_principal_set_realm(context,
 					       ctx->cred.client,
 					       *ctx->error.crealm);
+		if (ret)
+		    goto out;
 
-		ctx->used_pa_types = 0;
+		ret = krb5_unparse_name(context, ctx->cred.client, &ref_realm);
+		if (ret == 0) {
+		    _krb5_debugx(context, 5, "krb5_get_init_creds: got referal to %s", ref_realm);
+		    krb5_xfree(ref_realm);
 	    }
+
+		pa_restart(context, ctx);
+
+		first = 1;
+
+	    } else if (ret == KRB5KDC_ERR_KEY_EXP && ctx->runflags.change_password == 0 && ctx->prompter) {
+		char buf2[1024];
+		
+		ctx->runflags.change_password = 1;
+		
+		ctx->prompter(context, ctx->prompter_data, NULL, N_("Password has expired", ""), 0, NULL);
+		
+
+		/* try to avoid recursion */
+		if (ctx->in_tkt_service != NULL && strcmp(ctx->in_tkt_service, "kadmin/changepw") == 0)
+		    goto out;
+		
+		/* don't include prompter in runtime */
+		gettimeofday(&end_time, NULL);
+		timevalsub(&end_time, &start_time);
+		timevaladd(&ctx->stats.run_time, &end_time);
+
+		ret = change_password(context,
+				      ctx->cred.client,
+				      ctx->password,
+				      buf2,
+				      sizeof(buf2),
+				      ctx->prompter,
+				      ctx->prompter_data,
+				      NULL);
 	    if (ret)
 		goto out;
+		
+		gettimeofday(&start_time, NULL);
+
+		krb5_init_creds_set_password(context, ctx, buf2);
+
+		pa_restart(context, ctx);
+
+		first = 1;
+
+	    } else if (ret == KRB5KDC_ERR_PREAUTH_FAILED) {
+
+		/*
+		 * Old MIT KDC can't handle KRB5_PADATA_REQ_ENC_PA_REP,
+		 * so drop it and try again. But only try that for MIT 
+		 * Kerberos servers by keying of no METHOD-DATA.
+		 */
+		if (ctx->runflags.allow_enc_pa_rep) {
+		    if (ctx->md.len != 0) {
+			_krb5_debugx(context, 10, "Server send PA data with KRB-ERROR, "
+				     "so not a pre 1.7 MIT KDC and wont retry w/o ENC-PA-REQ");
+			goto out;
+		    }		    
+		    _krb5_debugx(context, 10, "Disable allow_enc_pa_rep and trying again");
+		    ctx->runflags.allow_enc_pa_rep = 0;
+		    goto retry;
+		}
+
+		if (ctx->fast_state.flags & KRB5_FAST_DISABLED) {
+		    _krb5_debugx(context, 10, "FAST disabled and got preauth failed");
+		    goto out;
+		}
+
+		if ((ctx->fast_state.flags & KRB5_FAST_OPTIMISTIC) == 0) {
+		    _krb5_debugx(context, 10, "Preauth failed");
+		    goto out;
+		}
+
+		_krb5_debugx(context, 10, "preauth failed with Optimistic FAST, trying w/o FAST");
+
+		ctx->fast_state.flags &= ~KRB5_FAST_OPTIMISTIC;
+		ctx->fast_state.flags |= KRB5_FAST_DISABLED;
+
+	    retry:
+		pa_restart(context, ctx);
+
+		first = 1;
+
+	    } else {
+		if (ctx->fast_state.flags & KRB5_FAST_OPTIMISTIC) {
+		    _krb5_debugx(context, 10,
+				 "Some other error %d failed with Optimistic FAST, trying w/o FAST", ret);
+
+		    ctx->fast_state.flags &= ~KRB5_FAST_OPTIMISTIC;
+		    ctx->fast_state.flags |= KRB5_FAST_DISABLED;
+		    pa_restart(context, ctx);
+
+		    first = 1;
+		} else {
+		    /* some other error code from the KDC, lets return it to the user */
+		    goto out;
+		}
+	    }
 	}
     }
 
@@ -1811,21 +3839,49 @@ krb5_init_creds_step(krb5_context context,
 	ctx->as_req.padata = NULL;
     }
 
+    ret = _krb5_fast_create_armor(context, &ctx->fast_state,
+				  ctx->cred.client->realm);
+    if (ret)
+	goto out;
+
     /* Set a new nonce. */
     ctx->as_req.req_body.nonce = ctx->nonce;
 
-    /* fill_in_md_data */
-    ret = process_pa_data_to_md(context, &ctx->cred, &ctx->as_req, ctx,
-				&ctx->md, &ctx->as_req.padata,
-				ctx->prompter, ctx->prompter_data);
+
+    /*
+     * Step and announce PA-DATA
+     */
+
+    ret = process_pa_data_to_md(context, &ctx->cred, first, &ctx->as_req, ctx,
+				&ctx->md, &ctx->as_req.padata);
     if (ret)
 	goto out;
+
+	
+    /*
+     * Wrap with FAST
+     */
+    ret = copy_AS_REQ(&ctx->as_req, &req2);
+    if (ret)
+	goto out;
+
+    ret = _krb5_fast_wrap_req(context,
+			      &ctx->fast_state,
+			      NULL,
+			      &req2);
+
+    krb5_data_free(&checksum_data);
+    if (ret) {
+	free_AS_REQ(&req2);
+	goto out;
+    }
 
     krb5_data_free(&ctx->req_buffer);
 
     ASN1_MALLOC_ENCODE(AS_REQ,
 		       ctx->req_buffer.data, ctx->req_buffer.length,
-		       &ctx->as_req, &len, ret);
+		       &req2, &len, ret);
+    free_AS_REQ(&req2);
     if (ret)
 	goto out;
     if(len != ctx->req_buffer.length)
@@ -1835,6 +3891,14 @@ krb5_init_creds_step(krb5_context context,
     out->length = ctx->req_buffer.length;
 
     *flags = KRB5_INIT_CREDS_STEP_FLAG_CONTINUE;
+
+    if (realm)
+	*realm = ctx->cred.client->realm;
+    
+
+    gettimeofday(&end_time, NULL);
+    timevalsub(&end_time, &start_time);
+    timevaladd(&ctx->stats.run_time, &end_time);
 
     return 0;
  out:
@@ -1846,7 +3910,7 @@ krb5_init_creds_step(krb5_context context,
  * context.
  *
  * @param context A Kerberos 5 context.
- * @param ctx
+ * @param ctx ctx krb5_init_creds_context context.
  * @param cred credentials, free with krb5_free_cred_contents().
  *
  * @return 0 for sucess or An Kerberos error code, see krb5_get_error_message().
@@ -1859,6 +3923,44 @@ krb5_init_creds_get_creds(krb5_context context,
 {
     return krb5_copy_creds_contents(context, &ctx->cred, cred);
 }
+
+/**
+ * Extract the as-reply key from the context.
+ *
+ * Only allowed when the as-reply-key is not directly derived from the
+ * password like PK-INIT, SRP, FAST hardened key, etc.
+ *
+ * @param context A Kerberos 5 context.
+ * @param ctx ctx krb5_init_creds_context context.
+ * @param as_reply_key keyblock, free with krb5_free_keyblock_contents().
+ *
+ * @return 0 for sucess or An Kerberos error code, see krb5_get_error_message().
+ */
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_init_creds_get_as_reply_key(krb5_context context,
+				 krb5_init_creds_context ctx,
+				 krb5_keyblock *as_reply_key)
+{
+    if (ctx->as_reply_key == NULL)
+	return KRB5KDC_ERR_PREAUTH_REQUIRED;
+    return krb5_copy_keyblock_contents(context, ctx->as_reply_key, as_reply_key);
+}
+
+
+KRB5_LIB_FUNCTION krb5_timestamp KRB5_LIB_CALL
+_krb5_init_creds_get_cred_endtime(krb5_context context, krb5_init_creds_context ctx)
+{
+    return ctx->cred.times.endtime;
+}
+
+KRB5_LIB_FUNCTION krb5_principal KRB5_LIB_CALL
+_krb5_init_creds_get_cred_client(krb5_context context, krb5_init_creds_context ctx)
+{
+    return ctx->cred.client;
+}
+
+
 
 /**
  * Get the last error from the transaction.
@@ -1880,6 +3982,80 @@ krb5_init_creds_get_error(krb5_context context,
 	krb5_set_error_message(context, ret, N_("malloc: out of memory", ""));
 
     return ret;
+}
+
+/**
+ * Store config
+ *
+ * @param context A Kerberos 5 context.
+ * @param ctx The krb5_init_creds_context to free.
+ * @param id store 
+ *
+ * @return Returns 0 or an error code
+ *
+ * @ingroup krb5_credential
+ */
+
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_init_creds_store_config(krb5_context context,
+			     krb5_init_creds_context ctx,
+			     krb5_ccache id)
+{
+    krb5_error_code ret;
+
+    if (ctx->kdc_hostname) {
+	krb5_data data;
+	data.length = strlen(ctx->kdc_hostname);
+	data.data = ctx->kdc_hostname;
+
+	ret = krb5_cc_set_config(context, id, NULL, "lkdc-hostname", &data);
+	if (ret)
+	    return ret;
+    }
+    if (ctx->sitename) {
+	krb5_data data;
+	data.length = strlen(ctx->sitename);
+	data.data = ctx->sitename;
+
+	ret = krb5_cc_set_config(context, id, NULL, "sitename", &data);
+	if (ret)
+	    return ret;
+    }
+
+    return 0;
+}
+
+
+krb5_error_code
+krb5_init_creds_store(krb5_context context,
+		      krb5_init_creds_context ctx,
+		      krb5_ccache id)
+{
+    krb5_error_code ret;
+
+    if (ctx->cred.client == NULL) {
+	ret = KRB5KDC_ERR_PREAUTH_REQUIRED;
+	krb5_set_error_message(context, ret, "init creds not completed yet");
+	return ret;
+    }
+
+    ret = krb5_cc_initialize(context, id, ctx->cred.client);
+    if (ret)
+	return ret;
+
+    ret = krb5_cc_store_cred(context, id, &ctx->cred);
+    if (ret)
+	return ret;
+
+    if (ctx->cred.flags.b.enc_pa_rep) {
+	krb5_data data = { 3, rk_UNCONST("yes") };
+	ret = krb5_cc_set_config(context, id, ctx->cred.server,
+				 "fast_avail", &data);
+	if (ret)
+	    return ret;
+    }
+
+    return 0;
 }
 
 /**
@@ -1925,21 +4101,35 @@ krb5_init_creds_get(krb5_context context, krb5_init_creds_context ctx)
 	goto out;
     krb5_sendto_ctx_set_func(stctx, _krb5_kdc_retry, NULL);
 
+    if (ctx->kdc_hostname)
+	krb5_sendto_set_hostname(context, stctx, ctx->kdc_hostname);
+    if (ctx->sitename)
+	krb5_sendto_set_sitename(context, stctx, ctx->sitename);
+    if (ctx->runflags.delegated_uuid)
+	krb5_sendto_set_delegated_app(context, stctx, ctx->delegated_uuid, ctx->delegated_signing_identity);
+
     while (1) {
+	krb5_realm realm = NULL;
+	struct timeval nstart, nend;
+	
 	flags = 0;
-	ret = krb5_init_creds_step(context, ctx, &in, &out, hostinfo, &flags);
+	ret = krb5_init_creds_step(context, ctx, &in, &out, hostinfo, &realm, &flags);
 	krb5_data_free(&in);
 	if (ret)
 	    goto out;
 
-	if ((flags & 1) == 0)
+	if ((flags & KRB5_INIT_CREDS_STEP_FLAG_CONTINUE) == 0)
 	    break;
 
-	ret = krb5_sendto_context (context, stctx, &out,
-				   ctx->cred.client->realm, &in);
+	gettimeofday(&nstart, NULL);
+
+	ret = krb5_sendto_context (context, stctx, &out, realm, &in);
     	if (ret)
 	    goto out;
 
+	gettimeofday(&nend, NULL);
+	timevalsub(&nend, &nstart);
+	timevaladd(&ctx->stats.run_time, &nend);
     }
 
  out:
@@ -2016,8 +4206,7 @@ krb5_get_init_creds_password(krb5_context context,
     ret = krb5_init_creds_get(context, ctx);
 
     if (ret == 0)
-	process_last_request(context, options, ctx);
-
+	krb5_process_last_request(context, options, ctx);
 
     if (ret == KRB5KDC_ERR_KEY_EXPIRED && chpw == 0) {
 	char buf2[1024];
@@ -2034,7 +4223,7 @@ krb5_get_init_creds_password(krb5_context context,
 			       client,
 			       ctx->password,
 			       buf2,
-			       sizeof(buf),
+			       sizeof(buf2),
 			       prompter,
 			       data,
 			       options);
@@ -2042,6 +4231,7 @@ krb5_get_init_creds_password(krb5_context context,
 	    goto out;
 	chpw = 1;
 	krb5_init_creds_free(context, ctx);
+
 	goto again;
     }
 
@@ -2091,7 +4281,7 @@ krb5_get_init_creds_keyblock(krb5_context context,
     ret = krb5_init_creds_get(context, ctx);
 
     if (ret == 0)
-        process_last_request(context, options, ctx);
+        krb5_process_last_request(context, options, ctx);
 
  out:
     if (ret == 0)
@@ -2137,7 +4327,7 @@ krb5_get_init_creds_keytab(krb5_context context,
 
     ret = krb5_init_creds_get(context, ctx);
     if (ret == 0)
-        process_last_request(context, options, ctx);
+        krb5_process_last_request(context, options, ctx);
 
  out:
     if (ret == 0)

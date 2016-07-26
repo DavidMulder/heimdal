@@ -42,27 +42,6 @@ _krb5_crc_init_table(void);
  *
  */
 
-static void
-encode_le_uint32(uint32_t n, unsigned char *p)
-{
-  p[0] = (n >> 0)  & 0xFF;
-  p[1] = (n >> 8)  & 0xFF;
-  p[2] = (n >> 16) & 0xFF;
-  p[3] = (n >> 24) & 0xFF;
-}
-
-
-static void
-decode_le_uint32(const void *ptr, uint32_t *n)
-{
-    const unsigned char *p = ptr;
-    *n = (p[0] << 0) | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
-}
-
-/*
- *
- */
-
 const char a2i_signmagic[] =
     "session key to server-to-client signing key magic constant";
 const char a2i_sealmagic[] =
@@ -73,12 +52,12 @@ const char i2a_sealmagic[] =
     "session key to client-to-server sealing key magic constant";
 
 
-void
+static void
 _gss_ntlm_set_key(struct ntlmv2_key *key, int acceptor, int sealsign,
 		  unsigned char *data, size_t len)
 {
     unsigned char out[16];
-    EVP_MD_CTX *ctx;
+    CCDigestRef ctx;
     const char *signmagic;
     const char *sealmagic;
 
@@ -92,47 +71,121 @@ _gss_ntlm_set_key(struct ntlmv2_key *key, int acceptor, int sealsign,
 
     key->seq = 0;
 
-    ctx = EVP_MD_CTX_create();
-    EVP_DigestInit_ex(ctx, EVP_md5(), NULL);
-    EVP_DigestUpdate(ctx, data, len);
-    EVP_DigestUpdate(ctx, signmagic, strlen(signmagic) + 1);
-    EVP_DigestFinal_ex(ctx, key->signkey, NULL);
+    ctx = CCDigestCreate(kCCDigestMD5);
+    CCDigestUpdate(ctx, data, len);
+    CCDigestUpdate(ctx, signmagic, strlen(signmagic) + 1);
+    CCDigestFinal(ctx, key->signkey);
 
-    EVP_DigestInit_ex(ctx, EVP_md5(), NULL);
-    EVP_DigestUpdate(ctx, data, len);
-    EVP_DigestUpdate(ctx, sealmagic, strlen(sealmagic) + 1);
-    EVP_DigestFinal_ex(ctx, out, NULL);
-    EVP_MD_CTX_destroy(ctx);
+    CCDigestReset(ctx);
+    CCDigestUpdate(ctx, data, len);
+    CCDigestUpdate(ctx, sealmagic, strlen(sealmagic) + 1);
+    CCDigestFinal(ctx, out);
+    CCDigestDestroy(ctx);
 
-    RC4_set_key(&key->sealkey, 16, out);
-    if (sealsign)
+    EVP_CIPHER_CTX_cleanup(&key->sealkey);
+
+    EVP_CipherInit_ex(&key->sealkey, EVP_rc4(), NULL, out, NULL, 1);
+    if (sealsign) {
 	key->signsealkey = &key->sealkey;
 }
+}
+
+/*
+ * Set (or reset) keys
+ */
+
+void
+_gss_ntlm_set_keys(ntlm_ctx ctx)
+{
+    int acceptor = (ctx->status & STATUS_CLIENT) ? 0 : 1;
+
+    if (ctx->sessionkey.length == 0)
+	return;
+
+    ctx->status |= STATUS_SESSIONKEY;
+	
+    if (ctx->flags & NTLM_NEG_SEAL)
+	ctx->gssflags |= GSS_C_CONF_FLAG;
+    if (ctx->flags & (NTLM_NEG_SIGN|NTLM_NEG_ALWAYS_SIGN))
+	ctx->gssflags |= GSS_C_INTEG_FLAG;
+
+    if (ctx->flags & NTLM_NEG_NTLM2_SESSION) {
+	_gss_ntlm_set_key(&ctx->u.v2.send, acceptor,
+			  (ctx->flags & NTLM_NEG_KEYEX),
+			  ctx->sessionkey.data,
+			  ctx->sessionkey.length);
+	_gss_ntlm_set_key(&ctx->u.v2.recv, !acceptor,
+			  (ctx->flags & NTLM_NEG_KEYEX),
+			  ctx->sessionkey.data,
+			  ctx->sessionkey.length);
+    } else {
+	EVP_CIPHER_CTX_cleanup(&ctx->u.v1.crypto_send.key);
+	EVP_CIPHER_CTX_cleanup(&ctx->u.v1.crypto_recv.key);
+	
+	EVP_CipherInit_ex(&ctx->u.v1.crypto_send.key, EVP_rc4(), NULL,
+			  ctx->sessionkey.data, NULL, 1);
+	EVP_CipherInit_ex(&ctx->u.v1.crypto_recv.key, EVP_rc4(), NULL,
+			  ctx->sessionkey.data, NULL, 1);
+    }
+}
+
+void
+_gss_ntlm_destroy_crypto(ntlm_ctx ctx)
+{
+    if ((ctx->status & STATUS_SESSIONKEY) == 0)
+	return;
+
+    if (ctx->flags & NTLM_NEG_NTLM2_SESSION) {
+	EVP_CIPHER_CTX_cleanup(&ctx->u.v2.send.sealkey);
+	EVP_CIPHER_CTX_cleanup(&ctx->u.v2.recv.sealkey);
+    } else {
+	EVP_CIPHER_CTX_cleanup(&ctx->u.v1.crypto_send.key);
+	EVP_CIPHER_CTX_cleanup(&ctx->u.v1.crypto_recv.key);
+    }
+}
+
 
 /*
  *
  */
 
 static OM_uint32
-v1_sign_message(gss_buffer_t in,
-		RC4_KEY *signkey,
+v1_sign_message(EVP_CIPHER_CTX *signkey,
 		uint32_t seq,
-		unsigned char out[16])
+		gss_iov_buffer_t trailer,
+                gss_iov_buffer_desc *iov,
+                int iov_count)
 {
-    unsigned char sigature[12];
-    uint32_t crc;
+    unsigned char *out = trailer->buffer.value;
+    unsigned char signature[12];
+    uint32_t crc = 0;
+    int i;
 
     _krb5_crc_init_table();
-    crc = _krb5_crc_update(in->value, in->length, 0);
 
-    encode_le_uint32(0, &sigature[0]);
-    encode_le_uint32(crc, &sigature[4]);
-    encode_le_uint32(seq, &sigature[8]);
+    for (i = 0; i < iov_count; i++) {
+        gss_iov_buffer_t iovp = &iov[i];
 
-    encode_le_uint32(1, out); /* version */
-    RC4(signkey, sizeof(sigature), sigature, out + 4);
+        switch (GSS_IOV_BUFFER_TYPE(iovp->type)) {
+        case GSS_IOV_BUFFER_TYPE_DATA:
+        case GSS_IOV_BUFFER_TYPE_PADDING:
+        case GSS_IOV_BUFFER_TYPE_SIGN_ONLY:
+            crc = _krb5_crc_update(iovp->buffer.value, iovp->buffer.length, crc);
+            break;
+        default:
+            break;
+        }
+    }
 
-    if (RAND_bytes(out + 4, 4) != 1)
+    _gss_mg_encode_le_uint32(0, &signature[0]);
+    _gss_mg_encode_le_uint32(crc, &signature[4]);
+    _gss_mg_encode_le_uint32(seq, &signature[8]);
+
+    _gss_mg_encode_le_uint32(1, out); /* version */
+    
+    EVP_Cipher(signkey, out + 4, signature, sizeof(signature));
+
+    if (CCRandomCopyBytes(kCCRandomDefault, out + 4, 4))
 	return GSS_S_UNAVAILABLE;
 
     return 0;
@@ -140,28 +193,50 @@ v1_sign_message(gss_buffer_t in,
 
 
 static OM_uint32
-v2_sign_message(gss_buffer_t in,
-		unsigned char signkey[16],
-		RC4_KEY *sealkey,
+v2_sign_message(unsigned char signkey[16],
+		EVP_CIPHER_CTX *sealkey,
 		uint32_t seq,
-		unsigned char out[16])
+		gss_iov_buffer_t trailer,
+                gss_iov_buffer_desc *iov,
+                int iov_count)
 {
+    unsigned char *out = trailer->buffer.value;
     unsigned char hmac[16];
-    unsigned int hmaclen;
-    HMAC_CTX c;
+    CCHmacContext c;
+    int i;
 
-    HMAC_CTX_init(&c);
-    HMAC_Init_ex(&c, signkey, 16, EVP_md5(), NULL);
+    assert(trailer->buffer.length == 16);
 
-    encode_le_uint32(seq, hmac);
-    HMAC_Update(&c, hmac, 4);
-    HMAC_Update(&c, in->value, in->length);
-    HMAC_Final(&c, hmac, &hmaclen);
-    HMAC_CTX_cleanup(&c);
+    CCHmacInit(&c, kCCHmacAlgMD5, signkey, 16);
 
-    encode_le_uint32(1, &out[0]);
+    _gss_mg_encode_le_uint32(seq, hmac);
+    CCHmacUpdate(&c, hmac, 4);
+    for (i = 0; i < iov_count; i++) {
+        gss_iov_buffer_t iovp = &iov[i];
+
+        /*
+         * We include empty buffers because NTLM2 always does
+         * DCE RPC header signing regardless of whether it was
+         * negotiated at bind time. The DCE RPC runtime will
+         * submit EMPTY header buffers when signing is disabled.
+         */
+        switch (GSS_IOV_BUFFER_TYPE(iovp->type)) {
+        case GSS_IOV_BUFFER_TYPE_EMPTY:
+        case GSS_IOV_BUFFER_TYPE_DATA:
+        case GSS_IOV_BUFFER_TYPE_PADDING:
+        case GSS_IOV_BUFFER_TYPE_SIGN_ONLY:
+            CCHmacUpdate(&c, iovp->buffer.value, iovp->buffer.length);
+            break;
+        default:
+            break;
+        }
+    }
+    CCHmacFinal(&c, hmac);
+    memset(&c, 0, sizeof(c));
+
+    _gss_mg_encode_le_uint32(1, &out[0]);
     if (sealkey)
-	RC4(sealkey, 8, hmac, &out[4]);
+	EVP_Cipher(sealkey, out + 4, hmac, 8);
     else
 	memcpy(&out[4], hmac, 8);
 
@@ -171,81 +246,96 @@ v2_sign_message(gss_buffer_t in,
 }
 
 static OM_uint32
-v2_verify_message(gss_buffer_t in,
-		  unsigned char signkey[16],
-		  RC4_KEY *sealkey,
+v2_verify_message(unsigned char signkey[16],
+		  EVP_CIPHER_CTX *sealkey,
 		  uint32_t seq,
-		  const unsigned char checksum[16])
+		  gss_iov_buffer_t trailer,
+                  gss_iov_buffer_desc *iov,
+                  int iov_count)
 {
     OM_uint32 ret;
-    unsigned char out[16];
+    unsigned char outbuf[16];
+    gss_iov_buffer_desc out;
 
-    ret = v2_sign_message(in, signkey, sealkey, seq, out);
+    if (trailer->buffer.length != 16)
+	return GSS_S_BAD_MIC;
+
+    _gss_mg_decode_be_uint32((uint8_t *)trailer->buffer.value + 12, &seq);
+
+    out.type = GSS_IOV_BUFFER_TYPE_TRAILER;
+    out.buffer.length = sizeof(outbuf);
+    out.buffer.value = outbuf;
+
+    ret = v2_sign_message(signkey, sealkey, seq, &out, iov, iov_count);
     if (ret)
 	return ret;
 
-    if (memcmp(checksum, out, 16) != 0)
+    if (ct_memcmp(trailer->buffer.value, outbuf, 16))
 	return GSS_S_BAD_MIC;
 
     return GSS_S_COMPLETE;
 }
 
 static OM_uint32
-v2_seal_message(const gss_buffer_t in,
-		unsigned char signkey[16],
+v2_seal_message(unsigned char signkey[16],
 		uint32_t seq,
-		RC4_KEY *sealkey,
-		gss_buffer_t out)
+		EVP_CIPHER_CTX *sealkey,
+                gss_iov_buffer_t trailer,
+		gss_iov_buffer_desc *iov,
+                int iov_count)
 {
-    unsigned char *p;
     OM_uint32 ret;
+    int i;
 
-    if (in->length + 16 < in->length)
-	return EINVAL;
+    for (i = 0; i < iov_count; i++) {
+        gss_iov_buffer_t iovp = &iov[i];
 
-    p = malloc(in->length + 16);
-    if (p == NULL)
-	return ENOMEM;
-
-    RC4(sealkey, in->length, in->value, p);
-
-    ret = v2_sign_message(in, signkey, sealkey, seq, &p[in->length]);
-    if (ret) {
-	free(p);
-	return ret;
+        switch (GSS_IOV_BUFFER_TYPE(iovp->type)) {
+        case GSS_IOV_BUFFER_TYPE_DATA:
+        case GSS_IOV_BUFFER_TYPE_PADDING:
+	    EVP_Cipher(sealkey, iovp->buffer.value, iovp->buffer.value,
+		       iovp->buffer.length);
+            break;
+        default:
+            break;
+        }
     }
 
-    out->value = p;
-    out->length = in->length + 16;
+    assert(trailer->buffer.length == 16);
 
-    return 0;
+    ret = v2_sign_message(signkey, sealkey, seq, trailer, iov, iov_count);
+
+    return ret;
 }
 
 static OM_uint32
-v2_unseal_message(gss_buffer_t in,
-		  unsigned char signkey[16],
+v2_unseal_message(unsigned char signkey[16],
 		  uint32_t seq,
-		  RC4_KEY *sealkey,
-		  gss_buffer_t out)
+		  EVP_CIPHER_CTX *sealkey,
+                  gss_iov_buffer_t trailer,
+                  gss_iov_buffer_desc *iov,
+                  int iov_count)
 {
     OM_uint32 ret;
+    int i;
 
-    if (in->length < 16)
-	return GSS_S_BAD_MIC;
+    for (i = 0; i < iov_count; i++) {
+        gss_iov_buffer_t iovp = &iov[i];
 
-    out->length = in->length - 16;
-    out->value = malloc(out->length);
-    if (out->value == NULL)
-	return GSS_S_BAD_MIC;
-
-    RC4(sealkey, out->length, in->value, out->value);
-
-    ret = v2_verify_message(out, signkey, sealkey, seq,
-			    ((const unsigned char *)in->value) + out->length);
-    if (ret) {
-	OM_uint32 junk;
-	gss_release_buffer(&junk, out);
+        switch (GSS_IOV_BUFFER_TYPE(iovp->type)) {
+        case GSS_IOV_BUFFER_TYPE_DATA:
+        case GSS_IOV_BUFFER_TYPE_PADDING:
+	    EVP_Cipher(sealkey, iovp->buffer.value, iovp->buffer.value,
+		       iovp->buffer.length);
+            break;
+        default:
+            break;
+        }
     }
+
+    ret = v2_verify_message(signkey, sealkey, seq,
+                            trailer, iov, iov_count);
+
     return ret;
 }
 
@@ -260,8 +350,62 @@ v2_unseal_message(gss_buffer_t in,
  *
  */
 
-OM_uint32 GSSAPI_CALLCONV
-_gss_ntlm_get_mic
+static OM_uint32 get_mic_iov
+           (OM_uint32 * minor_status,
+            const gss_ctx_id_t context_handle,
+            gss_qop_t qop_req,
+            gss_iov_buffer_t trailer,
+            gss_iov_buffer_desc *iov,
+            int iov_count
+           )
+{
+    ntlm_ctx ctx = (ntlm_ctx)context_handle;
+
+    *minor_status = 0;
+
+    assert(trailer->buffer.length == 16);
+    assert(trailer->buffer.value != NULL);
+
+    if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SIGN|NTLM_NEG_NTLM2_SESSION)) {
+	OM_uint32 ret;
+
+	if ((ctx->status & STATUS_SESSIONKEY) == 0)
+	    return GSS_S_UNAVAILABLE;
+
+	ret = v2_sign_message(ctx->u.v2.send.signkey,
+			      ctx->u.v2.send.signsealkey,
+			      ctx->u.v2.send.seq++,
+			      trailer, iov, iov_count);
+        return ret;
+
+    } else if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SIGN)) {
+	OM_uint32 ret;
+
+	if ((ctx->status & STATUS_SESSIONKEY) == 0)
+	    return GSS_S_UNAVAILABLE;
+
+	ret = v1_sign_message(&ctx->u.v1.crypto_send.key,
+			      ctx->u.v1.crypto_send.seq++,
+			      trailer, iov, iov_count);
+        return ret;
+
+    } else if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_ALWAYS_SIGN)) {
+	unsigned char *signature;
+
+	signature = trailer->buffer.value;
+
+	_gss_mg_encode_le_uint32(1, &signature[0]); /* version */
+	_gss_mg_encode_le_uint32(0, &signature[4]);
+	_gss_mg_encode_le_uint32(0, &signature[8]);
+	_gss_mg_encode_le_uint32(0, &signature[12]);
+
+        return GSS_S_COMPLETE;
+    }
+
+    return GSS_S_UNAVAILABLE;
+}
+
+OM_uint32 _gss_ntlm_get_mic
            (OM_uint32 * minor_status,
             const gss_ctx_id_t context_handle,
             gss_qop_t qop_req,
@@ -269,79 +413,43 @@ _gss_ntlm_get_mic
             gss_buffer_t message_token
            )
 {
-    ntlm_ctx ctx = (ntlm_ctx)context_handle;
-    OM_uint32 junk;
+    gss_iov_buffer_desc iov[2];
+    OM_uint32 ret, junk;
 
-    *minor_status = 0;
+    iov[0].type = GSS_IOV_BUFFER_TYPE_DATA;
+    iov[0].buffer = *message_buffer;
 
-    message_token->value = malloc(16);
-    message_token->length = 16;
-    if (message_token->value == NULL) {
-	*minor_status = ENOMEM;
-	return GSS_S_FAILURE;
+    iov[1].type = GSS_IOV_BUFFER_TYPE_TRAILER;
+    iov[1].buffer.length = 16;
+    iov[1].buffer.value = malloc(iov[1].buffer.length);
+    if (iov[1].buffer.value == NULL) {
+        *minor_status = ENOMEM;
+        return GSS_S_FAILURE;
     }
 
-    if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SIGN|NTLM_NEG_NTLM2_SESSION)) {
-	OM_uint32 ret;
+    ret = get_mic_iov(minor_status, context_handle, qop_req,
+                      &iov[1], iov, 1);
 
-	if ((ctx->status & STATUS_SESSIONKEY) == 0) {
-	    gss_release_buffer(&junk, message_token);
-	    return GSS_S_UNAVAILABLE;
-	}
+    if (ret)
+        gss_release_buffer(&junk, &iov[1].buffer);
+    else
+        *message_token = iov[1].buffer;
 
-	ret = v2_sign_message(message_buffer,
-			      ctx->u.v2.send.signkey,
-			      ctx->u.v2.send.signsealkey,
-			      ctx->u.v2.send.seq++,
-			      message_token->value);
-	if (ret)
-	    gss_release_buffer(&junk, message_token);
-        return ret;
-
-    } else if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SIGN)) {
-	OM_uint32 ret;
-
-	if ((ctx->status & STATUS_SESSIONKEY) == 0) {
-	    gss_release_buffer(&junk, message_token);
-	    return GSS_S_UNAVAILABLE;
-	}
-
-	ret = v1_sign_message(message_buffer,
-			      &ctx->u.v1.crypto_send.key,
-			      ctx->u.v1.crypto_send.seq++,
-			      message_token->value);
-	if (ret)
-	    gss_release_buffer(&junk, message_token);
-        return ret;
-
-    } else if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_ALWAYS_SIGN)) {
-	unsigned char *sigature;
-
-	sigature = message_token->value;
-
-	encode_le_uint32(1, &sigature[0]); /* version */
-	encode_le_uint32(0, &sigature[4]);
-	encode_le_uint32(0, &sigature[8]);
-	encode_le_uint32(0, &sigature[12]);
-
-        return GSS_S_COMPLETE;
-    }
-    gss_release_buffer(&junk, message_token);
-
-    return GSS_S_UNAVAILABLE;
+    return ret;
 }
 
 /*
  *
  */
 
-OM_uint32 GSSAPI_CALLCONV
-_gss_ntlm_verify_mic
+static OM_uint32
+verify_mic_iov
            (OM_uint32 * minor_status,
             const gss_ctx_id_t context_handle,
-            const gss_buffer_t message_buffer,
-            const gss_buffer_t token_buffer,
-            gss_qop_t * qop_state
+            gss_iov_buffer_t trailer,
+            gss_qop_t * qop_state,
+            gss_iov_buffer_desc *iov,
+            int iov_count
 	    )
 {
     ntlm_ctx ctx = (ntlm_ctx)context_handle;
@@ -350,7 +458,7 @@ _gss_ntlm_verify_mic
 	*qop_state = GSS_C_QOP_DEFAULT;
     *minor_status = 0;
 
-    if (token_buffer->length != 16)
+    if (trailer->buffer.length != 16)
 	return GSS_S_BAD_MIC;
 
     if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SIGN|NTLM_NEG_NTLM2_SESSION)) {
@@ -359,38 +467,52 @@ _gss_ntlm_verify_mic
 	if ((ctx->status & STATUS_SESSIONKEY) == 0)
 	    return GSS_S_UNAVAILABLE;
 
-	ret = v2_verify_message(message_buffer,
-				ctx->u.v2.recv.signkey,
+	ret = v2_verify_message(ctx->u.v2.recv.signkey,
 				ctx->u.v2.recv.signsealkey,
-				ctx->u.v2.recv.seq++,
-				token_buffer->value);
+				0,
+				trailer, iov, iov_count);
 	if (ret)
 	    return ret;
 
 	return GSS_S_COMPLETE;
     } else if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SIGN)) {
-
-	unsigned char sigature[12];
-	uint32_t crc, num;
+	unsigned char signature[12];
+	uint32_t crc = 0, num;
+        int i;
 
 	if ((ctx->status & STATUS_SESSIONKEY) == 0)
 	    return GSS_S_UNAVAILABLE;
 
-	decode_le_uint32(token_buffer->value, &num);
+	_gss_mg_decode_le_uint32(trailer->buffer.value, &num);
 	if (num != 1)
 	    return GSS_S_BAD_MIC;
 
-	RC4(&ctx->u.v1.crypto_recv.key, sizeof(sigature),
-	    ((unsigned char *)token_buffer->value) + 4, sigature);
+	EVP_Cipher(&ctx->u.v1.crypto_recv.key, signature,
+		   ((unsigned char *)trailer->buffer.value) + 4,
+		   sizeof(signature));
 
 	_krb5_crc_init_table();
-	crc = _krb5_crc_update(message_buffer->value,
-			       message_buffer->length, 0);
+
+        for (i = 0; i < iov_count; i++) {
+            gss_iov_buffer_t iovp = &iov[i];
+
+            switch (GSS_IOV_BUFFER_TYPE(iovp->type)) {
+            case GSS_IOV_BUFFER_TYPE_DATA:
+            case GSS_IOV_BUFFER_TYPE_PADDING:
+            case GSS_IOV_BUFFER_TYPE_SIGN_ONLY:
+                crc = _krb5_crc_update(iovp->buffer.value,
+                                       iovp->buffer.length, crc);
+                break;
+            default:
+                break;
+            }
+        }
+
 	/* skip first 4 bytes in the encrypted checksum */
-	decode_le_uint32(&sigature[4], &num);
+	_gss_mg_decode_le_uint32(&signature[4], &num);
 	if (num != crc)
 	    return GSS_S_BAD_MIC;
-	decode_le_uint32(&sigature[8], &num);
+	_gss_mg_decode_le_uint32(&signature[8], &num);
 	if (ctx->u.v1.crypto_recv.seq != num)
 	    return GSS_S_BAD_MIC;
 	ctx->u.v1.crypto_recv.seq++;
@@ -400,15 +522,15 @@ _gss_ntlm_verify_mic
 	uint32_t num;
 	unsigned char *p;
 
-	p = (unsigned char*)(token_buffer->value);
+	p = (unsigned char*)(trailer->buffer.value);
 
-	decode_le_uint32(&p[0], &num); /* version */
+	_gss_mg_decode_le_uint32(&p[0], &num); /* version */
 	if (num != 1) return GSS_S_BAD_MIC;
-	decode_le_uint32(&p[4], &num);
+	_gss_mg_decode_le_uint32(&p[4], &num);
 	if (num != 0) return GSS_S_BAD_MIC;
-	decode_le_uint32(&p[8], &num);
+	_gss_mg_decode_le_uint32(&p[8], &num);
 	if (num != 0) return GSS_S_BAD_MIC;
-	decode_le_uint32(&p[12], &num);
+	_gss_mg_decode_le_uint32(&p[12], &num);
 	if (num != 0) return GSS_S_BAD_MIC;
 
         return GSS_S_COMPLETE;
@@ -417,11 +539,32 @@ _gss_ntlm_verify_mic
     return GSS_S_UNAVAILABLE;
 }
 
+OM_uint32
+_gss_ntlm_verify_mic
+           (OM_uint32 * minor_status,
+            const gss_ctx_id_t context_handle,
+            const gss_buffer_t message_buffer,
+            const gss_buffer_t token_buffer,
+            gss_qop_t * qop_state
+	    )
+{
+    gss_iov_buffer_desc iov[2];
+
+    iov[0].type = GSS_IOV_BUFFER_TYPE_DATA;
+    iov[0].buffer = *message_buffer;
+
+    iov[1].type = GSS_IOV_BUFFER_TYPE_TRAILER;
+    iov[1].buffer = *token_buffer;
+
+    return verify_mic_iov(minor_status, context_handle,
+                          &iov[1], qop_state, iov, 1);
+}
+
 /*
  *
  */
 
-OM_uint32 GSSAPI_CALLCONV
+OM_uint32
 _gss_ntlm_wrap_size_limit (
             OM_uint32 * minor_status,
             const gss_ctx_id_t context_handle,
@@ -452,79 +595,199 @@ _gss_ntlm_wrap_size_limit (
  *
  */
 
-OM_uint32 GSSAPI_CALLCONV
-_gss_ntlm_wrap
+OM_uint32 _gss_ntlm_wrap_iov
+(OM_uint32 * minor_status,
+ const gss_ctx_id_t context_handle,
+ int conf_req_flag,
+ gss_qop_t qop_req,
+ int * conf_state,
+ gss_iov_buffer_desc *iov,
+ int iov_count
+    )
+{
+    ntlm_ctx ctx = (ntlm_ctx)context_handle;
+    OM_uint32 ret;
+    gss_iov_buffer_t trailer;
+
+    *minor_status = 0;
+    if (conf_state)
+	*conf_state = 0;
+    if (iov == GSS_C_NO_IOV_BUFFER)
+	return GSS_S_FAILURE;
+
+    /* TRAILER for normal protocols, HEADER for DCE */
+    trailer = _gss_mg_find_buffer(iov, iov_count, GSS_IOV_BUFFER_TYPE_TRAILER);
+    if (trailer == NULL) {
+        trailer = _gss_mg_find_buffer(iov, iov_count, GSS_IOV_BUFFER_TYPE_HEADER);
+        if (trailer == NULL) {
+	    *minor_status = HNTLM_ERR_MISSING_BUFFER;
+	    return gss_mg_set_error_string(GSS_NTLM_MECHANISM, GSS_S_FAILURE,
+					   HNTLM_ERR_MISSING_BUFFER,
+					   "iov header buffer missing");
+        }
+    }
+    if (GSS_IOV_BUFFER_FLAGS(trailer->type) & GSS_IOV_BUFFER_TYPE_FLAG_ALLOCATE) {
+        ret = _gss_mg_allocate_buffer(minor_status, trailer, 16);
+        if (ret)
+            return ret;
+    } else if (trailer->buffer.length < 16) {
+        *minor_status = KRB5_BAD_MSIZE;
+        return GSS_S_FAILURE;
+    } else {
+        trailer->buffer.length = 16;
+    }
+
+    if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SEAL|NTLM_NEG_NTLM2_SESSION)) {
+
+	return v2_seal_message(ctx->u.v2.send.signkey,
+			       ctx->u.v2.send.seq++,
+			       &ctx->u.v2.send.sealkey,
+			       trailer, iov, iov_count);
+
+    } else if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SEAL)) {
+        int i;
+
+        for (i = 0; i < iov_count; i++) {
+            gss_iov_buffer_t iovp = &iov[i];
+
+            switch (GSS_IOV_BUFFER_TYPE(iovp->type)) {
+            case GSS_IOV_BUFFER_TYPE_DATA:
+            case GSS_IOV_BUFFER_TYPE_PADDING:
+		EVP_Cipher(&ctx->u.v1.crypto_send.key,
+			   iovp->buffer.value, iovp->buffer.value,
+			   iovp->buffer.length);
+                break;
+            default:
+                break;
+            }
+        }
+
+	ret = get_mic_iov(minor_status, context_handle,
+				0, trailer, iov, iov_count);
+
+	    return ret;
+	}
+
+    return GSS_S_UNAVAILABLE;
+}
+
+OM_uint32 _gss_ntlm_wrap
 (OM_uint32 * minor_status,
  const gss_ctx_id_t context_handle,
  int conf_req_flag,
  gss_qop_t qop_req,
  const gss_buffer_t input_message_buffer,
  int * conf_state,
- gss_buffer_t output_message_buffer
-    )
+ gss_buffer_t output_message_buffer)
 {
-    ntlm_ctx ctx = (ntlm_ctx)context_handle;
+    gss_iov_buffer_desc iov[2];
     OM_uint32 ret;
 
-    *minor_status = 0;
-    if (conf_state)
-	*conf_state = 0;
-    if (output_message_buffer == GSS_C_NO_BUFFER)
-	return GSS_S_FAILURE;
-
-
-    if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SEAL|NTLM_NEG_NTLM2_SESSION)) {
-
-	return v2_seal_message(input_message_buffer,
-			       ctx->u.v2.send.signkey,
-			       ctx->u.v2.send.seq++,
-			       &ctx->u.v2.send.sealkey,
-			       output_message_buffer);
-
-    } else if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SEAL)) {
-	gss_buffer_desc trailer;
-	OM_uint32 junk;
-
-	output_message_buffer->length = input_message_buffer->length + 16;
-	output_message_buffer->value = malloc(output_message_buffer->length);
-	if (output_message_buffer->value == NULL) {
-	    output_message_buffer->length = 0;
+    output_message_buffer->length = input_message_buffer->length + 16;
+    output_message_buffer->value = malloc(output_message_buffer->length);
+    if (output_message_buffer->value == NULL) {
+        *minor_status = ENOMEM;
 	    return GSS_S_FAILURE;
 	}
 
+    iov[0].type = GSS_IOV_BUFFER_TYPE_DATA;
+    iov[0].buffer.length = input_message_buffer->length;
+    iov[0].buffer.value = output_message_buffer->value;
+    memcpy(iov[0].buffer.value, input_message_buffer->value,
+           input_message_buffer->length);
 
-	RC4(&ctx->u.v1.crypto_send.key, input_message_buffer->length,
-	    input_message_buffer->value, output_message_buffer->value);
+    iov[1].type = GSS_IOV_BUFFER_TYPE_TRAILER;
+    iov[1].buffer.length = 16;
+    iov[1].buffer.value = (unsigned char *)output_message_buffer->value + 16;
 
-	ret = _gss_ntlm_get_mic(minor_status, context_handle,
-				0, input_message_buffer,
-				&trailer);
-	if (ret) {
-	    gss_release_buffer(&junk, output_message_buffer);
-	    return ret;
-	}
-	if (trailer.length != 16) {
-	    gss_release_buffer(&junk, output_message_buffer);
-	    gss_release_buffer(&junk, &trailer);
-	    return GSS_S_FAILURE;
-	}
-	memcpy(((unsigned char *)output_message_buffer->value) +
-	       input_message_buffer->length,
-	       trailer.value, trailer.length);
-	gss_release_buffer(&junk, &trailer);
-
-	return GSS_S_COMPLETE;
+    ret = _gss_ntlm_wrap_iov(minor_status, context_handle,
+                             conf_req_flag, qop_req,
+                             conf_state, iov, sizeof(iov)/sizeof(iov[0]));
+    if (GSS_ERROR(ret)) {
+        OM_uint32 tmp;
+        gss_release_buffer(&tmp, output_message_buffer);
     }
 
-    return GSS_S_UNAVAILABLE;
+    return ret;
 }
 
 /*
  *
  */
 
-OM_uint32 GSSAPI_CALLCONV
-_gss_ntlm_unwrap
+OM_uint32 _gss_ntlm_unwrap_iov
+           (OM_uint32 * minor_status,
+            const gss_ctx_id_t context_handle,
+            int * conf_state,
+            gss_qop_t * qop_state,
+            gss_iov_buffer_desc *iov,
+            int iov_count
+           )
+{
+    ntlm_ctx ctx = (ntlm_ctx)context_handle;
+    OM_uint32 ret;
+    gss_iov_buffer_t trailer;
+
+    *minor_status = 0;
+
+    if (conf_state)
+	*conf_state = 0;
+    if (qop_state)
+	*qop_state = 0;
+
+    /* TRAILER for normal protocols, HEADER for DCE */
+    trailer = _gss_mg_find_buffer(iov, iov_count, GSS_IOV_BUFFER_TYPE_TRAILER);
+    if (trailer == NULL) {
+        trailer = _gss_mg_find_buffer(iov, iov_count, GSS_IOV_BUFFER_TYPE_HEADER);
+        if (trailer == NULL) {
+	    *minor_status = HNTLM_ERR_MISSING_BUFFER;
+	    return gss_mg_set_error_string(GSS_NTLM_MECHANISM, GSS_S_FAILURE,
+					   HNTLM_ERR_MISSING_BUFFER,
+					   "iov tailer buffer missing");
+        }
+    }
+
+    if (trailer->buffer.length < 16) 
+        return GSS_S_BAD_MIC;
+
+    if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SEAL|NTLM_NEG_NTLM2_SESSION)) {
+
+	return v2_unseal_message(ctx->u.v2.recv.signkey,
+				 ctx->u.v2.recv.seq++,
+				 &ctx->u.v2.recv.sealkey,
+				 trailer,
+				 iov,
+				 iov_count);
+
+    } else if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SEAL)) {
+
+        int i;
+
+        for (i = 0; i < iov_count; i++) {
+            gss_iov_buffer_t iovp = &iov[i];
+
+            switch (GSS_IOV_BUFFER_TYPE(iovp->type)) {
+            case GSS_IOV_BUFFER_TYPE_DATA:
+            case GSS_IOV_BUFFER_TYPE_PADDING:
+		EVP_Cipher(&ctx->u.v1.crypto_recv.key,
+			   iovp->buffer.value, iovp->buffer.value,
+			   iovp->buffer.length);
+                break;
+            default:
+                break;
+            }
+        }
+	
+	ret = verify_mic_iov(minor_status, context_handle,
+                             trailer, NULL, iov, iov_count);
+
+	return ret;
+    }
+
+    return GSS_S_UNAVAILABLE;
+}
+
+OM_uint32 _gss_ntlm_unwrap
            (OM_uint32 * minor_status,
             const gss_ctx_id_t context_handle,
             const gss_buffer_t input_message_buffer,
@@ -533,58 +796,118 @@ _gss_ntlm_unwrap
             gss_qop_t * qop_state
            )
 {
-    ntlm_ctx ctx = (ntlm_ctx)context_handle;
+    gss_iov_buffer_desc iov[2];
     OM_uint32 ret;
 
-    *minor_status = 0;
-    output_message_buffer->value = NULL;
-    output_message_buffer->length = 0;
-
-    if (conf_state)
-	*conf_state = 0;
-    if (qop_state)
-	*qop_state = 0;
-
-    if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SEAL|NTLM_NEG_NTLM2_SESSION)) {
-
-	return v2_unseal_message(input_message_buffer,
-				 ctx->u.v2.recv.signkey,
-				 ctx->u.v2.recv.seq++,
-				 &ctx->u.v2.recv.sealkey,
-				 output_message_buffer);
-
-    } else if (CTX_FLAGS_ISSET(ctx, NTLM_NEG_SEAL)) {
-
-	gss_buffer_desc trailer;
-	OM_uint32 junk;
-
 	if (input_message_buffer->length < 16)
-	    return GSS_S_BAD_MIC;
+        return GSS_S_DEFECTIVE_TOKEN;
 
 	output_message_buffer->length = input_message_buffer->length - 16;
 	output_message_buffer->value = malloc(output_message_buffer->length);
 	if (output_message_buffer->value == NULL) {
-	    output_message_buffer->length = 0;
+        *minor_status = ENOMEM;
 	    return GSS_S_FAILURE;
 	}
+    memcpy(output_message_buffer->value, input_message_buffer->value,
+           output_message_buffer->length);
 
-	RC4(&ctx->u.v1.crypto_recv.key, output_message_buffer->length,
-	    input_message_buffer->value, output_message_buffer->value);
+    iov[0].type = GSS_IOV_BUFFER_TYPE_DATA;
+    iov[0].buffer = *output_message_buffer;
 
-	trailer.value = ((unsigned char *)input_message_buffer->value) +
-	    output_message_buffer->length;
-	trailer.length = 16;
+    iov[1].type = GSS_IOV_BUFFER_TYPE_TRAILER;
+    iov[1].buffer.value = (unsigned char *)input_message_buffer->value +
+                          input_message_buffer->length - 16;
+    iov[1].buffer.length = 16;
 
-	ret = _gss_ntlm_verify_mic(minor_status, context_handle,
-				   output_message_buffer,
-				   &trailer, NULL);
-	if (ret) {
-	    gss_release_buffer(&junk, output_message_buffer);
+    ret = _gss_ntlm_unwrap_iov(minor_status, context_handle,
+                               conf_state, qop_state, iov,
+                               sizeof(iov)/sizeof(iov[0]));
+    if (GSS_ERROR(ret)) {
+        OM_uint32 tmp;
+        gss_release_buffer(&tmp, output_message_buffer);
+    }
+
 	    return ret;
 	}
 
+OM_uint32
+_gss_ntlm_wrap_iov_length(OM_uint32 * minor_status,
+                          gss_ctx_id_t context_handle,
+                          int conf_req_flag,
+                          gss_qop_t qop_req,
+                          int *conf_state,
+                          gss_iov_buffer_desc *iov,
+                          int iov_count)
+{
+    gss_iov_buffer_t iovp;
+    OM_uint32 ctype;
+
+    /* DCE puts the trailer in the HEADER, other protocols in TRAILER. */
+    iovp = _gss_mg_find_buffer(iov, iov_count, GSS_IOV_BUFFER_TYPE_TRAILER);
+    if (iovp == NULL) {
+        iovp = _gss_mg_find_buffer(iov, iov_count, GSS_IOV_BUFFER_TYPE_HEADER);
+        if (iovp == NULL) {
+	    *minor_status = HNTLM_ERR_MISSING_BUFFER;
+	    return gss_mg_set_error_string(GSS_NTLM_MECHANISM, GSS_S_FAILURE,
+					   HNTLM_ERR_MISSING_BUFFER,
+					   "iov header buffer missing");
+        } else
+            ctype = GSS_IOV_BUFFER_TYPE_TRAILER;
+    } else
+        ctype = GSS_IOV_BUFFER_TYPE_HEADER;
+
+    iovp->buffer.length = 16;
+
+    iovp = _gss_mg_find_buffer(iov, iov_count, GSS_IOV_BUFFER_TYPE_PADDING);
+    if (iovp != NULL)
+        iovp->buffer.length = 0;
+
+    /* No HEADER if we have a TRAILER and vice versa */
+    iovp = _gss_mg_find_buffer(iov, iov_count, ctype);
+    if (iovp != NULL)
+        iovp->buffer.length = 0;
+
+    if (conf_state != NULL)
+        *conf_state = conf_req_flag;
+
+    *minor_status = 0;
 	return GSS_S_COMPLETE;
     }
 
-    return GSS_S_UNAVAILABLE;
+
+void
+_gss_ntlm_debug_hex(int level, const char *name, const void *data, size_t size)
+{
+    char *hex;
+
+    if (!_gss_mg_log_level(level))
+	return;
+
+    if (hex_encode(data, size, &hex) < 0)
+	return;
+
+    _gss_mg_log(level, "%s %s", name, hex);
+    free(hex);
+}
+
+void
+_gss_ntlm_debug_key(int level, const char *name, const void *data, size_t size)
+{
+    char *hex;
+
+    /**
+     * Only print the first 2 bytes though since we really don't want
+     * the full key sprinkled though logs.
+     */
+    size = min(size, 2);
+
+    if (!_gss_mg_log_level(level))
+	return;
+
+    if (hex_encode(data, size, &hex) < 0)
+	return;
+
+    _gss_mg_log(level, "%s %s", name, hex);
+    memset(hex, 0, strlen(hex));
+    free(hex);
 }

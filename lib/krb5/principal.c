@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2010 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -71,8 +73,6 @@ host/admin@H5L.ORG
  * @param context A Kerberos context.
  * @param p a principal to free.
  *
- * @return An krb5 error code, see krb5_get_error_message().
- *
  * @ingroup krb5_principal
  */
 
@@ -92,8 +92,6 @@ krb5_free_principal(krb5_context context,
  * @param context A Kerberos context.
  * @param principal principal to set the type for
  * @param type the new type
- *
- * @return An krb5 error code, see krb5_get_error_message().
  *
  * @ingroup krb5_principal
  */
@@ -394,7 +392,6 @@ krb5_parse_name(krb5_context context,
 
 static const char quotable_chars[] = " \n\t\b\\/@";
 static const char replace_chars[] = " ntb\\/@";
-static const char nq_chars[] = "    \\/@";
 
 #define add_char(BASE, INDEX, LEN, C) do { if((INDEX) < (LEN)) (BASE)[(INDEX)++] = (C); }while(0);
 
@@ -677,7 +674,6 @@ krb5_principal_set_realm(krb5_context context,
     return 0;
 }
 
-#ifndef HEIMDAL_SMALLER
 /**
  * Build a principal using vararg style building
  *
@@ -706,7 +702,6 @@ krb5_build_principal(krb5_context context,
     va_end(ap);
     return ret;
 }
-#endif
 
 /**
  * Build a principal using vararg style building
@@ -737,7 +732,7 @@ krb5_make_principal(krb5_context context,
 	realm = r;
     }
     va_start(ap, realm);
-    ret = krb5_build_principal_va(context, principal, strlen(realm), realm, ap);
+    ret = krb5_build_principal_va(context, principal, (int)strlen(realm), realm, ap);
     va_end(ap);
     if(r)
 	free(r);
@@ -1038,7 +1033,8 @@ krb5_sname_to_principal (krb5_context context,
 {
     krb5_error_code ret;
     char localhost[MAXHOSTNAMELEN];
-    char **realms, *host = NULL;
+    char **realms;
+    size_t len;
 
     if(type != KRB5_NT_SRV_HST && type != KRB5_NT_UNKNOWN) {
 	krb5_set_error_message(context, KRB5_SNAME_UNSUPP_NAMETYPE,
@@ -1055,27 +1051,40 @@ krb5_sname_to_principal (krb5_context context,
 	    return ret;
 	}
 	localhost[sizeof(localhost) - 1] = '\0';
-	hostname = localhost;
+    } else {
+	strlcpy(localhost, hostname, sizeof(localhost));
     }
     if(sname == NULL)
 	sname = "host";
     if(type == KRB5_NT_SRV_HST) {
-	ret = krb5_expand_hostname_realms (context, hostname,
+	char *host;
+
+	ret = krb5_expand_hostname_realms (context, localhost,
 					   &host, &realms);
 	if (ret)
 	    return ret;
 	strlwr(host);
-	hostname = host;
+	strlcpy(localhost, host, sizeof(localhost));
+	free(host);
     } else {
 	ret = krb5_get_host_realm(context, hostname, &realms);
 	if(ret)
 	    return ret;
     }
 
+    /*
+     * Squash any trailing . on the hostname since that is jolly good
+     * to have when looking up a DNS name (qualified), but its no good
+     * to have in the kerberos principal since those are supposed to
+     * be in qualified format already.
+     */
+
+    len = strlen(localhost);
+    if (len > 0 && localhost[len - 1] == '.')
+	localhost[len - 1] = '\0';
+
     ret = krb5_make_principal(context, ret_princ, realms[0], sname,
-			      hostname, NULL);
-    if(host)
-	free(host);
+			      localhost, NULL);
     krb5_free_host_realm(context, realms);
     return ret;
 }
@@ -1122,6 +1131,64 @@ krb5_parse_nametype(krb5_context context, const char *str, int32_t *nametype)
 }
 
 /**
+ * Returns true if name is Kerberos NULL name
+ *
+ * @ingroup krb5_principal
+ */
+
+krb5_boolean KRB5_LIB_FUNCTION
+krb5_principal_is_null(krb5_context context, krb5_const_principal principal)
+{
+    if (principal->name.name_type == KRB5_NT_WELLKNOWN &&
+	principal->name.name_string.len == 2 &&
+	strcmp(principal->name.name_string.val[0], "WELLKNOWN") == 0 &&
+	strcmp(principal->name.name_string.val[1], "NULL") == 0)
+	return TRUE;
+    return FALSE;
+}
+
+const char _krb5_wellknown_lkdc[] = "WELLKNOWN:COM.APPLE.LKDC";
+static const char lkdc_prefix[] = "LKDC:";
+
+/**
+ * Returns true if name is Kerberos an LKDC realm
+ *
+ * @ingroup krb5_principal
+ */
+
+krb5_boolean KRB5_LIB_FUNCTION
+krb5_realm_is_lkdc(const char *realm)
+{
+
+    return strncmp(realm, lkdc_prefix, sizeof(lkdc_prefix)-1) == 0 ||
+	strncmp(realm, _krb5_wellknown_lkdc, sizeof(_krb5_wellknown_lkdc) - 1) == 0;
+}
+
+/**
+ * Returns true if name is Kerberos an LKDC realm
+ *
+ * @ingroup krb5_principal
+ */
+
+krb5_boolean KRB5_LIB_FUNCTION
+krb5_principal_is_lkdc(krb5_context context, krb5_const_principal principal)
+{
+    return krb5_realm_is_lkdc(principal->realm);
+}
+
+/**
+ * Returns true if name is Kerberos an LKDC realm
+ *
+ * @ingroup krb5_principal
+ */
+
+krb5_boolean KRB5_LIB_FUNCTION
+krb5_principal_is_pku2u(krb5_context context, krb5_const_principal principal)
+{
+    return strcmp(principal->realm, KRB5_PKU2U_REALM_NAME) == 0;
+}
+
+/**
  * Check if the cname part of the principal is a krbtgt principal
  *
  * @ingroup krb5_principal
@@ -1132,5 +1199,38 @@ krb5_principal_is_krbtgt(krb5_context context, krb5_const_principal p)
 {
     return p->name.name_string.len == 2 &&
 	strcmp(p->name.name_string.val[0], KRB5_TGS_NAME) == 0;
+}
 
+/**
+ * Returns true iff name is an WELLKNOWN:ORG.H5L.HOSTBASED-SERVICE
+ *
+ * @ingroup krb5_principal
+ */
+
+krb5_boolean KRB5_LIB_FUNCTION
+krb5_principal_is_gss_hostbased_service(krb5_context context,
+					krb5_const_principal principal)
+{
+    if (principal == NULL)
+	return FALSE;
+    if (principal->name.name_string.len != 2)
+	return FALSE;
+    if (strcmp(principal->name.name_string.val[1], KRB5_GSS_HOSTBASED_SERVICE_NAME) != 0)
+	return FALSE;
+    return TRUE;
+}
+
+/**
+ * Check if the cname part of the principal is a initial or renewed krbtgt principal
+ *
+ * @ingroup krb5_principal
+ */
+
+
+krb5_boolean KRB5_LIB_FUNCTION
+krb5_principal_is_root_krbtgt(krb5_context context, krb5_const_principal p)
+{
+    return p->name.name_string.len == 2 &&
+	strcmp(p->name.name_string.val[0], KRB5_TGS_NAME) == 0 &&
+	strcmp(p->name.name_string.val[1], p->realm) == 0;
 }

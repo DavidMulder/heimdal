@@ -93,8 +93,8 @@ main(int argc, char **argv)
 	errx(1, "couldn't allocate set_time field of keyset");
     *keyset.set_time = time(NULL);
 
-    ret = hdb_generate_key_set_password(context, principal, password_str,
-					&keyset.keys.val, &len);
+    ret = hdb_generate_key_set_password(context, principal, password_str, 0, NULL,
+					NULL, &keyset.keys.val, &len);
     if (ret)
 	krb5_err(context, 1, ret, "hdb_generate_key_set_password");
     keyset.keys.len = len;

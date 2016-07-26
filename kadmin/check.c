@@ -101,7 +101,7 @@ do_check_entry(krb5_principal principal, void *data)
 }
 
 int
-check(void *opt, int argc, char **argv)
+check(struct check_options *opt, int argc, char **argv)
 {
     kadm5_principal_ent_rec ent;
     krb5_error_code ret;
@@ -148,6 +148,7 @@ check(void *opt, int argc, char **argv)
      * Check kadmin/admin@REALM
      */
 
+    if (!opt->ds_local_flag) {
     if (asprintf(&p, "kadmin/admin@%s", realm) == -1) {
 	krb5_warn(context, errno, "asprintf");
 	goto fail;
@@ -163,11 +164,13 @@ check(void *opt, int argc, char **argv)
     free(p);
 
     kadm5_free_principal_ent(kadm_handle, &ent);
+    }
 
     /*
      * Check kadmin/changepw@REALM
      */
 
+    if (!opt->ds_local_flag) {
     if (asprintf(&p, "kadmin/changepw@%s", realm) == -1) {
 	krb5_warn(context, errno, "asprintf");
 	goto fail;
@@ -183,6 +186,7 @@ check(void *opt, int argc, char **argv)
     free(p);
 
     kadm5_free_principal_ent(kadm_handle, &ent);
+    }
 
     /*
      * Check for duplicate afs keys
@@ -225,7 +229,9 @@ check(void *opt, int argc, char **argv)
 	}
     }
 
+    if (!opt->ds_local_flag) {
     foreach_principal("*", do_check_entry, "check", NULL);
+    }
 
     free(realm);
     return 0;

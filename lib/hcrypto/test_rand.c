@@ -123,6 +123,10 @@ main(int argc, char **argv)
 	else if (strcasecmp(rand_method, "unix") == 0)
 	    RAND_set_rand_method(RAND_unix_method());
 #endif
+#ifndef __APPLE_PRIVATE__
+	else if (strcasecmp(rand_method, "cc") == 0)
+	    RAND_set_rand_method(RAND_cc_method());
+#endif
 #ifndef NO_RAND_EGD_METHOD
 	else if (strcasecmp(rand_method, "egd") == 0)
 	    RAND_set_rand_method(RAND_egd_method());

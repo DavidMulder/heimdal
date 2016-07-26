@@ -33,6 +33,9 @@
 
 #include "hx_locl.h"
 
+#undef HEIMDAL_PRINTF_ATTRIBUTE
+#define HEIMDAL_PRINTF_ATTRIBUTE(x)
+
 /**
  * @page page_error Hx509 error reporting functions
  *
@@ -79,6 +82,7 @@ hx509_clear_error_string(hx509_context context)
 void
 hx509_set_error_stringv(hx509_context context, int flags, int code,
 			const char *fmt, va_list ap)
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 0))
 {
     heim_error_t msg;
 
@@ -111,6 +115,7 @@ hx509_set_error_stringv(hx509_context context, int flags, int code,
 void
 hx509_set_error_string(hx509_context context, int flags, int code,
 		       const char *fmt, ...)
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 5))
 {
     va_list ap;
 
@@ -136,11 +141,12 @@ hx509_get_error_string(hx509_context context, int error_code)
     heim_error_t msg = context->error;
     heim_string_t s;
     char *str = NULL;
+    const char *cstr;
 
     if (msg == NULL || heim_error_get_code(msg) != error_code) {
-	const char *cstr;
+	char buf[256];
 
-	cstr = com_right(context->et_list, error_code);
+	cstr = com_right_r(context->et_list, error_code, buf, sizeof(buf));
 	if (cstr)
 	    return strdup(cstr);
 	cstr = strerror(error_code);
@@ -153,9 +159,7 @@ hx509_get_error_string(hx509_context context, int error_code)
 
     s = heim_error_copy_string(msg);
     if (s) {
-	str = heim_string_get_utf8(s);
-	if (str)
-	    str = strdup(str);
+	str = heim_string_copy_utf8(s);
 	heim_release(s);
     }
     return str;
@@ -190,6 +194,8 @@ hx509_free_error_string(char *str)
 void
 hx509_err(hx509_context context, int exit_code,
 	  int error_code, const char *fmt, ...)
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 4, 5))
+    HEIMDAL_NORETURN_ATTRIBUTE
 {
     va_list ap;
     const char *msg;

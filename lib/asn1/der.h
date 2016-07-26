@@ -36,6 +36,8 @@
 #ifndef __DER_H__
 #define __DER_H__
 
+
+
 typedef enum {
     ASN1_C_UNIV = 0,
     ASN1_C_APPL = 1,
@@ -82,6 +84,9 @@ enum {
 };
 
 #define ASN1_INDEFINITE 0xdce0deed
+
+#define ASN1_CHOICE_ELLIPSIS	(-1)
+#define ASN1_CHOICE_INVALID	(0)
 
 typedef struct heim_der_time_t {
     time_t dt_sec;

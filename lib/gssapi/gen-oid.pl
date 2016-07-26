@@ -37,20 +37,27 @@ my $output;
 my $CFILE, $HFILE;
 my $onlybase;
 my $header = 0;
+my $export_file = 0;
 
-Getopts('b:h') || die "foo";
+Getopts('b:he') || die "foo";
 
 if($opt_b) {
     $onlybase = $opt_b;
 }
 
+$export_file = 1 if ($opt_e);
 $header = 1 if ($opt_h);
 
+if ($export_file) {
+    printf "# Generated file\n";
+} else {
 printf "/* Generated file */\n";
+}
+
 if ($header) {
     printf "#ifndef GSSAPI_GSSAPI_OID\n";
     printf "#define GSSAPI_GSSAPI_OID 1\n\n";
-} else {
+} elsif (!$export_file) {
     printf "#include \"mech_locl.h\"\n\n";
 }
 
@@ -105,7 +112,9 @@ while(<>) {
 	$data = sprintf("\\x%x", $num) . $data;
 	$length += 1;
 
-	if ($header) {
+	if ($export_file) {
+	    printf "&$store\n";
+	} elsif ($header) {
 	    printf "extern GSSAPI_LIB_VARIABLE gss_OID_desc $store;\n";
 	    printf "#define $name (&$store)\n\n";
 	} else {
@@ -122,10 +131,10 @@ while(<>) {
 
 }
 
-foreach my $k (keys %types) {
-    if (!$header) {
+if (!$header && !$export_file) {
+    foreach my $k (sort keys %types) {
 	print "struct _gss_oid_name_table _gss_ont_" . $k . "[] = {\n";
-	foreach my $m (values %tables) {
+	foreach my $m (sort values %tables) {
 	    if ($$m->{type} eq $k) {
 		printf "  { %s, \"%s\", %s, %s },\n", $$m->{oid}, $$m->{oid}, $$m->{short}, $$m->{long};
 	    }

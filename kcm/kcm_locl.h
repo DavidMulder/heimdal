@@ -55,16 +55,15 @@
 
 /* Cache management */
 
-#define KCM_FLAGS_VALID			0x0001
-#define KCM_FLAGS_USE_KEYTAB		0x0002
-#define KCM_FLAGS_RENEWABLE		0x0004
-#define KCM_FLAGS_OWNER_IS_SYSTEM	0x0008
-#define KCM_FLAGS_USE_CACHED_KEY	0x0010
+#define KCM_FLAGS_USE_KEYTAB		0x0001
+#define KCM_FLAGS_USE_PASSWORD		0x0002
 
-#define KCM_MASK_KEY_PRESENT		( KCM_FLAGS_USE_KEYTAB | \
-					  KCM_FLAGS_USE_CACHED_KEY )
+#define KCM_FLAGS_RENEWABLE		0x0010
+#define KCM_FLAGS_OWNER_IS_SYSTEM	0x0020
 
-struct kcm_ccache_data;
+#define KCM_MASK_KEY_PRESENT (KCM_FLAGS_USE_KEYTAB|KCM_FLAGS_USE_PASSWORD)
+
+
 struct kcm_creds;
 
 struct kcm_default_cache {
@@ -82,14 +81,13 @@ struct kcm_creds {
     struct kcm_creds *next;
 };
 
-typedef struct kcm_ccache_data {
+struct kcm_ccache_data {
     char *name;
     kcmuuid_t uuid;
+    long holdcount;
     unsigned refcnt;
     uint16_t flags;
-    uint16_t mode;
     uid_t uid;
-    gid_t gid;
     pid_t session; /* really au_asid_t */
     krb5_principal client; /* primary client principal */
     krb5_principal server; /* primary server principal (TGS if NULL) */
@@ -97,47 +95,25 @@ typedef struct kcm_ccache_data {
     krb5_deltat tkt_life;
     krb5_deltat renew_life;
     int32_t kdc_offset;
-    union {
+    heim_event_t renew_event;
+    time_t renew_time;
+    heim_event_t expire_event;
+    krb5_deltat expire;
+    time_t next_refresh_time;
+    /* key */
 	krb5_keytab keytab;
-	krb5_keyblock keyblock;
-    } key;
+    char *password;
+
     HEIMDAL_MUTEX mutex;
-    struct kcm_ccache_data *next;
-} kcm_ccache_data;
+    TAILQ_ENTRY(kcm_ccache_data) members;
+};
 
 #define KCM_ASSERT_VALID(_ccache)		do { \
-    if (((_ccache)->flags & KCM_FLAGS_VALID) == 0) \
-	krb5_abortx(context, "kcm_free_ccache_data: ccache invalid"); \
-    else if ((_ccache)->refcnt == 0) \
+    if ((_ccache)->refcnt == 0) \
 	krb5_abortx(context, "kcm_free_ccache_data: ccache refcnt == 0"); \
     } while (0)
 
-typedef kcm_ccache_data *kcm_ccache;
-
-/* Event management */
-
-typedef struct kcm_event {
-    int valid;
-    time_t fire_time;
-    unsigned fire_count;
-    time_t expire_time;
-    time_t backoff_time;
-    enum {
-	KCM_EVENT_NONE = 0,
-	KCM_EVENT_ACQUIRE_CREDS,
-	KCM_EVENT_RENEW_CREDS,
-	KCM_EVENT_DESTROY_CREDS,
-	KCM_EVENT_DESTROY_EMPTY_CACHE
-    } action;
-    kcm_ccache ccache;
-    struct kcm_event *next;
-} kcm_event;
-
-/* wakeup interval for event queue */
-#define KCM_EVENT_QUEUE_INTERVAL		60
-#define KCM_EVENT_DEFAULT_BACKOFF_TIME		5
-#define KCM_EVENT_MAX_BACKOFF_TIME		(12 * 60 * 60)
-
+typedef struct kcm_ccache_data *kcm_ccache;
 
 /* Request format is  LENGTH | MAJOR | MINOR | OPERATION | request */
 /* Response format is LENGTH | STATUS | response */
@@ -145,8 +121,8 @@ typedef struct kcm_event {
 typedef struct kcm_client {
     pid_t pid;
     uid_t uid;
-    gid_t gid;
     pid_t session;
+    char execpath[MAXPATHLEN];
 } kcm_client;
 
 #define CLIENT_IS_ROOT(client) ((client)->uid == 0)
@@ -160,7 +136,7 @@ struct kcm_op {
     kcm_method method;
 };
 
-#define DEFAULT_LOG_DEST    "0/FILE:" LOCALSTATEDIR "/log/kcmd.log"
+#define DEFAULT_LOG_DEST    "0/SYSLOG:DEBUG:DAEMON"
 #define _PATH_KCM_CONF	    SYSCONFDIR "/kcm.conf"
 
 extern krb5_context kcm_context;
@@ -168,19 +144,20 @@ extern char *socket_path;
 extern char *door_path;
 extern size_t max_request;
 extern sig_atomic_t exit_flag;
-extern int name_constraints;
+extern int max_num_requests;
+extern int kcm_timeout;
 #ifdef SUPPORT_DETACH
 extern int detach_from_console;
 #endif
 extern int launchd_flag;
 extern int disallow_getting_krbtgt;
+extern int kcm_data_changed;
+extern int use_uid_matching;
+extern int disable_ntlm_reflection_detection;
 
 #if 0
 extern const krb5_cc_ops krb5_kcmss_ops;
 #endif
-
-void	kcm_service(void *, const heim_idata *, const heim_icred,
-		    heim_ipc_complete, heim_sipc_call);
 
 #include <kcm-protos.h>
 

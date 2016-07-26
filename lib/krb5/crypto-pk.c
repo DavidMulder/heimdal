@@ -49,8 +49,8 @@ _krb5_pk_octetstring2key(krb5_context context,
     size_t keylen, offset;
     void *keydata;
     unsigned char counter;
-    unsigned char shaoutput[SHA_DIGEST_LENGTH];
-    EVP_MD_CTX *m;
+    unsigned char shaoutput[CC_SHA1_DIGEST_LENGTH];
+    CCDigestRef m;
 
     if(et == NULL) {
 	krb5_set_error_message(context, KRB5_PROG_ETYPE_NOSUPP,
@@ -66,7 +66,7 @@ _krb5_pk_octetstring2key(krb5_context context,
 	return ENOMEM;
     }
 
-    m = EVP_MD_CTX_create();
+    m = CCDigestCreate(kCCDigestSHA1);
     if (m == NULL) {
 	free(keydata);
 	krb5_set_error_message(context, ENOMEM, N_("malloc: out of memory", ""));
@@ -77,16 +77,16 @@ _krb5_pk_octetstring2key(krb5_context context,
     offset = 0;
     do {
 
-	EVP_DigestInit_ex(m, EVP_sha1(), NULL);
-	EVP_DigestUpdate(m, &counter, 1);
-	EVP_DigestUpdate(m, dhdata, dhsize);
+	CCDigestReset(m);
+	CCDigestUpdate(m, &counter, 1);
+	CCDigestUpdate(m, dhdata, dhsize);
 
 	if (c_n)
-	    EVP_DigestUpdate(m, c_n->data, c_n->length);
+	    CCDigestUpdate(m, c_n->data, c_n->length);
 	if (k_n)
-	    EVP_DigestUpdate(m, k_n->data, k_n->length);
+	    CCDigestUpdate(m, k_n->data, k_n->length);
 
-	EVP_DigestFinal_ex(m, shaoutput, NULL);
+	CCDigestFinal(m, shaoutput);
 
 	memcpy((unsigned char *)keydata + offset,
 	       shaoutput,
@@ -97,7 +97,7 @@ _krb5_pk_octetstring2key(krb5_context context,
     } while(offset < keylen);
     memset(shaoutput, 0, sizeof(shaoutput));
 
-    EVP_MD_CTX_destroy(m);
+    CCDigestDestroy(m);
 
     ret = krb5_random_to_key(context, type, keydata, keylen, key);
     memset(keydata, 0, sizeof(keylen));
@@ -150,9 +150,9 @@ encode_otherinfo(krb5_context context,
     memset(&pubinfo, 0, sizeof(pubinfo));
 
     pubinfo.enctype = enctype;
-    pubinfo.as_REQ = *as_req;
-    pubinfo.pk_as_rep = *pk_as_rep;
-    pubinfo.ticket = *ticket;
+    pubinfo.as_REQ = rk_UNCONST(as_req);
+    pubinfo.pk_as_rep = rk_UNCONST(pk_as_rep);
+    pubinfo.ticket = rk_UNCONST(ticket);
     ASN1_MALLOC_ENCODE(PkinitSuppPubInfo, pub.data, pub.length,
 		       &pubinfo, &size, ret);
     if (ret) {
@@ -162,16 +162,20 @@ encode_otherinfo(krb5_context context,
     if (pub.length != size)
 	krb5_abortx(context, "asn1 compiler internal error");
 
+    if (client) {
     ret = encode_uvinfo(context, client, &otherinfo.partyUInfo);
     if (ret) {
 	free(pub.data);
 	return ret;
     }
+    }
+    if (server) {
     ret = encode_uvinfo(context, server, &otherinfo.partyVInfo);
     if (ret) {
 	free(otherinfo.partyUInfo.data);
 	free(pub.data);
 	return ret;
+    }
     }
 
     otherinfo.algorithmID = *ai;
@@ -192,8 +196,6 @@ encode_otherinfo(krb5_context context,
     return 0;
 }
 
-
-
 krb5_error_code
 _krb5_pk_kdf(krb5_context context,
 	     const struct AlgorithmIdentifier *ai,
@@ -208,26 +210,28 @@ _krb5_pk_kdf(krb5_context context,
 	     krb5_keyblock *key)
 {
     struct _krb5_encryption_type *et;
+    CCDigestAlgorithm digest;
     krb5_error_code ret;
     krb5_data other;
     size_t keylen, offset;
     uint32_t counter;
     unsigned char *keydata;
-    unsigned char shaoutput[SHA512_DIGEST_LENGTH];
-    const EVP_MD *md;
-    EVP_MD_CTX *m;
+    unsigned char output[CC_SHA512_DIGEST_LENGTH];
+    size_t digestsize;
+    CCDigestRef m;
 
     if (der_heim_oid_cmp(&asn1_oid_id_pkinit_kdf_ah_sha1, &ai->algorithm) == 0) {
-        md = EVP_sha1();
-    } else if (der_heim_oid_cmp(&asn1_oid_id_pkinit_kdf_ah_sha256, &ai->algorithm) == 0) {
-        md = EVP_sha256();
+	digest = kCCDigestSHA1;
+	digestsize = CC_SHA1_DIGEST_LENGTH;
     } else if (der_heim_oid_cmp(&asn1_oid_id_pkinit_kdf_ah_sha512, &ai->algorithm) == 0) {
-        md = EVP_sha512();
+	digest = kCCDigestSHA512;
+	digestsize = CC_SHA512_DIGEST_LENGTH;
     } else {
 	krb5_set_error_message(context, KRB5_PROG_ETYPE_NOSUPP,
 			       N_("KDF not supported", ""));
 	return KRB5_PROG_ETYPE_NOSUPP;
     }
+
     if (ai->parameters != NULL &&
 	(ai->parameters->length != 2 ||
 	 memcmp(ai->parameters->data, "\x05\x00", 2) != 0))
@@ -260,7 +264,7 @@ _krb5_pk_kdf(krb5_context context,
 	return ret;
     }
 
-    m = EVP_MD_CTX_create();
+    m = CCDigestCreate(digest);
     if (m == NULL) {
 	free(keydata);
 	free(other.data);
@@ -273,24 +277,24 @@ _krb5_pk_kdf(krb5_context context,
     do {
 	unsigned char cdata[4];
 
-	EVP_DigestInit_ex(m, md, NULL);
+	CCDigestReset(m);
 	_krb5_put_int(cdata, counter, 4);
-	EVP_DigestUpdate(m, cdata, 4);
-	EVP_DigestUpdate(m, dhdata, dhsize);
-	EVP_DigestUpdate(m, other.data, other.length);
+	CCDigestUpdate(m, cdata, 4);
+	CCDigestUpdate(m, dhdata, dhsize);
+	CCDigestUpdate(m, other.data, other.length);
 
-	EVP_DigestFinal_ex(m, shaoutput, NULL);
+	CCDigestFinal(m, output);
 
 	memcpy((unsigned char *)keydata + offset,
-	       shaoutput,
-	       min(keylen - offset, EVP_MD_CTX_size(m)));
+	       output,
+	       min(keylen - offset, digestsize));
 
-	offset += EVP_MD_CTX_size(m);
+	offset += digestsize;
 	counter++;
     } while(offset < keylen);
-    memset(shaoutput, 0, sizeof(shaoutput));
+    memset(output, 0, sizeof(output));
 
-    EVP_MD_CTX_destroy(m);
+    CCDigestDestroy(m);
     free(other.data);
 
     ret = krb5_random_to_key(context, enctype, keydata, keylen, key);

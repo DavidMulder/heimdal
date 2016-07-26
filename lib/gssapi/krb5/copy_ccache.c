@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -120,7 +122,7 @@ _gsskrb5_krb5_import_cred(OM_uint32 *minor_status,
 					context,
 					id,
 					handle->principal,
-					&handle->lifetime);
+					&handle->endtime);
 	if (ret != GSS_S_COMPLETE) {
 	    krb5_free_principal(context, handle->principal);
 	    free(handle);
@@ -163,23 +165,11 @@ _gsskrb5_krb5_import_cred(OM_uint32 *minor_status,
     }
 
 
-    if (id || keytab) {
-	ret = gss_create_empty_oid_set(minor_status, &handle->mechanisms);
-	if (ret == GSS_S_COMPLETE)
-	    ret = gss_add_oid_set_member(minor_status, GSS_KRB5_MECHANISM,
-					 &handle->mechanisms);
-	if (ret != GSS_S_COMPLETE) {
-	    kret = *minor_status;
-	    goto out;
-	}
-    }
-
     *minor_status = 0;
     *cred = (gss_cred_id_t)handle;
     return GSS_S_COMPLETE;
 
 out:
-    gss_release_oid_set(minor_status, &handle->mechanisms);
     if (handle->ccache)
 	krb5_cc_close(context, handle->ccache);
     if (handle->keytab)

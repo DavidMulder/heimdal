@@ -307,7 +307,7 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_display_name
 OM_uint32 GSSAPI_CALLCONV _gss_spnego_import_name
            (OM_uint32 * minor_status,
             const gss_buffer_t name_buffer,
-            const gss_OID name_type,
+            gss_const_OID name_type,
             gss_name_t * output_name
            )
 {
@@ -547,7 +547,7 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_import_sec_context (
 	return ret;
     }
 
-    ctx->open = 1;
+    ctx->flags.open = 1;
     /* don't bother filling in the rest of the fields */
 
     HEIMDAL_MUTEX_unlock(&ctx->ctx_id_mutex);
@@ -559,7 +559,7 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_import_sec_context (
 
 OM_uint32 GSSAPI_CALLCONV _gss_spnego_inquire_names_for_mech (
             OM_uint32 * minor_status,
-            const gss_OID mechanism,
+            gss_const_OID mechanism,
             gss_OID_set * name_types
            )
 {

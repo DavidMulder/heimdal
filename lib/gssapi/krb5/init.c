@@ -33,8 +33,21 @@
 
 #include "gsskrb5_locl.h"
 
-static HEIMDAL_MUTEX context_mutex = HEIMDAL_MUTEX_INITIALIZER;
-static int created_key;
+heim_string_t _gsskrb5_kGSSICPassword;
+heim_string_t _gsskrb5_kGSSICKerberosCacheName;
+heim_string_t _gsskrb5_kGSSICSiteName;
+heim_string_t _gsskrb5_kGSSICCertificate;
+heim_string_t _gsskrb5_kGSSICLKDCHostname;
+heim_string_t _gsskrb5_kGSSICAppIdentifierACL;
+heim_string_t _gsskrb5_kGSSICAppleSourceApp;
+heim_string_t _gsskrb5_kGSSICAppleSourceAppAuditToken;
+heim_string_t _gsskrb5_kGSSICAppleSourceAppPID;
+heim_string_t _gsskrb5_kGSSICAppleSourceAppUUID;
+heim_string_t _gsskrb5_kGSSICAppleSourceAppSigningIdentity;
+heim_string_t _gsskrb5_kGSSICVerifyCredential;
+heim_string_t _gsskrb5_kGSSICVerifyCredentialAcceptorName;
+heim_string_t _gsskrb5_kGSSICCreateNewCredential;
+
 static HEIMDAL_thread_key context_key;
 
 static void
@@ -47,22 +60,36 @@ destroy_context(void *ptr)
     krb5_free_context(context);
 }
 
+static void
+once_func(void *ctx)
+{
+    int ret;
+
+    _gsskrb5_kGSSICPassword = heim_string_create("kGSSICPassword");
+    _gsskrb5_kGSSICCertificate = heim_string_create("kGSSICCertificate");
+    _gsskrb5_kGSSICSiteName = heim_string_create("kGSSICSiteName");
+    _gsskrb5_kGSSICKerberosCacheName = heim_string_create("kGSSICKerberosCacheName");
+    _gsskrb5_kGSSICLKDCHostname = heim_string_create("kGSSICLKDCHostname");
+    _gsskrb5_kGSSICAppIdentifierACL = heim_string_create("kGSSICAppIdentifierACL");
+    _gsskrb5_kGSSICAppleSourceApp = heim_string_create("kGSSICAppleSourceApp");
+    _gsskrb5_kGSSICAppleSourceAppAuditToken = heim_string_create("kGSSICAppleSourceAppAuditToken");
+    _gsskrb5_kGSSICAppleSourceAppPID = heim_string_create("kGSSICAppleSourceAppPID");
+    _gsskrb5_kGSSICAppleSourceAppUUID = heim_string_create("kGSSICAppleSourceAppUUID");
+    _gsskrb5_kGSSICAppleSourceAppSigningIdentity = heim_string_create("kGSSICAppleSourceAppSigningIdentity");
+    _gsskrb5_kGSSICVerifyCredential = heim_string_create("kGSSICVerifyCredential");
+    _gsskrb5_kGSSICVerifyCredentialAcceptorName = heim_string_create("kGSSICVerifyCredentialAcceptorName");
+    _gsskrb5_kGSSICCreateNewCredential = heim_string_create("kGSSICCreateNewCredential");
+
+	HEIMDAL_key_create(&context_key, destroy_context, ret);
+	}
+
 krb5_error_code
 _gsskrb5_init (krb5_context *context)
 {
+    static heim_base_once_t once;
     krb5_error_code ret = 0;
 
-    HEIMDAL_MUTEX_lock(&context_mutex);
-
-    if (!created_key) {
-	HEIMDAL_key_create(&context_key, destroy_context, ret);
-	if (ret) {
-	    HEIMDAL_MUTEX_unlock(&context_mutex);
-	    return ret;
-	}
-	created_key = 1;
-    }
-    HEIMDAL_MUTEX_unlock(&context_mutex);
+    heim_base_once_f(&once, NULL, once_func);
 
     *context = HEIMDAL_getspecific(context_key);
     if (*context == NULL) {
@@ -75,6 +102,8 @@ _gsskrb5_init (krb5_context *context)
 		*context = NULL;
 	    }
 	}
+    } else {
+	krb5_reload_config(*context, 0, NULL);
     }
 
     return ret;

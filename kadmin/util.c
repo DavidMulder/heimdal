@@ -156,7 +156,9 @@ edit_attributes (const char *prompt, krb5_flags *attr, int *mask, int bit)
 int
 parse_policy (const char *resp, char **policy, int *mask, int bit)
 {
-    if (strspn(resp, VALID_POLICY_NAME_CHARS) == strlen(resp) &&
+    if (strcasecmp(resp, "none") == 0) {
+	return 0;
+    } else if (strspn(resp, VALID_POLICY_NAME_CHARS) == strlen(resp) &&
 	*resp != '\0') {
 	
 	*policy = strdup(resp);
@@ -168,7 +170,8 @@ parse_policy (const char *resp, char **policy, int *mask, int bit)
 	    *mask |= bit;
 	return 0;
     } else if(*resp == '?') {
-	print_flags_table (kdb_attrs, stderr);
+	fprintf (stderr, "Policy is free string or \"none\" for no policy, "
+		 "by default the \"default\" policy is used\n");
     } else {
 	fprintf (stderr, "Unable to parse \"%s\"\n", resp);
     }
@@ -338,12 +341,12 @@ edit_timet (const char *prompt, krb5_timestamp *value, int *mask, int bit)
  */
 
 void
-deltat2str(unsigned t, char *str, size_t len)
+deltat2str(krb5_deltat t, char *str, size_t len)
 {
     if(t == 0 || t == INT_MAX)
 	snprintf(str, len, "unlimited");
     else
-	unparse_time(t, str, len);
+	unparse_time((unsigned)t, str, len);
 }
 
 /*
@@ -546,7 +549,7 @@ set_entry(krb5_context contextp,
     if (policy != NULL) {
 	if (parse_policy (policy, &ent->policy,
 			      mask, KADM5_POLICY)) {
-	    krb5_warnx (contextp, "unable to parse `%s'", attributes);
+	    krb5_warnx (contextp, "unable to parse `%s'", policy);
 	    return 1;
 	}
     }
@@ -641,6 +644,9 @@ foreach_principal(const char *exp_str,
  * in `buf, len'
  */
 
+static void interrupt(int sig) __attribute__((__noreturn__));
+
+
 #include <setjmp.h>
 
 static jmp_buf jmpbuf;
@@ -665,7 +671,7 @@ get_response(const char *prompt, const char *def, char *buf, size_t len)
     }
 
     fprintf(stderr, "%s [%s]:", prompt, def);
-    if(fgets(buf, len, stdin) == NULL) {
+    if(fgets(buf, (int)len, stdin) == NULL) {
 	int save_errno = errno;
 	if(ferror(stdin))
 	    krb5_err(context, 1, save_errno, "<stdin>");
@@ -695,7 +701,7 @@ hex2n (char c)
     if (p == NULL)
 	return -1;
     else
-	return p - hexdigits;
+	return (int)(p - hexdigits);
 }
 
 /*

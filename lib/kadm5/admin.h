@@ -100,6 +100,7 @@
 
 #define KADM5_POLICY_NORMAL_MASK (~0)
 
+#define KADM5_KADMIN_SERVICE	"kadmin"
 #define KADM5_ADMIN_SERVICE	"kadmin/admin"
 #define KADM5_HIST_PRINCIPAL	"kadmin/history"
 #define KADM5_CHANGEPW_SERVICE	"kadmin/changepw"

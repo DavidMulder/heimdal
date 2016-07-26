@@ -87,7 +87,7 @@ emem_seek(krb5_storage *sp, off_t offset, int whence)
 	    offset = 0;
 	s->ptr = s->base + offset;
 	if((size_t)offset > s->len)
-	    s->len = offset;
+	    s->len = (size_t)offset;
 	break;
     case SEEK_CUR:
 	sp->seek(sp,s->ptr - s->base + offset, SEEK_SET);
@@ -118,17 +118,20 @@ emem_trunc(krb5_storage *sp, off_t offset)
     } else if ((size_t)offset > s->size || (s->size / 2) > (size_t)offset) {
 	void *base;
 	size_t off;
+	size_t soffset = (size_t)offset;
 	off = s->ptr - s->base;
-	base = realloc(s->base, offset);
+	if (offset > (off_t)soffset)
+	    return ENOMEM;
+	base = realloc(s->base, soffset);
 	if(base == NULL)
 	    return ENOMEM;
-	if ((size_t)offset > s->size)
-	    memset((char *)base + s->size, 0, offset - s->size);
-	s->size = offset;
+	if (soffset > s->size)
+	    memset((char *)base + s->size, 0, soffset - s->size);
+	s->size = soffset;
 	s->base = base;
 	s->ptr = (unsigned char *)base + off;
     }
-    s->len = offset;
+    s->len = (size_t)offset;
     if ((s->ptr - s->base) > offset)
 	s->ptr = s->base + offset;
     return 0;

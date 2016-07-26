@@ -111,9 +111,9 @@ _kdc_check_access(krb5_context context,
 		  hdb_entry_ex *client_ex, const char *client_name,
 		  hdb_entry_ex *server_ex, const char *server_name,
 		  KDC_REQ *req,
-		  krb5_data *e_data)
+		  METHOD_DATA *method_data)
 {
-    if (windcft == NULL)
+    if (windcft == NULL || windcft->client_access == NULL)
 	    return kdc_check_flags(context, config,
 				   client_ex, client_name,
 				   server_ex, server_name,
@@ -123,5 +123,5 @@ _kdc_check_access(krb5_context context,
 				    context, config,
 				    client_ex, client_name,
 				    server_ex, server_name,
-				    req, e_data);
+				    req, method_data);
 }

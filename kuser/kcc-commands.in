@@ -90,6 +90,11 @@ command = {
 		help = "Verbose output"
 	}
 	option = {
+		long = "json"
+		type = "flag"
+		help = "JSON formated output"
+	}
+	option = {
 		name = "a"
 		short = "a"
 		type = "flag"
@@ -103,6 +108,10 @@ command = {
 		long = "hidden"
 		type = "flag"
 		help = "Verbose output"
+	}
+	option = {
+		long = "version"
+		type = "flag"
 	}
 }
 command = {
@@ -121,6 +130,10 @@ command = {
 	       type = "string"
 	       argument = "cachename"
 	       help = "Credentials cache"
+	}
+	option = {
+		long = "version"
+		type = "flag"
 	}
 }
 command = {
@@ -150,6 +163,10 @@ command = {
 		short = "i"
 		type = "flag"
 		help = "interactive selection"
+	}
+	option = {
+		long = "version"
+		type = "flag"
 	}
 };
 command = {
@@ -189,6 +206,31 @@ command = {
 	       type = "flag"
 	       help = "Quiet"
 	}
+	option = {
+		long = "version"
+		type = "flag"
+	}
+}
+command = {
+	name = "kdc"
+	option = {
+	       long = "json"
+	       type = "flag"
+	       help = "format output in json"
+	}
+	option = {
+	       long = "type"
+	       type = "string"
+	       help = "type to fetch (kdc|kpasswd|kadmin|kkdcp)"
+	}
+	option = {
+		long = "uuid"
+		type = "string"
+		help = "uuid reference"
+	}
+	argument = "realm..."
+	min_args = "1"
+	help = "Print the KDC the client will try for a specific realms"
 }
 command = {
 	name = "copy_cred_cache"
@@ -225,9 +267,28 @@ command = {
 	       type = "integer"
 	       help = "file cache version to create"
 	}
+	option = {
+		long = "version"
+		type = "flag"
+	}
 	min_args = "1"
 	max_args = "2"
 	help = "Copies credential caches"
+}
+command = {
+	name = "dump-credentials"
+	option = {
+	       long = "type"
+	       type = "string"
+	       help = "only credentials of type"
+	}
+	option = {
+		long = "verbose"
+		short = "v"
+		type = "flag"
+		help = "Verbose output"
+	}
+	help = "Dump credential cache"
 }
 command = {
 	name = "help"

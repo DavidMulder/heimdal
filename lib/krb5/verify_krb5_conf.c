@@ -345,6 +345,7 @@ check_log(krb5_context context, const char *path, char *data)
 }
 
 typedef int (*check_func_t)(krb5_context, const char*, char*);
+
 struct entry {
     const char *name;
     int type;
@@ -400,6 +401,8 @@ struct entry libdefaults_entries[] = {
     { "kdc_timesync", krb5_config_string, check_boolean },
     { "log_utc", krb5_config_string, check_boolean },
     { "maxretries", krb5_config_string, check_numeric },
+    { "large_message_size", krb5_config_string, check_numeric },
+    { "max_message_size", krb5_config_string, check_numeric },
     { "scan_interfaces", krb5_config_string, check_boolean },
     { "srv_lookup", krb5_config_string, check_boolean },
     { "srv_try_txt", krb5_config_string, check_boolean },
@@ -651,7 +654,7 @@ main(int argc, char **argv)
 
     setprogname (argv[0]);
 
-    ret = krb5_init_context(&context);
+    ret = krb5_init_context_flags(KRB5_CONTEXT_FLAG_NO_CONFIG, &context);
     if (ret == KRB5_CONFIG_BADFORMAT)
 	errx (1, "krb5_init_context failed to parse configuration file");
     else if (ret)

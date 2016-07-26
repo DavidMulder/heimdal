@@ -32,7 +32,9 @@
  */
 
 #include "kpasswd_locl.h"
-RCSID("$Id$");
+
+static void usage (int ret, struct getargs *a, int num_args) __attribute__((noreturn));
+
 
 static int version_flag;
 static int help_flag;
@@ -91,7 +93,7 @@ change_password(krb5_context context,
     }
 
     ret = krb5_set_password_using_ccache (context, id, pwbuf,
-					  principal,
+					 admin_principal_str ? principal : NULL,
 					  &result_code,
 					  &result_code_string,
 					  &result_string);
@@ -118,12 +120,16 @@ main (int argc, char **argv)
     krb5_error_code ret;
     krb5_context context;
     krb5_principal principal;
+    int optidx = 0;
     krb5_get_init_creds_opt *opt;
     krb5_ccache id = NULL;
     int exit_value;
-    int optidx = 0;
 
     setprogname(argv[0]);
+
+    ret = krb5_init_context (&context);
+    if (ret)
+	errx(1, "krb5_init_context failed: %d", ret);
 
     if(getarg(args, sizeof(args) / sizeof(args[0]), argc, argv, &optidx))
 	usage(1, args, sizeof(args) / sizeof(args[0]));
@@ -133,6 +139,7 @@ main (int argc, char **argv)
 	print_version(NULL);
 	return 0;
     }
+
     argc -= optidx;
     argv += optidx;
 
@@ -194,7 +201,6 @@ main (int argc, char **argv)
 	case KRB5KRB_AP_ERR_BAD_INTEGRITY :
 	case KRB5KRB_AP_ERR_MODIFIED :
 	    krb5_errx(context, 1, "Password incorrect");
-	    break;
 	default:
 	    krb5_err(context, 1, ret, "krb5_get_init_creds");
 	}

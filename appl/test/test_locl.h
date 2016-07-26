@@ -78,7 +78,7 @@
 
 #define PORT "test"
 
-extern char *service;
+extern char *service_str;
 extern char *mech;
 extern char *keytab_str;
 extern krb5_keytab keytab;

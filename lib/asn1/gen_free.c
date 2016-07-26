@@ -80,8 +80,11 @@ free_type (const char *name, const Type *t, int preserve)
 	if ((t->type == TSequence || t->type == TChoice) && preserve)
 	    fprintf(codefile, "der_free_octet_string(&data->_save);\n");
 
-	if(t->type == TChoice)
+	if(t->type == TChoice) {
 	    fprintf(codefile, "switch((%s)->element) {\n", name);
+	    fprintf(codefile,
+		    "case ASN1_CHOICE_INVALID: break;\n");
+	}
 
 	ASN1_TAILQ_FOREACH(m, t->members, members) {
 	    char *s;
@@ -170,8 +173,6 @@ free_type (const char *name, const Type *t, int preserve)
     case TOID :
 	free_primitive ("oid", name);
 	break;
-    default :
-	abort ();
     }
 }
 
@@ -181,7 +182,7 @@ generate_type_free (const Symbol *s)
     int preserve = preserve_type(s->name) ? TRUE : FALSE;
 
     fprintf (codefile, "void ASN1CALL\n"
-	     "free_%s(%s *data)\n"
+	     "free_%s(%s * HEIMDAL_UNUSED_ATTRIBUTE data)\n"
 	     "{\n",
 	     s->gen_name, s->gen_name);
 

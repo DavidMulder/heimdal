@@ -58,6 +58,7 @@ krb5src = \
 	krb5/inquire_mechs_for_name.c \
 	krb5/inquire_names_for_mech.c \
 	krb5/inquire_sec_context_by_oid.c \
+	krb5/iter_cred.c \
 	krb5/pname_to_uid.c \
 	krb5/process_context_token.c \
 	krb5/prf.c \
@@ -188,6 +189,7 @@ ntlmsrc = \
 	ntlm/import_sec_context.c \
 	ntlm/indicate_mechs.c \
 	ntlm/init_sec_context.c \
+	ntlm/iter_cred.c \
 	ntlm/inquire_context.c \
 	ntlm/inquire_cred_by_mech.c \
 	ntlm/inquire_mechs_for_name.c \
@@ -211,6 +213,8 @@ dist_libgssapi_la_SOURCES  = \
 nodist_libgssapi_la_SOURCES  = \
 	gkrb5_err.c \
 	gkrb5_err.h \
+	spnego_asn1-template.c \
+	gssapi_asn1-template.c \
 	$(BUILT_SOURCES)
 
 libgssapi_la_DEPENDENCIES = version-script.map
@@ -306,10 +310,10 @@ bin_PROGRAMS = gsstool
 noinst_PROGRAMS = test_cred test_kcred test_context test_ntlm
 
 test_context_SOURCES = test_context.c test_common.c test_common.h
-test_ntlm_SOURCES = test_ntlm.c test_common.c test_common.h
+test_gssntlm_SOURCES = test_gssntlm.c test_common.c test_common.h
 test_acquire_cred_SOURCES = test_acquire_cred.c test_common.c test_common.h
 
-test_ntlm_LDADD = \
+test_gssntlm_LDADD = \
 	$(top_builddir)/lib/ntlm/libheimntlm.la \
 	$(LDADD)
 
@@ -348,6 +352,8 @@ EXTRA_DIST = \
 $(libgssapi_la_OBJECTS): gkrb5_err.h gssapi_asn1.h gssapi_asn1-priv.h
 $(libgssapi_la_OBJECTS): spnego_asn1.h spnego_asn1-priv.h
 $(libgssapi_la_OBJECTS): $(srcdir)/gssapi/gssapi_oid.h
+$(libgssapi_la_OBJECTS): $(srcdir)/gssapi/gssapi_protos.h
+$(libgssapi_la_OBJECTS): $(srcdir)/gssapi/gssapi_private.h
 
 gkrb5_err.h gkrb5_err.c: $(srcdir)/krb5/gkrb5_err.et
 	$(COMPILE_ET) $(srcdir)/krb5/gkrb5_err.et
@@ -355,3 +361,9 @@ gkrb5_err.h gkrb5_err.c: $(srcdir)/krb5/gkrb5_err.et
 $(srcdir)/gssapi/gssapi_oid.h $(srcdir)/mech/gss_oid.c:
 	perl $(srcdir)/gen-oid.pl -b base -h $(srcdir)/oid.txt > $(srcdir)/gssapi/gssapi_oid.h
 	perl $(srcdir)/gen-oid.pl -b base $(srcdir)/oid.txt > $(srcdir)/mech/gss_oid.c
+
+$(srcdir)/gssapi/gssapi_protos.h:
+	cd $(srcdir) && perl ../../cf/make-proto.pl -E GSS_LIB -q -P comment -o gssapi/gssapi_protos.h $(dist_libgssapi_la_SOURCES) || rm -f gssapi_protos.h
+
+$(srcdir)/gssapi/gssapi_private.h:
+	cd $(srcdir) && perl ../../cf/make-proto.pl -q -P comment -p gssapi_private.h $(mechsrc) || rm -f gssapi_private.h

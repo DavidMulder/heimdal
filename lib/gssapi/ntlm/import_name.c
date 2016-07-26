@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -33,31 +35,53 @@
 
 #include "ntlm.h"
 
-OM_uint32 GSSAPI_CALLCONV
-_gss_ntlm_import_name
-           (OM_uint32 * minor_status,
-            const gss_buffer_t input_name_buffer,
-            const gss_OID input_name_type,
-            gss_name_t * output_name
-           )
+gss_name_t
+_gss_ntlm_create_name(OM_uint32 *minor_status,
+		      const char *user, const char *domain, int flags)
 {
-    char *name, *p, *p2;
-    int is_hostnamed;
-    int is_username;
     ntlm_name n;
+    n = calloc(1, sizeof(*n));
+    if (n == NULL) {
+	*minor_status = ENOMEM;
+	return NULL;
+    }
 
-    *minor_status = 0;
+    n->user = strdup(user);
+    n->domain = strdup(domain);
+    n->flags = flags;
 
-    if (output_name == NULL)
-	return GSS_S_CALL_INACCESSIBLE_WRITE;
+    if (n->user == NULL || n->domain == NULL) {
+	free(n->user);
+	free(n->domain);
+	free(n);
+	*minor_status = ENOMEM;
+	return NULL;
+    }
 
-    *output_name = GSS_C_NO_NAME;
+    return (gss_name_t)n;
+}
 
-    is_hostnamed = gss_oid_equal(input_name_type, GSS_C_NT_HOSTBASED_SERVICE);
-    is_username = gss_oid_equal(input_name_type, GSS_C_NT_USER_NAME);
+static OM_uint32
+anon_name(OM_uint32 *minor_status,
+	  gss_const_OID mech,
+	  const gss_buffer_t input_name_buffer,
+	  gss_const_OID input_name_type,
+	  gss_name_t *output_name)
+{
+    *output_name = _gss_ntlm_create_name(minor_status, "", "", NTLM_ANON_NAME);
+    if (*output_name == NULL)
+	return GSS_S_FAILURE;
+    return GSS_S_COMPLETE;
+}
 
-    if (!is_hostnamed && !is_username)
-	return GSS_S_BAD_NAMETYPE;
+static OM_uint32
+hostbased_name(OM_uint32 *minor_status,
+	       gss_const_OID mech,
+	       const gss_buffer_t input_name_buffer,
+	       gss_const_OID input_name_type,
+	       gss_name_t *output_name)
+{
+    char *name, *p;
 
     name = malloc(input_name_buffer->length + 1);
     if (name == NULL) {
@@ -69,44 +93,127 @@ _gss_ntlm_import_name
 
     /* find "domain" part of the name and uppercase it */
     p = strchr(name, '@');
-    if (p == NULL) {
-        free(name);
-	return GSS_S_BAD_NAME;
-    }
+    if (p) {
     p[0] = '\0';
     p++;
-    p2 = strchr(p, '.');
-    if (p2 && p2[1] != '\0') {
-	if (is_hostnamed) {
-	    p = p2 + 1;
-	    p2 = strchr(p, '.');
-	}
-	if (p2)
-	    *p2 = '\0';
+    } else {
+	p = "";
     }
-    strupr(p);
 
-    n = calloc(1, sizeof(*n));
-    if (n == NULL) {
+    *output_name = _gss_ntlm_create_name(minor_status, name, p, 0);
 	free(name);
-	*minor_status = ENOMEM;
+    if (*output_name == NULL)
 	return GSS_S_FAILURE;
-    }
-
-    n->user = strdup(name);
-    n->domain = strdup(p);
-
-    free(name);
-
-    if (n->user == NULL || n->domain == NULL) {
-	free(n->user);
-	free(n->domain);
-	free(n);
-	*minor_status = ENOMEM;
-	return GSS_S_FAILURE;
-    }
-
-    *output_name = (gss_name_t)n;
 
     return GSS_S_COMPLETE;
+    }
+
+static OM_uint32
+parse_name(OM_uint32 *minor_status,
+	   gss_const_OID mech,
+	   int domain_required,
+	   const gss_buffer_t input_name_buffer,
+	   gss_const_OID input_name_type,
+	   gss_name_t *output_name)
+{
+    char *name, *p, *user, *domain;
+
+    if (memchr(input_name_buffer->value, '@', input_name_buffer->length) != NULL)
+	return hostbased_name(minor_status, mech, input_name_buffer,
+			      input_name_type, output_name);
+
+    name = malloc(input_name_buffer->length + 1);
+    if (name == NULL) {
+	*minor_status = ENOMEM;
+	return GSS_S_FAILURE;
+    }
+    memcpy(name, input_name_buffer->value, input_name_buffer->length);
+    name[input_name_buffer->length] = '\0';
+
+    /* find "domain" part of the name and uppercase it */
+    p = strchr(name, '\\');
+    if (p) {
+	p[0] = '\0';
+	user = p + 1;
+	domain = name;
+	strupr(domain);
+    } else if (!domain_required) {
+	user = name;
+	domain = ""; /* no domain */
+    } else {
+	free(name);
+	*minor_status = HNTLM_ERR_MISSING_NAME_SEPARATOR;
+	return gss_mg_set_error_string(GSS_NTLM_MECHANISM, GSS_S_BAD_NAME,
+				       HNTLM_ERR_MISSING_NAME_SEPARATOR,
+				       "domain requested but missing name");
+    }
+
+    *output_name = _gss_ntlm_create_name(minor_status, user, domain, 0);
+    free(name);
+    if (*output_name == NULL)
+	return GSS_S_FAILURE;
+
+    return GSS_S_COMPLETE;
+}
+
+static OM_uint32
+user_name(OM_uint32 *minor_status,
+	  gss_const_OID mech,
+	  const gss_buffer_t input_name_buffer,
+	  gss_const_OID input_name_type,
+	  gss_name_t *output_name)
+{
+    return parse_name(minor_status, mech, 0, input_name_buffer, input_name_type, output_name);
+}
+
+static OM_uint32
+parse_ntlm_name(OM_uint32 *minor_status,
+		gss_const_OID mech,
+		const gss_buffer_t input_name_buffer,
+		gss_const_OID input_name_type,
+		gss_name_t *output_name)
+{
+    return parse_name(minor_status, mech, 1, input_name_buffer, input_name_type, output_name);
+}
+
+static OM_uint32
+export_name(OM_uint32 *minor_status,
+	    gss_const_OID mech,
+	    const gss_buffer_t input_name_buffer,
+	    gss_const_OID input_name_type,
+	    gss_name_t *output_name)
+{
+    return parse_name(minor_status, mech, 1, input_name_buffer, input_name_type, output_name);
+}
+
+static struct _gss_name_type ntlm_names[] = {
+    { GSS_C_NT_ANONYMOUS, anon_name},
+    { GSS_C_NT_HOSTBASED_SERVICE, hostbased_name},
+    { GSS_C_NT_USER_NAME, user_name },
+    { GSS_C_NT_NTLM, parse_ntlm_name },
+    { GSS_C_NT_EXPORT_NAME, export_name },
+    { NULL }
+};
+
+
+OM_uint32 _gss_ntlm_import_name
+           (OM_uint32 * minor_status,
+            const gss_buffer_t input_name_buffer,
+            gss_const_OID input_name_type,
+            gss_name_t * output_name
+           )
+{
+    return _gss_mech_import_name(minor_status, GSS_NTLM_MECHANISM,
+				 ntlm_names, input_name_buffer,
+				 input_name_type, output_name);
+}
+
+OM_uint32 _gss_ntlm_inquire_names_for_mech (
+            OM_uint32 * minor_status,
+            gss_const_OID mechanism,
+            gss_OID_set * name_types
+           )
+{
+    return _gss_mech_inquire_names_for_mech(minor_status, ntlm_names,
+					    name_types);
 }

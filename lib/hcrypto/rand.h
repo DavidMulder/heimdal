@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2006 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
@@ -61,6 +60,7 @@ typedef struct RAND_METHOD RAND_METHOD;
 #define RAND_fortuna_method hc_RAND_fortuna_method
 #define RAND_egd_method hc_RAND_egd_method
 #define RAND_unix_method hc_RAND_unix_method
+#define RAND_cc_method hc_RAND_cc_method
 #define RAND_w32crypto_method hc_RAND_w32crypto_method
 
 /*
@@ -103,6 +103,7 @@ int	RAND_egd_bytes(const char *, int);
 
 const RAND_METHOD *	RAND_fortuna_method(void);
 const RAND_METHOD *	RAND_unix_method(void);
+const RAND_METHOD *	RAND_cc_method(void);
 const RAND_METHOD *	RAND_egd_method(void);
 const RAND_METHOD *	RAND_w32crypto_method(void);
 

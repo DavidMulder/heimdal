@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -48,17 +50,35 @@
 
 #include <gssapi.h>
 #include <gssapi_ntlm.h>
+#include <gssapi_spi.h>
 #include <gssapi_mech.h>
 #include <gssapi_oid.h>
 
 #include <krb5.h>
-#include <kcm.h>
 #include <heim_threads.h>
+
+#include <kcm.h>
+#include <hex.h>
 
 #include <heimntlm.h>
 
 #define HC_DEPRECATED_CRYPTO
 #include "crypto-headers.h"
+
+typedef struct {
+    char *user;
+    char *domain;
+    int flags;
+#define NTLM_UUID	1
+#define NTLM_ANON_NAME	2
+#define NTLM_DS_UUID	4
+    unsigned char ds_uuid[16];
+    unsigned char uuid[16];
+} ntlm_name_desc, *ntlm_name;
+
+struct ntlm_ctx;
+
+typedef ntlm_name ntlm_cred;
 
 typedef OM_uint32
 (*ntlm_interface_init)(OM_uint32 *, void **);
@@ -67,49 +87,63 @@ typedef OM_uint32
 (*ntlm_interface_destroy)(OM_uint32 *, void *);
 
 typedef int
-(*ntlm_interface_probe)(OM_uint32 *, void *, const char *);
+(*ntlm_interface_probe)(OM_uint32 *, void *, const char *, unsigned int *flags);
 
 typedef OM_uint32
-(*ntlm_interface_type2)(OM_uint32 *, void *, uint32_t, const char *,
-			const char *, uint32_t *, struct ntlm_buf *);
+(*ntlm_interface_type3)(OM_uint32 *, struct ntlm_ctx *, void *, const struct ntlm_type3 *,
+			ntlm_cred, uint32_t *, uint32_t *, struct ntlm_buf *,
+			ntlm_name *, struct ntlm_buf *, struct ntlm_buf *);
 
 typedef OM_uint32
-(*ntlm_interface_type3)(OM_uint32 *, void *, const struct ntlm_type3 *,
-			struct ntlm_buf *);
+(*ntlm_interface_targetinfo)(OM_uint32 *,
+			     struct ntlm_ctx *,
+			     void *,
+			     const char *,
+			     const char *,
+			     uint32_t *);
+
 
 typedef void
 (*ntlm_interface_free_buffer)(struct ntlm_buf *);
 
 struct ntlm_server_interface {
+    const char *nsi_name;
     ntlm_interface_init nsi_init;
     ntlm_interface_destroy nsi_destroy;
     ntlm_interface_probe nsi_probe;
-    ntlm_interface_type2 nsi_type2;
     ntlm_interface_type3 nsi_type3;
     ntlm_interface_free_buffer nsi_free_buffer;
+    ntlm_interface_targetinfo nsi_ti;
 };
 
 
 struct ntlmv2_key {
     uint32_t seq;
-    RC4_KEY sealkey;
-    RC4_KEY *signsealkey;
+    EVP_CIPHER_CTX sealkey;
+    EVP_CIPHER_CTX *signsealkey;
     unsigned char signkey[16];
 };
 
 extern struct ntlm_server_interface ntlmsspi_kdc_digest;
+extern struct ntlm_server_interface ntlmsspi_dstg_digest;
+extern struct ntlm_server_interface ntlmsspi_netr_digest;
+extern struct ntlm_server_interface ntlmsspi_od_digest;
 
-typedef struct ntlm_cred {
-    gss_cred_usage_t usage;
-    char *username;
-    char *domain;
-    struct ntlm_buf key;
-} *ntlm_cred;
 
-typedef struct {
-    struct ntlm_server_interface *server;
-    void *ictx;
+struct ntlm_backend {
+    struct ntlm_server_interface *interface;
+    void *ctx;
+};
+
+
+typedef struct ntlm_ctx {
+    struct ntlm_backend *backends;
+    size_t num_backends;
     ntlm_cred client;
+
+    unsigned int probe_flags;
+#define NSI_NO_SIGNING 1
+
     OM_uint32 gssflags;
     uint32_t kcmflags;
     uint32_t flags;
@@ -118,14 +152,27 @@ typedef struct {
 #define STATUS_CLIENT 2
 #define STATUS_SESSIONKEY 4
     krb5_data sessionkey;
+    krb5_data type1;
+    krb5_data type2;
+    krb5_data type3;
 
+    uint8_t challenge[8];
+
+    struct ntlm_targetinfo ti;
+    struct ntlm_buf targetinfo;
+
+    gss_name_t srcname;
+    gss_name_t targetname;
+    char *clientsuppliedtargetname;
+
+    char uuid[16];
     gss_buffer_desc pac;
 
     union {
 	struct {
 	    struct {
 		uint32_t seq;
-		RC4_KEY key;
+		EVP_CIPHER_CTX key;
 	    } crypto_send, crypto_recv;
 	} v1;
 	struct {
@@ -133,11 +180,6 @@ typedef struct {
 	} v2;
     } u;
 } *ntlm_ctx;
-
-typedef struct {
-    char *user;
-    char *domain;
-} *ntlm_name;
 
 #include <ntlm-private.h>
 

@@ -78,8 +78,8 @@ extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_nt_dn_oid_desc;
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_krb5_nt_principal_name_referral_oid_desc;
 #define GSS_KRB5_NT_PRINCIPAL_NAME_REFERRAL (&__gss_krb5_nt_principal_name_referral_oid_desc)
 
-extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ntlm_avguest_oid_desc;
-#define GSS_C_NTLM_AVGUEST (&__gss_c_ntlm_avguest_oid_desc)
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ntlm_guest_oid_desc;
+#define GSS_C_NTLM_GUEST (&__gss_c_ntlm_guest_oid_desc)
 
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ntlm_v1_oid_desc;
 #define GSS_C_NTLM_V1 (&__gss_c_ntlm_v1_oid_desc)
@@ -96,8 +96,39 @@ extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ntlm_force_v1_oid_desc;
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_krb5_cred_no_ci_flags_x_oid_desc;
 #define GSS_KRB5_CRED_NO_CI_FLAGS_X (&__gss_krb5_cred_no_ci_flags_x_oid_desc)
 
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_nt_uuid_oid_desc;
+#define GSS_C_NT_UUID (&__gss_c_nt_uuid_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ntlm_support_channelbindings_oid_desc;
+#define GSS_C_NTLM_SUPPORT_CHANNELBINDINGS (&__gss_c_ntlm_support_channelbindings_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ntlm_support_lm2_oid_desc;
+#define GSS_C_NTLM_SUPPORT_LM2 (&__gss_c_ntlm_support_lm2_oid_desc)
+
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_krb5_import_cred_x_oid_desc;
 #define GSS_KRB5_IMPORT_CRED_X (&__gss_krb5_import_cred_x_oid_desc)
+
+ /* .34 was GSS_APPL_LKDC_SUPPORTED */
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ntlm_reset_keys_oid_desc;
+#define GSS_C_NTLM_RESET_KEYS (&__gss_c_ntlm_reset_keys_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_diag_oid_desc;
+#define GSS_C_CRED_DIAG (&__gss_c_cred_diag_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_validate_oid_desc;
+#define GSS_C_CRED_VALIDATE (&__gss_c_cred_validate_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_set_default_oid_desc;
+#define GSS_C_CRED_SET_DEFAULT (&__gss_c_cred_set_default_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_get_default_oid_desc;
+#define GSS_C_CRED_GET_DEFAULT (&__gss_c_cred_get_default_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_renew_oid_desc;
+#define GSS_C_CRED_RENEW (&__gss_c_cred_renew_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ctx_pfs_x_oid_desc;
+#define GSS_C_CTX_PFS_X (&__gss_c_ctx_pfs_x_oid_desc)
 
  /* glue for gss_inquire_saslname_for_mech */
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ma_sasl_mech_name_oid_desc;
@@ -116,6 +147,12 @@ extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_password_oid_desc;
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_certificate_oid_desc;
 #define GSS_C_CRED_CERTIFICATE (&__gss_c_cred_certificate_oid_desc)
 
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_secidentity_oid_desc;
+#define GSS_C_CRED_SecIdentity (&__gss_c_cred_secidentity_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_heimbase_oid_desc;
+#define GSS_C_CRED_HEIMBASE (&__gss_c_cred_heimbase_oid_desc)
+
 /* Heimdal mechanisms - 1.2.752.43.14 */
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_sasl_digest_md5_mechanism_oid_desc;
 #define GSS_SASL_DIGEST_MD5_MECHANISM (&__gss_sasl_digest_md5_mechanism_oid_desc)
@@ -123,6 +160,10 @@ extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_sasl_digest_md5_mechanism_oid_desc
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_netlogon_mechanism_oid_desc;
 #define GSS_NETLOGON_MECHANISM (&__gss_netlogon_mechanism_oid_desc)
 
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_appl_lkdc_supported_oid_desc;
+#define GSS_APPL_LKDC_SUPPORTED (&__gss_appl_lkdc_supported_oid_desc)
+
+ /* GSS_NETLOGON_SET_.* should move to some other location */
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_netlogon_set_session_key_x_oid_desc;
 #define GSS_NETLOGON_SET_SESSION_KEY_X (&__gss_netlogon_set_session_key_x_oid_desc)
 
@@ -148,8 +189,47 @@ extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_krb5_mechanism_oid_desc;
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_ntlm_mechanism_oid_desc;
 #define GSS_NTLM_MECHANISM (&__gss_ntlm_mechanism_oid_desc)
 
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_iakerb_mechanism_oid_desc;
+#define GSS_IAKERB_MECHANISM (&__gss_iakerb_mechanism_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_pku2u_mechanism_oid_desc;
+#define GSS_PKU2U_MECHANISM (&__gss_pku2u_mechanism_oid_desc)
+
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_spnego_mechanism_oid_desc;
 #define GSS_SPNEGO_MECHANISM (&__gss_spnego_mechanism_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_scram_mechanism_oid_desc;
+#define GSS_SCRAM_MECHANISM (&__gss_scram_mechanism_oid_desc)
+
+/*
+ * GSS names
+ */
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_nt_user_name_oid_desc;
+#define GSS_C_NT_USER_NAME (&__gss_c_nt_user_name_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_nt_machine_uid_name_oid_desc;
+#define GSS_C_NT_MACHINE_UID_NAME (&__gss_c_nt_machine_uid_name_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_nt_string_uid_name_oid_desc;
+#define GSS_C_NT_STRING_UID_NAME (&__gss_c_nt_string_uid_name_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_nt_hostbased_service_x_oid_desc;
+#define GSS_C_NT_HOSTBASED_SERVICE_X (&__gss_c_nt_hostbased_service_x_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_nt_hostbased_service_oid_desc;
+#define GSS_C_NT_HOSTBASED_SERVICE (&__gss_c_nt_hostbased_service_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_nt_anonymous_oid_desc;
+#define GSS_C_NT_ANONYMOUS (&__gss_c_nt_anonymous_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_nt_export_name_oid_desc;
+#define GSS_C_NT_EXPORT_NAME (&__gss_c_nt_export_name_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_krb5_nt_principal_name_oid_desc;
+#define GSS_KRB5_NT_PRINCIPAL_NAME (&__gss_krb5_nt_principal_name_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_krb5_nt_principal_oid_desc;
+#define GSS_KRB5_NT_PRINCIPAL (&__gss_krb5_nt_principal_oid_desc)
 
  /* From Luke Howard */
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_peer_has_updated_spnego_oid_desc;

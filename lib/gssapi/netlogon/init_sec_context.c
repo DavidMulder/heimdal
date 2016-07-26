@@ -68,7 +68,7 @@ _netlogon_make_initial_auth_message(OM_uint32 *minor_status,
 #define MAX_NL_NAMES    5
     gss_buffer_desc names[MAX_NL_NAMES];
     uint8_t comp_names[3][MAXHOSTNAMELEN * 2];
-    size_t n = 0, i = 0, len;
+    size_t n = 0, i __attribute__((__unused__)) = 0 , len;
     OM_uint32 ret;
     uint8_t *p;
 

@@ -32,8 +32,13 @@
  */
 
 #include "krb5_locl.h"
+#include <CommonCrypto/CommonCryptor.h>
+#ifndef __APPLE_TARGET_EMBEDDED__
+#include <CommonCrypto/CommonCryptor.h>
+#include <CommonCrypto/CommonCryptorSPI.h>
+#endif
 
-#ifdef HEIM_WEAK_CRYPTO
+#ifdef HEIM_KRB5_DES
 
 #ifdef ENABLE_AFS_STRING_TO_KEY
 
@@ -69,7 +74,7 @@ krb5_DES_AFS3_CMU_string_to_key (krb5_data pw,
        much significance as possible. */
     for (i = 0; i < sizeof(DES_cblock); i++)
 	((unsigned char*)key)[i] <<= 1;
-    DES_set_odd_parity (key);
+    CCDesSetOddParity(key, sizeof(*key));
 }
 
 /*
@@ -88,7 +93,7 @@ krb5_DES_AFS3_Transarc_string_to_key (krb5_data pw,
 
     memcpy(password, pw.data, min(pw.length, sizeof(password)));
     if(pw.length < sizeof(password)) {
-	int len = min(cell.length, sizeof(password) - pw.length);
+	size_t len = min(cell.length, sizeof(password) - pw.length);
 	size_t i;
 
 	memcpy(password + pw.length, cell.data, len);
@@ -98,20 +103,16 @@ krb5_DES_AFS3_Transarc_string_to_key (krb5_data pw,
     passlen = min(sizeof(password), pw.length + cell.length);
     memcpy(&ivec, "kerberos", 8);
     memcpy(&temp_key, "kerberos", 8);
-    DES_set_odd_parity (&temp_key);
-    DES_set_key_unchecked (&temp_key, &schedule);
-    DES_cbc_cksum ((void*)password, &ivec, passlen, &schedule, &ivec);
+    CCDesCBCCksum(password, &ivec, passlen, temp_key, sizeof(temp_key), &ivec);
 
     memcpy(&temp_key, &ivec, 8);
-    DES_set_odd_parity (&temp_key);
-    DES_set_key_unchecked (&temp_key, &schedule);
-    DES_cbc_cksum ((void*)password, key, passlen, &schedule, &ivec);
+    CCDesCBCCksum(password, &key, passlen, temp_key, sizeof(temp_key), &ivec);
     memset(&schedule, 0, sizeof(schedule));
     memset(&temp_key, 0, sizeof(temp_key));
     memset(&ivec, 0, sizeof(ivec));
     memset(password, 0, sizeof(password));
 
-    DES_set_odd_parity (key);
+    CCDesSetOddParity(key, sizeof(*key));
 }
 
 static krb5_error_code
@@ -156,14 +157,18 @@ DES_string_to_key_int(unsigned char *data, size_t length, DES_cblock *key)
 	if((i % 8) == 7)
 	    reverse = !reverse;
     }
-    DES_set_odd_parity(key);
-    if(DES_is_weak_key(key))
+    CCDesSetOddParity(key, sizeof(*key));
+    if(CCDesIsWeakKey(key, sizeof(*key)))
 	(*key)[7] ^= 0xF0;
+#ifndef __APPLE_PRIVATE__
     DES_set_key_unchecked(key, &schedule);
     DES_cbc_cksum((void*)data, key, length, &schedule, key);
+#else
+    CCDesCBCCksum(data, key, length, key, sizeof(*key), key);
+#endif
     memset(&schedule, 0, sizeof(schedule));
-    DES_set_odd_parity(key);
-    if(DES_is_weak_key(key))
+    CCDesSetOddParity(key, sizeof(*key));
+    if(CCDesIsWeakKey(key, sizeof(*key)))
 	(*key)[7] ^= 0xF0;
 }
 
@@ -221,4 +226,5 @@ struct salt_type _krb5_des_salt[] = {
 #endif
     { 0 }
 };
-#endif
+
+#endif /* HEIM_KRB5_DES */

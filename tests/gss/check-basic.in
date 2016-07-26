@@ -34,33 +34,37 @@
 # $Id$
 #
 
-srcdir="@srcdir@"
-objdir="@objdir@"
+env_setup="@env_setup@"
+confdir="@confdir@"
+testdir="@testdir@"
+
+. ${env_setup}
 
 # If there is no useful db support compile in, disable test
-../db/have-db || exit 77
+${have_db} || exit 77
 
 R=TEST.H5L.SE
+R2=TEST2.H5L.SE
 
 port=@port@
 
-keytabfile=${objdir}/server.keytab
+keytabfile=${testdir}/server.keytab
 keytab="FILE:${keytabfile}"
 nokeytab="FILE:no-such-keytab"
-cache="FILE:krb5ccfile"
-cache2="FILE:krb5ccfile2"
+cache="FILE:${testdir}/krb5ccfile"
+cache2="FILE:${testdir}/krb5ccfile2"
 nocache="FILE:no-such-cache"
 
-kinit="${TESTS_ENVIRONMENT} ../../kuser/kinit -c $cache ${afs_no_afslog}"
-kdestroy="${TESTS_ENVIRONMENT} ../../kuser/kdestroy -c $cache ${afs_no_unlog}"
-klist="${TESTS_ENVIRONMENT} ../../kuser/klist -c $cache"
-kadmin="${TESTS_ENVIRONMENT} ../../kadmin/kadmin -l -r $R"
-kdc="${TESTS_ENVIRONMENT} ../../kdc/kdc --addresses=localhost -P $port"
+kinit="${kinit} -c $cache ${afs_no_afslog}"
+kdestroy="${kdestroy} -c $cache ${afs_no_unlog}"
+klist="${klist} -c $cache"
+kadmin="${kadmin} -l -r $R"
+kdc="${kdc} --addresses=localhost -P $port"
 
-acquire_cred="${TESTS_ENVIRONMENT} ../../lib/gssapi/test_acquire_cred"
-test_kcred="${TESTS_ENVIRONMENT} ../../lib/gssapi/test_kcred"
+acquire_cred="${test_acquire_cred}"
+test_kcred="${test_kcred}"
 
-KRB5_CONFIG="${objdir}/krb5.conf"
+KRB5_CONFIG="${confdir}/krb5.conf"
 export KRB5_CONFIG
 
 KRB5_KTNAME="${keytab}"
@@ -69,11 +73,11 @@ KRB5CCNAME="${cache}"
 export KRB5CCNAME
 
 rm -f ${keytabfile}
-rm -f current-db*
-rm -f out-*
-rm -f mkey.file*
+rm -f ${testdir}/current-db*
+rm -f ${testdir}/out-*
+rm -f ${testdir}/mkey.file*
 
-> messages.log
+> ${testdir}/messages.log
 
 echo Creating database
 ${kadmin} \
@@ -82,21 +86,26 @@ ${kadmin} \
     --realm-max-renewable-life=1month \
     ${R} || exit 1
 
-echo upw > ${objdir}/foopassword
+echo upw > ${testdir}/foopassword
 
 ${kadmin} add -p upw --use-defaults user@${R} || exit 1
 ${kadmin} add -p upw --use-defaults another@${R} || exit 1
+
 ${kadmin} add -p p1 --use-defaults host/host.test.h5l.se@${R} || exit 1
 ${kadmin} ext -k ${keytab} host/host.test.h5l.se@${R} || exit 1
+
+${kadmin} add -p p1 --use-defaults host/host-r2.test.h5l.se@${R2} || exit 1
+${kadmin} ext -k ${keytab} host/host-r2.test.h5l.se@${R2} || exit 1
 
 echo "Doing database check"
 ${kadmin} check ${R} || exit 1
 
 echo Starting kdc
+env MallocStackLoggingNoCompact=1 MallocErrorAbort=1 MallocLogFile=${testdir}/malloc-log \
 ${kdc} &
 kdcpid=$!
 
-sh ${srcdir}/../kdc/wait-kdc.sh
+sh ${wait_kdc} KDC ${testdir}/messages.log
 if [ "$?" != 0 ] ; then
     kill ${kdcpid}
     exit 1
@@ -107,7 +116,7 @@ trap "kill ${kdcpid}; echo signal killing kdc; exit 1;" EXIT
 exitcode=0
 
 echo "initial ticket"
-${kinit} --password-file=${objdir}/foopassword user@${R} || exitcode=1
+${kinit} --password-file=${testdir}/foopassword user@${R} || exit 1
 
 echo "keytab"
 ${acquire_cred} \
@@ -121,7 +130,33 @@ ${acquire_cred} \
 echo "keytab w/ wrong name"
 ${acquire_cred} \
     --acquire-type=accept \
+    --cred-type=krb5 \
+    --kerberos \
     --acquire-name=host@host2.test.h5l.se 2>/dev/null && exit 1
+
+echo "keytab default realm wrong (hostbased service name)"
+${acquire_cred} \
+    --acquire-type=accept \
+    --cred-type=krb5 \
+    --kerberos \
+    --name-type=hostbased-service \
+    --acquire-name=host@host-r2.test.h5l.se 2>/dev/null || exit 1
+
+echo "keytab default realm wrong (kerberos principal)"
+${acquire_cred} \
+    --acquire-type=accept \
+    --cred-type=krb5 \
+    --kerberos \
+    --name-type=krb5-principal-name \
+    --acquire-name=host/host-r2.test.h5l.se@${R1} 2>/dev/null && exit 1
+
+echo "keytab default realm wrong (kerberos principal referral)"
+${acquire_cred} \
+    --acquire-type=accept \
+    --cred-type=krb5 \
+    --kerberos \
+    --name-type=krb5-principal-name-referral \
+    --acquire-name=host/host-r2.test.h5l.se@${R2} >/dev/null || exit 1
 
 echo "init using keytab"
 ${acquire_cred} \
@@ -145,6 +180,7 @@ echo "init using keytab (loop 10, kerberos)"
 ${acquire_cred} \
     --acquire-type=initiate \
     --loops=10 \
+    --cred-type=krb5 \
     --kerberos \
     --acquire-name=host@host.test.h5l.se > /dev/null || exit 1
 
@@ -152,6 +188,7 @@ echo "init using keytab (loop 10, target, kerberos)"
 ${acquire_cred} \
     --acquire-type=initiate \
     --loops=10 \
+    --cred-type=krb5 \
     --kerberos \
     --target=host@host.test.h5l.se \
     --acquire-name=host@host.test.h5l.se > /dev/null || exit 1
@@ -160,7 +197,13 @@ echo "init using existing cc"
 ${acquire_cred} \
     --name-type=user-name \
     --acquire-type=initiate \
-    --acquire-name=user || exit 1
+    --acquire-name=user@${R} || exit 1
+
+echo "init using existing cc (domain only)"
+${acquire_cred} \
+    --name-type=user-name \
+    --acquire-type=initiate \
+    --acquire-name=@${R} || exit 1
 
 KRB5CCNAME=${nocache}
 
@@ -168,14 +211,20 @@ echo "fail init using existing cc"
 ${acquire_cred} \
     --name-type=user-name \
     --acquire-type=initiate \
-    --acquire-name=user 2>/dev/null && exit 1
+    --acquire-name=user@${R} 2>/dev/null && exit 1
+
+echo "init using existing cc (domain only)"
+${acquire_cred} \
+    --name-type=user-name \
+    --acquire-type=initiate \
+    --acquire-name=@${R} 2>/dev/null && exit 1
 
 echo "use gss_krb5_ccache_name for user"
 ${acquire_cred} \
     --name-type=user-name \
     --ccache=${cache} \
     --acquire-type=initiate \
-    --acquire-name=user >/dev/null || exit 1
+    --acquire-name=user@${R} >/dev/null || exit 1
 
 KRB5CCNAME=${cache}
 KRB5_KTNAME=${nokeytab}
@@ -198,9 +247,36 @@ ${acquire_cred} \
     --ccache=${cache} \
     --acquire-name=host@host.test.h5l.se 2>/dev/null || exit 1
 
+echo "init anon ntlm cred"
+
+for mech in spengo ntlm ; do
+    echo "init anon ntlm cred (mech=$mech)"
+    ${acquire_cred} \
+	--anonymous \
+        --target=host@server.domain \
+        --acquire-type=initiate \
+        --cred-type=ntlm \
+        --mech-type=spnego \
+        --name-type=anonymous \
+            2>/dev/null || exit 1
+
+    echo "init anon ntlm cred (mech=$mech) (failure because non GSS_C_ANON_FLAG)"
+    ${acquire_cred} \
+        --target=host@server.domain \
+        --acquire-type=initiate \
+        --cred-type=ntlm \
+        --mech-type=spnego \
+        --name-type=anonymous \
+            2>/dev/null && exit 1
+
+done
+
+echo "checking scram"
+${test_gssscram} --user=lha --password=foo || exit 1
+
 trap "" EXIT
 
 echo "killing kdc (${kdcpid})"
-kill ${kdcpid} 2> /dev/null
+sh ${leaks_kill} kdc ${kdcpid} || { exitcode=1; }
 
 exit $exitcode

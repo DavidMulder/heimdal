@@ -42,6 +42,7 @@
 #include <stdarg.h>
 #include <gssapi.h>
 #include <gssapi_krb5.h>
+#include <gssapi_spi.h>
 #include <gssapi_spnego.h>
 #include <krb5.h>
 #include <err.h>
@@ -176,9 +177,6 @@ main(int argc, char **argv)
 	print_version(NULL);
 	exit(0);
     }
-
-    argc -= optidx;
-    argv += optidx;
 
     copy_import();
 

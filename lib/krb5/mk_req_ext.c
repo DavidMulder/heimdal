@@ -38,6 +38,7 @@ _krb5_mk_req_internal(krb5_context context,
 		      krb5_auth_context *auth_context,
 		      const krb5_flags ap_req_options,
 		      krb5_data *in_data,
+		      krb5_ccache ccache,
 		      krb5_creds *in_creds,
 		      krb5_data *outbuf,
 		      krb5_key_usage checksum_usage,
@@ -72,6 +73,15 @@ _krb5_mk_req_internal(krb5_context context,
     ret = krb5_copy_keyblock(context, &in_creds->session, &ac->keyblock);
     if (ret)
 	goto out;
+
+    /*
+     * Now that we know the enctype, setup PFS if possible
+     */
+    if (auth_context && (ap_req_options & AP_OPTS_USE_PFS) != 0) {
+	ret = _krb5_auth_con_setup_pfs(context, ac, ac->keyblock->keytype);
+	if (ret)
+	    goto out;
+    }
 
     /* it's unclear what type of checksum we can use.  try the best one, except:
      * a) if it's configured differently for the current realm, or
@@ -155,6 +165,7 @@ krb5_mk_req_extended(krb5_context context,
 				 auth_context,
 				 ap_req_options,
 				 in_data,
+				 NULL,
 				 in_creds,
 				 outbuf,
 				 KRB5_KU_AP_REQ_AUTH_CKSUM,

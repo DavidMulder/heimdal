@@ -48,11 +48,15 @@ struct PACTYPE {
 };
 
 struct krb5_pac_data {
+    struct heim_base_uniq base;
     struct PACTYPE *pac;
     krb5_data data;
     struct PAC_INFO_BUFFER *server_checksum;
     struct PAC_INFO_BUFFER *privsvr_checksum;
     struct PAC_INFO_BUFFER *logon_name;
+    struct PAC_INFO_BUFFER *credential_info;
+
+    krb5_data credential_data;
 };
 
 #define PAC_ALIGNMENT			8
@@ -60,10 +64,12 @@ struct krb5_pac_data {
 #define PACTYPE_SIZE			8
 #define PAC_INFO_BUFFER_SIZE		16
 
+#define PAC_CREDENTIAL_INFO		2
 #define PAC_SERVER_CHECKSUM		6
 #define PAC_PRIVSVR_CHECKSUM		7
 #define PAC_LOGON_NAME			10
 #define PAC_CONSTRAINED_DELEGATION	11
+#define PAC_USER_UPN_DNS		12
 
 #define CHECK(r,f,l)						\
 	do {							\
@@ -111,6 +117,26 @@ HMAC_MD5_any_checksum(krb5_context context,
     return ret;
 }
 
+static krb5_error_code
+assign_pac_buffer(krb5_context context, struct PAC_INFO_BUFFER **val, struct PAC_INFO_BUFFER *value, const char *type)
+{
+    if (*val != NULL) {
+	krb5_set_error_message(context, EINVAL, N_("PAC have two %s", ""), type);
+	return EINVAL;
+    }
+    *val = value;
+    return 0;
+}
+
+
+static void
+pac_release(void *ptr)
+{
+    krb5_pac pac = ptr;
+    krb5_data_free(&pac->data);
+    krb5_data_free(&pac->credential_data);
+    free(pac->pac);
+}
 
 /*
  *
@@ -125,7 +151,7 @@ krb5_pac_parse(krb5_context context, const void *ptr, size_t len,
     krb5_storage *sp = NULL;
     uint32_t i, tmp, tmp2, header_end;
 
-    p = calloc(1, sizeof(*p));
+    p = heim_uniq_alloc(sizeof(*p), "krb5-pac", pac_release);
     if (p == NULL) {
 	ret = krb5_enomem(context);
 	goto out;
@@ -142,7 +168,12 @@ krb5_pac_parse(krb5_context context, const void *ptr, size_t len,
     CHECK(ret, krb5_ret_uint32(sp, &tmp2), out);
     if (tmp < 1) {
 	ret = EINVAL; /* Too few buffers */
-	krb5_set_error_message(context, ret, N_("PAC have too few buffer", ""));
+	krb5_set_error_message(context, ret, N_("PAC have too few buffers", ""));
+	goto out;
+    }
+    if (tmp > 1000) {
+	ret = HEIM_PAC_TOO_MANY; /* Too many buffers */
+	krb5_set_error_message(context, ret, N_("PAC have too many buffers", ""));
 	goto out;
     }
     if (tmp2 != 0) {
@@ -209,32 +240,26 @@ krb5_pac_parse(krb5_context context, const void *ptr, size_t len,
 	}
 
 	/* let save pointer to data we need later */
-	if (p->pac->buffers[i].type == PAC_SERVER_CHECKSUM) {
-	    if (p->server_checksum) {
-		ret = EINVAL;
-		krb5_set_error_message(context, ret,
-				       N_("PAC have two server checksums", ""));
+	switch (p->pac->buffers[i].type) {
+	case PAC_SERVER_CHECKSUM:
+	    ret = assign_pac_buffer(context, &p->server_checksum, &p->pac->buffers[i], "server checksum");
+	    break;
+	case PAC_PRIVSVR_CHECKSUM:
+	    ret = assign_pac_buffer(context, &p->privsvr_checksum, &p->pac->buffers[i], "KDC checksum");
+	    break;
+	case PAC_LOGON_NAME:
+	    ret = assign_pac_buffer(context, &p->logon_name, &p->pac->buffers[i], "logon names");
+	    break;
+	case PAC_CREDENTIAL_INFO:
+	    ret = assign_pac_buffer(context, &p->credential_info, &p->pac->buffers[i], "credential info");
+	    break;
+	default:
+	    _krb5_debugx(context, 5, "krb5_pac_parse: unsupported pac type %d", (int)p->pac->buffers[i].type);
+	    ret = 0;
+	    }
+	if (ret)
 		goto out;
 	    }
-	    p->server_checksum = &p->pac->buffers[i];
-	} else if (p->pac->buffers[i].type == PAC_PRIVSVR_CHECKSUM) {
-	    if (p->privsvr_checksum) {
-		ret = EINVAL;
-		krb5_set_error_message(context, ret,
-				       N_("PAC have two KDC checksums", ""));
-		goto out;
-	    }
-	    p->privsvr_checksum = &p->pac->buffers[i];
-	} else if (p->pac->buffers[i].type == PAC_LOGON_NAME) {
-	    if (p->logon_name) {
-		ret = EINVAL;
-		krb5_set_error_message(context, ret,
-				       N_("PAC have two logon names", ""));
-		goto out;
-	    }
-	    p->logon_name = &p->pac->buffers[i];
-	}
-    }
 
     ret = krb5_data_copy(&p->data, ptr, len);
     if (ret)
@@ -264,7 +289,7 @@ krb5_pac_init(krb5_context context, krb5_pac *pac)
     krb5_error_code ret;
     krb5_pac p;
 
-    p = calloc(1, sizeof(*p));
+    p = heim_uniq_alloc(sizeof(*p), "krb5-pac", pac_release);
     if (p == NULL) {
 	return krb5_enomem(context);
     }
@@ -310,8 +335,8 @@ krb5_pac_add_buffer(krb5_context context, krb5_pac p,
     offset = p->data.length + PAC_INFO_BUFFER_SIZE;
 
     p->pac->buffers[len].type = type;
-    p->pac->buffers[len].buffersize = data->length;
-    p->pac->buffers[len].offset_lo = offset;
+    p->pac->buffers[len].buffersize = (uint32_t)data->length;
+    p->pac->buffers[len].offset_lo = (uint32_t)offset;
     p->pac->buffers[len].offset_hi = 0;
 
     old_end = p->data.length;
@@ -405,7 +430,7 @@ krb5_pac_get_types(krb5_context context,
 {
     size_t i;
 
-    *types = calloc(p->pac->numbuffers, sizeof(*types));
+    *types = calloc(p->pac->numbuffers, sizeof(**types));
     if (*types == NULL) {
 	*len = 0;
 	return krb5_enomem(context);
@@ -417,16 +442,19 @@ krb5_pac_get_types(krb5_context context,
     return 0;
 }
 
-/*
+/**
+ * Free the windows PAC
  *
+ * @param context Kerberos 5 context.
+ * @param pac the pac structure returned by krb5_pac_parse() and others
+ *
+ * @ingroup krb5_pac
  */
 
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_pac_free(krb5_context context, krb5_pac pac)
 {
-    krb5_data_free(&pac->data);
-    free(pac->pac);
-    free(pac);
+    heim_release(pac);
 }
 
 /*
@@ -443,6 +471,7 @@ verify_checksum(krb5_context context,
     krb5_storage *sp = NULL;
     uint32_t type;
     krb5_error_code ret;
+    krb5_ssize_t sret;
     Checksum cksum;
 
     memset(&cksum, 0, sizeof(cksum));
@@ -457,14 +486,14 @@ verify_checksum(krb5_context context,
     CHECK(ret, krb5_ret_uint32(sp, &type), out);
     cksum.cksumtype = type;
     cksum.checksum.length =
-	sig->buffersize - krb5_storage_seek(sp, 0, SEEK_CUR);
+	(size_t)(sig->buffersize - krb5_storage_seek(sp, 0, SEEK_CUR));
     cksum.checksum.data = malloc(cksum.checksum.length);
     if (cksum.checksum.data == NULL) {
 	ret = krb5_enomem(context);
 	goto out;
     }
-    ret = krb5_storage_read(sp, cksum.checksum.data, cksum.checksum.length);
-    if (ret != (int)cksum.checksum.length) {
+    sret = krb5_storage_read(sp, cksum.checksum.data, cksum.checksum.length);
+    if (sret != (int)cksum.checksum.length) {
 	ret = EINVAL;
 	krb5_set_error_message(context, ret, "PAC checksum missing checksum");
 	goto out;
@@ -549,6 +578,8 @@ create_checksum(krb5_context context,
     if (cksumtype == (uint32_t)CKSUMTYPE_HMAC_MD5) {
 	ret = HMAC_MD5_any_checksum(context, key, data, datalen,
 				    KRB5_KU_OTHER_CKSUM, &cksum);
+	if (ret)
+	    return ret;
     } else {
 	ret = krb5_crypto_init(context, key, 0, &crypto);
 	if (ret)
@@ -595,6 +626,7 @@ verify_logonname(krb5_context context,
 		 krb5_const_principal principal)
 {
     krb5_error_code ret;
+    krb5_ssize_t sret;
     krb5_principal p2;
     uint32_t time1, time2;
     krb5_storage *sp;
@@ -633,8 +665,8 @@ verify_logonname(krb5_context context,
 	krb5_storage_free(sp);
 	return krb5_enomem(context);
     }
-    ret = krb5_storage_read(sp, s, len);
-    if (ret != len) {
+    sret = krb5_storage_read(sp, s, len);
+    if (sret != len) {
 	krb5_storage_free(sp);
 	krb5_set_error_message(context, EINVAL, "Failed to read PAC logon name");
 	return EINVAL;
@@ -703,6 +735,7 @@ build_logon_name(krb5_context context,
 		 krb5_data *logon)
 {
     krb5_error_code ret;
+    krb5_ssize_t sret;
     krb5_storage *sp;
     uint64_t t;
     char *s, *s2;
@@ -746,9 +779,9 @@ build_logon_name(krb5_context context,
     /* write libwind code here */
 #endif
 
-    ret = krb5_storage_write(sp, s2, len * 2);
+    sret = krb5_storage_write(sp, s2, len * 2);
     free(s2);
-    if (ret != (int)(len * 2)) {
+    if (sret < 0 || (size_t)sret != (len * 2)) {
 	ret = krb5_enomem(context);
 	goto out;
     }
@@ -865,6 +898,97 @@ krb5_pac_verify(krb5_context context,
  *
  */
 
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_pac_process_credentials_buffer(krb5_context context,
+				    krb5_pac pac,
+				    krb5_keyblock *as_rep_key)
+{
+    uint32_t version = 0;
+    int32_t encryptionType = 0;
+    krb5_storage *sp = NULL;
+    krb5_crypto crypto = NULL;
+    krb5_error_code ret;
+
+    if (pac->credential_data.length)
+	return HEIM_PAC_MALFORMED;
+
+    if (pac->credential_info == NULL)
+	return HEIM_PAC_CINFO_MISSING;
+
+    if (pac->credential_info->buffersize < 8)
+	return HEIM_PAC_MALFORMED;
+    if (pac->credential_info->buffersize > 10000)
+	return HEIM_PAC_TOO_MANY;
+
+    sp = krb5_storage_from_readonly_mem(((const char *)pac->data.data) + pac->credential_info->offset_lo,
+					pac->credential_info->buffersize);
+    if (sp == NULL)
+	return krb5_enomem(context);
+
+    krb5_storage_set_flags(sp, KRB5_STORAGE_BYTEORDER_LE);
+
+    CHECK(ret, krb5_ret_uint32(sp, &version), out);
+    CHECK(ret, krb5_ret_int32(sp, &encryptionType), out);
+
+    if (version != 0) {
+	ret = HEIM_PAC_VERSION;
+	krb5_set_error_message(context, ret, N_("unsupport pac credentail version: %d", ""), (int)version);
+	goto out;
+    }
+    
+    /*
+     * Check the specific encryptes we support, these are hard coded in MS-KILE/MS-PAC
+     */
+    switch (encryptionType) {
+    case 0x01:
+    case 0x03:
+    case 0x11:
+    case 0x12:
+    case 0x17:
+	break;
+    default:
+	ret = HEIM_PAC_INVALID_ENCTYPE;
+	krb5_set_error_message(context, ret, N_("enctype: %d not support as pac enctype", ""), (int)encryptionType);
+	goto out;
+    }
+
+    if (as_rep_key->keytype != encryptionType) {
+	ret = HEIM_PAC_INVALID_ENCTYPE;
+	krb5_set_error_message(context, ret, N_("as key (%d) mismatch with PAC enctype (%d)", ""),
+			       (int)as_rep_key->keytype, (int)encryptionType);
+	goto out;
+    }
+
+    ret = krb5_crypto_init(context, as_rep_key, 0, &crypto);
+    if (ret)
+	goto out;
+
+    ret = krb5_decrypt(context, crypto, KRB5_KU_OTHER_ENCRYPTED,
+		       ((const char *)pac->data.data) + pac->credential_info->offset_lo + 8,
+		       pac->credential_info->buffersize - 8,
+		       &pac->credential_data);
+    if (ret)
+	goto out;
+
+ out:
+    if (sp)
+	krb5_storage_free(sp);
+    if (crypto)
+	krb5_crypto_destroy(context, crypto);
+    
+    return ret;
+}
+
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_pac_copy_credential_package(krb5_context context, krb5_pac pac, const char *package, krb5_data *data)
+{
+    return HEIM_PAC_CINFO_MISSING;
+}
+
+/*
+ *
+ */
+
 static krb5_error_code
 fill_zeros(krb5_context context, krb5_storage *sp, size_t len)
 {
@@ -927,9 +1051,10 @@ _krb5_pac_sign(krb5_context context,
 	       krb5_data *data)
 {
     krb5_error_code ret;
+    krb5_ssize_t sret;
     krb5_storage *sp = NULL, *spdata = NULL;
     uint32_t end;
-    size_t server_size, priv_size;
+    size_t server_size = 0, priv_size = 0;
     uint32_t server_offset = 0, priv_offset = 0;
     uint32_t server_cksumtype = 0, priv_cksumtype = 0;
     int num = 0;
@@ -938,11 +1063,11 @@ _krb5_pac_sign(krb5_context context,
 
     krb5_data_zero(&logon);
 
-    if (p->logon_name == NULL)
+    if (principal != NULL && p->logon_name == NULL)
 	num++;
-    if (p->server_checksum == NULL)
+    if (server_key != NULL && p->server_checksum == NULL)
 	num++;
-    if (p->privsvr_checksum == NULL)
+    if (priv_key != NULL && p->privsvr_checksum == NULL)
 	num++;
 
     if (num) {
@@ -954,17 +1079,17 @@ _krb5_pac_sign(krb5_context context,
 
 	p->pac = ptr;
 
-	if (p->logon_name == NULL) {
+	if (principal != NULL && p->logon_name == NULL) {
 	    p->logon_name = &p->pac->buffers[p->pac->numbuffers++];
 	    memset(p->logon_name, 0, sizeof(*p->logon_name));
 	    p->logon_name->type = PAC_LOGON_NAME;
 	}
-	if (p->server_checksum == NULL) {
+	if (server_key != NULL && p->server_checksum == NULL) {
 	    p->server_checksum = &p->pac->buffers[p->pac->numbuffers++];
 	    memset(p->server_checksum, 0, sizeof(*p->server_checksum));
 	    p->server_checksum->type = PAC_SERVER_CHECKSUM;
 	}
-	if (p->privsvr_checksum == NULL) {
+	if (priv_key != NULL && p->privsvr_checksum == NULL) {
 	    p->privsvr_checksum = &p->pac->buffers[p->pac->numbuffers++];
 	    memset(p->privsvr_checksum, 0, sizeof(*p->privsvr_checksum));
 	    p->privsvr_checksum->type = PAC_PRIVSVR_CHECKSUM;
@@ -972,17 +1097,24 @@ _krb5_pac_sign(krb5_context context,
     }
 
     /* Calculate LOGON NAME */
+    if (principal != NULL) {
     ret = build_logon_name(context, authtime, principal, &logon);
     if (ret)
 	goto out;
+    }
 
     /* Set lengths for checksum */
+    if (server_key != NULL) {
     ret = pac_checksum(context, server_key, &server_cksumtype, &server_size);
     if (ret)
 	goto out;
+    }
+
+    if (p->server_checksum != NULL && priv_key != NULL) {
     ret = pac_checksum(context, priv_key, &priv_cksumtype, &priv_size);
     if (ret)
 	goto out;
+    }
 
     /* Encode PAC */
     sp = krb5_storage_emem();
@@ -1004,8 +1136,7 @@ _krb5_pac_sign(krb5_context context,
     end = PACTYPE_SIZE + (PAC_INFO_BUFFER_SIZE * p->pac->numbuffers);
 
     for (i = 0; i < p->pac->numbuffers; i++) {
-	uint32_t len;
-	size_t sret;
+	size_t len;
 	void *ptr = NULL;
 
 	/* store data */
@@ -1031,7 +1162,7 @@ _krb5_pac_sign(krb5_context context,
 	    ptr = (char *)p->data.data + p->pac->buffers[i].offset_lo;
 
 	    sret = krb5_storage_write(spdata, ptr, len);
-	    if (sret != len) {
+	    if (sret < 0 || (size_t)sret != len) {
 		ret = krb5_enomem(context);
 		goto out;
 	    }
@@ -1040,7 +1171,7 @@ _krb5_pac_sign(krb5_context context,
 
 	/* write header */
 	CHECK(ret, krb5_store_uint32(sp, p->pac->buffers[i].type), out);
-	CHECK(ret, krb5_store_uint32(sp, len), out);
+	CHECK(ret, krb5_store_uint32(sp, (uint32_t)len), out);
 	CHECK(ret, krb5_store_uint32(sp, end), out);
 	CHECK(ret, krb5_store_uint32(sp, 0), out);
 
@@ -1066,8 +1197,8 @@ _krb5_pac_sign(krb5_context context,
 	krb5_set_error_message(context, ret, N_("malloc: out of memory", ""));
 	goto out;
     }
-    ret = krb5_storage_write(sp, d.data, d.length);
-    if (ret != (int)d.length) {
+    sret = krb5_storage_write(sp, d.data, d.length);
+    if (sret != (int)d.length) {
 	krb5_data_free(&d);
 	ret = krb5_enomem(context);
 	goto out;
@@ -1081,6 +1212,7 @@ _krb5_pac_sign(krb5_context context,
     }
 
     /* sign */
+    if (server_key != NULL) {
     ret = create_checksum(context, server_key, server_cksumtype,
 			  d.data, d.length,
 			  (char *)d.data + server_offset, server_size);
@@ -1088,12 +1220,16 @@ _krb5_pac_sign(krb5_context context,
 	krb5_data_free(&d);
 	goto out;
     }
+    }
+
+    if (p->server_checksum != NULL && priv_key != NULL) {
     ret = create_checksum(context, priv_key, priv_cksumtype,
 			  (char *)d.data + server_offset, server_size,
 			  (char *)d.data + priv_offset, priv_size);
     if (ret) {
 	krb5_data_free(&d);
 	goto out;
+    }
     }
 
     /* done */

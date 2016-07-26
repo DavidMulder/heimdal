@@ -40,6 +40,12 @@
 
 #include <engine.h>
 #include <evp.h>
+#ifdef __APPLE_TARGET_EMBEDDED__
+#include <CommonCrypto/CommonRandom.h>
+#else
+#include <CommonCrypto/CommonRandomSPI.h>
+#endif
+
 
 /*
  *
@@ -94,7 +100,7 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
 
     /* signing */
 
-    keylen = RSA_private_encrypt(len, in, res, rsa, padding);
+    keylen = RSA_private_encrypt((int)len, in, res, rsa, padding);
     if (keylen <= 0)
 	errx(1, "failed to private encrypt: %d %d", (int)len, (int)keylen);
 
@@ -105,7 +111,7 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
     if (keylen <= 0)
 	errx(1, "failed to public decrypt: %d", (int)keylen);
 
-    if (keylen != len)
+    if ((size_t)keylen != len)
 	errx(1, "output buffer not same length: %d", (int)keylen);
 
     if (memcmp(res2, in, len) != 0)
@@ -113,7 +119,7 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
 
     /* encryption */
 
-    keylen = RSA_public_encrypt(len, in, res, rsa, padding);
+    keylen = RSA_public_encrypt((int)len, in, res, rsa, padding);
     if (keylen <= 0)
 	errx(1, "failed to public encrypt: %d", (int)keylen);
 
@@ -124,7 +130,7 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
     if (keylen <= 0)
 	errx(1, "failed to private decrypt: %d", (int)keylen);
 
-    if (keylen != len)
+    if ((size_t)keylen != len)
 	errx(1, "output buffer not same length: %d", (int)keylen);
 
     if (memcmp(res2, in, len) != 0)
@@ -132,10 +138,10 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
 
     len2 = keylen;
 
-    if (RSA_sign(NID_sha1, in, len, res, &len2, rsa) != 1)
+    if (RSA_sign(NID_sha1, in, (int)len, res, &len2, rsa) != 1)
 	errx(1, "RSA_sign failed");
 
-    if (RSA_verify(NID_sha1, in, len, res, len2, rsa) != 1)
+    if (RSA_verify(NID_sha1, in, (int)len, res, len2, rsa) != 1)
 	errx(1, "RSA_verify failed");
 
     free(res);
@@ -149,7 +155,7 @@ cb_func(int a, int b, BN_GENCB *c)
 }
 
 static RSA *
-read_key(ENGINE *engine, const char *rsa_key)
+read_key(ENGINE *engine, const char *rsakey)
 {
     unsigned char buf[1024 * 4];
     const unsigned char *p;
@@ -159,20 +165,20 @@ read_key(ENGINE *engine, const char *rsa_key)
 
     f = fopen(rsa_key, "rb");
     if (f == NULL)
-	err(1, "could not open file %s", rsa_key);
+	err(1, "could not open file %s", rsakey);
     rk_cloexec_file(f);
 
     size = fread(buf, 1, sizeof(buf), f);
     fclose(f);
     if (size == 0)
-	err(1, "failed to read file %s", rsa_key);
+	err(1, "failed to read file %s", rsakey);
     if (size == sizeof(buf))
-	err(1, "key too long in file %s!", rsa_key);
+	err(1, "key too long in file %s!", rsakey);
 
     p = buf;
     rsa = d2i_RSAPrivateKey(NULL, &p, size);
     if (rsa == NULL)
-	err(1, "failed to parse key in file %s", rsa_key);
+	err(1, "failed to parse key in file %s", rsakey);
 
     RSA_set_method(rsa, ENGINE_get_RSA(engine));
 
@@ -240,9 +246,6 @@ main(int argc, char **argv)
 
     printf("rsa %s\n", ENGINE_get_RSA(engine)->name);
 
-    if (RAND_status() != 1)
-	errx(77, "no functional random device, refusing to run tests");
-
     if (time_keygen) {
 	struct timeval tv1, tv2;
 	BIGNUM *e;
@@ -301,7 +304,7 @@ main(int argc, char **argv)
 
 	p = emalloc(loops * size);
 
-	RAND_bytes(p, loops * size);
+	CCRandomCopyBytes(kCCRandomDefault, p, loops * size);
 
 	gettimeofday(&tv1, NULL);
 	for (i = 0; i < loops; i++)
@@ -341,19 +344,19 @@ main(int argc, char **argv)
 	for (i = 0; i < 128; i++) {
 	    unsigned char sha1[20];
 
-	    RAND_bytes(sha1, sizeof(sha1));
+	    CCRandomCopyBytes(kCCRandomDefault, sha1, sizeof(sha1));
 	    check_rsa(sha1, sizeof(sha1), rsa, RSA_PKCS1_PADDING);
 	}
 	for (i = 0; i < 128; i++) {
 	    unsigned char des3[21];
 
-	    RAND_bytes(des3, sizeof(des3));
+	    CCRandomCopyBytes(kCCRandomDefault, des3, sizeof(des3));
 	    check_rsa(des3, sizeof(des3), rsa, RSA_PKCS1_PADDING);
 	}
 	for (i = 0; i < 128; i++) {
 	    unsigned char aes[32];
 
-	    RAND_bytes(aes, sizeof(aes));
+	    CCRandomCopyBytes(kCCRandomDefault, aes, sizeof(aes));
 	    check_rsa(aes, sizeof(aes), rsa, RSA_PKCS1_PADDING);
 	}
 
@@ -374,7 +377,7 @@ main(int argc, char **argv)
 
 	BN_GENCB_set(&cb, cb_func, NULL);
 
-	RAND_bytes(&n, sizeof(n));
+	CCRandomCopyBytes(kCCRandomDefault, &n, sizeof(n));
 	n &= 0x1ff;
 	n += 1024;
 
@@ -385,7 +388,7 @@ main(int argc, char **argv)
 
 	for (j = 0; j < 8; j++) {
 	    unsigned char sha1[20];
-	    RAND_bytes(sha1, sizeof(sha1));
+	    CCRandomCopyBytes(kCCRandomDefault, sha1, sizeof(sha1));
 	    check_rsa(sha1, sizeof(sha1), rsa, RSA_PKCS1_PADDING);
 	}
 

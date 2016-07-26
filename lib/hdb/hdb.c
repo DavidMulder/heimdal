@@ -73,6 +73,9 @@ static struct hdb_method methods[] = {
 #if HAVE_NDBM
     { HDB_INTERFACE_VERSION, "ndbm:",	hdb_ndbm_create},
 #endif
+#ifdef HAVE_OPENDIRECTORY
+    { HDB_INTERFACE_VERSION, "od:",	hdb_od_create},
+#endif
     { HDB_INTERFACE_VERSION, "keytab:",	hdb_keytab_create},
 #if defined(OPENLDAP) && !defined(OPENLDAP_MODULE)
     { HDB_INTERFACE_VERSION, "ldap:",	hdb_ldap_create},
@@ -118,7 +121,7 @@ hdb_next_enctype2key(krb5_context context,
 
 krb5_error_code
 hdb_enctype2key(krb5_context context,
-		hdb_entry *e,
+		const hdb_entry *e,
 		krb5_enctype enctype,
 		Key **key)
 {
@@ -345,7 +348,7 @@ find_dynamic_method (krb5_context context,
     }
 
     if (mso->create == NULL) {
-	krb5_errx(context, 1,
+	krb5_warnx(context,
 		  "no entry point function in shared mod %s ",
 		   prefix);
 	dlclose(dl);

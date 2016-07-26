@@ -164,16 +164,21 @@ init_generate (const char *filename, const char *base)
 	     "#ifndef __asn1_common_definitions__\n"
 	     "#define __asn1_common_definitions__\n\n");
     fprintf (headerfile,
+			 "#ifndef __HEIM_BASE_DATA__\n"
+			 "#define __HEIM_BASE_DATA__ 1\n"
+			 "struct heim_base_data {\n"
+			 "    size_t length;\n"
+			 "    void *data;\n"
+			 "};\n"
+			 "#endif\n\n");			 
+    fprintf (headerfile,
 	     "typedef struct heim_integer {\n"
 	     "  size_t length;\n"
 	     "  void *data;\n"
 	     "  int negative;\n"
 	     "} heim_integer;\n\n");
     fprintf (headerfile,
-	     "typedef struct heim_octet_string {\n"
-	     "  size_t length;\n"
-	     "  void *data;\n"
-	     "} heim_octet_string;\n\n");
+	     "typedef struct heim_base_data heim_octet_string;\n\n");
     fprintf (headerfile,
 	     "typedef char *heim_general_string;\n\n"
 	     );
@@ -181,10 +186,10 @@ init_generate (const char *filename, const char *base)
 	     "typedef char *heim_utf8_string;\n\n"
 	     );
     fprintf (headerfile,
-	     "typedef struct heim_octet_string heim_printable_string;\n\n"
+	     "typedef struct heim_base_data heim_printable_string;\n\n"
 	     );
     fprintf (headerfile,
-	     "typedef struct heim_octet_string heim_ia5_string;\n\n"
+	     "typedef struct heim_base_data heim_ia5_string;\n\n"
 	     );
     fprintf (headerfile,
 	     "typedef struct heim_bmp_string {\n"
@@ -210,8 +215,8 @@ init_generate (const char *filename, const char *base)
 	     "  void *data;\n"
 	     "} heim_bit_string;\n\n");
     fprintf (headerfile,
-	     "typedef struct heim_octet_string heim_any;\n"
-	     "typedef struct heim_octet_string heim_any_set;\n\n");
+	     "typedef struct heim_base_data heim_any;\n"
+	     "typedef struct heim_base_data heim_any_set;\n\n");
     fputs("#define ASN1_MALLOC_ENCODE(T, B, BL, S, L, R)                  \\\n"
 	  "  do {                                                         \\\n"
 	  "    (BL) = length_##T((S));                                    \\\n"
@@ -224,6 +229,27 @@ init_generate (const char *filename, const char *base)
 	  "      if((R) != 0) {                                           \\\n"
 	  "        free((B));                                             \\\n"
 	  "        (B) = NULL;                                            \\\n"
+	  "      }                                                        \\\n"
+	  "    }                                                          \\\n"
+	  "  } while (0)\n\n",
+	  headerfile);
+    fputs("#define ASN1_ENCODE_CFMutableData(_TYPE, _CFDATA, S, R)        \\\n"
+	  "  do {                                                         \\\n"
+	  "    size_t __length##_TYPE;			                  \\\n"
+	  "    size_t __size##_TYPE = length_##_TYPE((S));                \\\n"
+	  "    (_CFDATA) = CFDataCreateMutable(NULL, (__size##_TYPE));    \\\n"
+	  "    if((_CFDATA) == NULL) {                                    \\\n"
+	  "      (R) = ENOMEM;                                            \\\n"
+	  "    } else {                                                   \\\n"
+	  "      CFDataSetLength((_CFDATA), (__size##_TYPE));             \\\n"
+	  "      (R) = encode_##_TYPE(((unsigned char*)(CFDataGetMutableBytePtr((_CFDATA)))) + (__size##_TYPE) - 1, (__size##_TYPE), \\\n"
+	  "                       (S), &(__length##_TYPE));               \\\n"
+	  "      if((R) != 0) {                                           \\\n"
+	  "        CFRelease((_CFDATA));                                  \\\n"
+	  "        (_CFDATA) = NULL;                                      \\\n"
+	  "      }                                                        \\\n"
+	  "      if((__size##_TYPE) != (__length##_TYPE)) {               \\\n"
+	  "        asn1_abort(\"internal asn1 error\");                   \\\n"
 	  "      }                                                        \\\n"
 	  "    }                                                          \\\n"
 	  "  } while (0)\n\n",
@@ -265,14 +291,14 @@ init_generate (const char *filename, const char *base)
 	     "#include <string.h>\n"
 	     "#include <errno.h>\n"
 	     "#include <limits.h>\n"
-	     "#include <krb5-types.h>\n",
-	     filename);
+	     "#include <%s>\n",
+	     filename,
+	     type_file_string);
 
     fprintf (templatefile,
 	     "#include <%s>\n"
 	     "#include <%s>\n"
 	     "#include <der.h>\n"
-	     "#include <der-private.h>\n"
 	     "#include <asn1-template.h>\n",
 	     header, privheader);
 
@@ -363,18 +389,21 @@ generate_header_of_codefile(const char *name)
 	     "#include <string.h>\n"
 	     "#include <errno.h>\n"
 	     "#include <limits.h>\n"
-	     "#include <krb5-types.h>\n",
-	     orig_filename);
+	     "#include <%s>\n",
+	     orig_filename,
+	     type_file_string);
 
     fprintf (codefile,
-	     "#include <%s>\n"
-	     "#include <%s>\n",
+	     "#include \"%s\"\n"
+	     "#include \"%s\"\n",
 	     header, privheader);
     fprintf (codefile,
 	     "#include <asn1_err.h>\n"
 	     "#include <der.h>\n"
-	     "#include <der-private.h>\n"
-	     "#include <asn1-template.h>\n"
+	     "#include <asn1-template.h>\n\n");
+
+    if (parse_units_flag)
+	fprintf (codefile,
 	     "#include <parse_units.h>\n\n");
 
 }
@@ -406,7 +435,7 @@ generate_constant (const Symbol *s)
 	break;
     case objectidentifiervalue: {
 	struct objid *o, **list;
-	unsigned int i, len;
+	size_t i, len;
 	char *gen_upper;
 
 	if (!one_code_file)
@@ -433,16 +462,16 @@ generate_constant (const Symbol *s)
 		    o->label ? o->label : "label-less", o->value);
 	}
 
-	fprintf (codefile, "static unsigned oid_%s_variable_num[%d] =  {",
-		 s->gen_name, len);
+	fprintf (codefile, "static unsigned oid_%s_variable_num[%lu] =  {",
+		 s->gen_name, (unsigned long)len);
 	for (i = len ; i > 0; i--) {
 	    fprintf(codefile, "%d%s ", list[i - 1]->value, i > 1 ? "," : "");
 	}
 	fprintf(codefile, "};\n");
 
 	fprintf (codefile, "const heim_oid asn1_oid_%s = "
-		 "{ %d, oid_%s_variable_num };\n\n",
-		 s->gen_name, len, s->gen_name);
+		 "{ %lu, oid_%s_variable_num };\n\n",
+		 s->gen_name, (unsigned long)len, s->gen_name);
 
 	free(list);
 
@@ -468,8 +497,6 @@ generate_constant (const Symbol *s)
 
 	break;
     }
-    default:
-	abort();
     }
 }
 
@@ -582,7 +609,7 @@ define_asn1 (int level, Type *t)
     case TSet:
     case TSequence: {
 	Member *m;
-	int max_width = 0;
+	size_t max_width = 0;
 
 	if(t->type == TChoice)
 	    fprintf(headerfile, "CHOICE {\n");
@@ -597,13 +624,13 @@ define_asn1 (int level, Type *t)
 	max_width += 3;
 	if(max_width < 16) max_width = 16;
 	ASN1_TAILQ_FOREACH(m, t->members, members) {
-	    int width = max_width;
+	    size_t width = max_width;
 	    space(level + 1);
 	    if (m->ellipsis) {
 		fprintf (headerfile, "...");
 	    } else {
 		width -= fprintf(headerfile, "%s", m->name);
-		fprintf(headerfile, "%*s", width, "");
+		fprintf(headerfile, "%*s", (int)width, "");
 		define_asn1(level + 1, m->type);
 		if(m->optional)
 		    fprintf(headerfile, " OPTIONAL");
@@ -680,8 +707,6 @@ define_asn1 (int level, Type *t)
 	space(level);
 	fprintf (headerfile, "NULL");
 	break;
-    default:
-	abort ();
     }
 }
 
@@ -700,10 +725,27 @@ getnewbasename(char **newbasename, int typedefp, const char *basename, const cha
 	err(1, "malloc");
 }
 
+void
+check_preserve_type(const char *name, Type *t)
+{
+    while(t && t->type == TTag)
+	t = t->subtype;
+
+    if (t == NULL)
+	errx(1, "%s: no real type ?", name);
+
+    if (t->type != TSequence && t->type != TChoice)
+	errx(1, "%s: preserve only supportd for SEQUENCE and CHOICE: %d",
+	     name, (int)t->type);
+}
+
 static void
 define_type (int level, const char *name, const char *basename, Type *t, int typedefp, int preservep)
 {
     char *newbasename = NULL;
+
+    if (preservep)
+	check_preserve_type(name, t);
 
     switch (t->type) {
     case TType:
@@ -725,7 +767,7 @@ define_type (int level, const char *name, const char *basename, Type *t, int typ
 	    fprintf (headerfile, "heim_integer %s;\n", name);
 	} else if (t->range->min == INT_MIN && t->range->max == INT_MAX) {
 	    fprintf (headerfile, "int %s;\n", name);
-	} else if (t->range->min == 0 && t->range->max == UINT_MAX) {
+	} else if (t->range->min == 0 && (unsigned int)t->range->max == UINT_MAX) {
 	    fprintf (headerfile, "unsigned int %s;\n", name);
 	} else if (t->range->min == 0 && t->range->max == INT_MAX) {
 	    fprintf (headerfile, "unsigned int %s;\n", name);
@@ -888,13 +930,14 @@ define_type (int level, const char *name, const char *basename, Type *t, int typ
 	    fprintf(headerfile, "heim_octet_string _save;\n");
 	}
 	space(level + 1);
-	fprintf (headerfile, "enum {\n");
+	fprintf (headerfile, "enum %s_enum {\n", newbasename);
 	m = have_ellipsis(t);
 	if (m) {
 	    space(level + 2);
-	    fprintf (headerfile, "%s = 0,\n", m->label);
+	    fprintf (headerfile, "%s = -1,\n", m->label);
 	    first = 0;
 	}
+	fprintf (headerfile, "invalid_choice_%s = 0,\n", newbasename);
 	ASN1_TAILQ_FOREACH(m, t->members, members) {
 	    space(level + 2);
 	    if (m->ellipsis)
@@ -965,8 +1008,6 @@ define_type (int level, const char *name, const char *basename, Type *t, int typ
 	space(level);
 	fprintf (headerfile, "int %s;\n", name);
 	break;
-    default:
-	abort ();
     }
     if (newbasename)
 	free(newbasename);

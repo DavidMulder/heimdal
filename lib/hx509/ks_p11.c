@@ -36,7 +36,11 @@
 #include <dlfcn.h>
 #endif
 
-#ifdef HAVE_DLOPEN
+#ifndef HAVE_DLOPEN
+#undef HEIM_KS_P11
+#endif
+
+#ifdef HEIM_KS_P11
 
 #include "pkcs11.h"
 
@@ -61,10 +65,10 @@ struct p11_slot {
 };
 
 struct p11_module {
+    struct heim_base_uniq base;
     void *dl_handle;
     CK_FUNCTION_LIST_PTR funcs;
     CK_ULONG num_slots;
-    unsigned int ref;
     struct p11_slot *slot;
 };
 
@@ -78,7 +82,6 @@ static int p11_get_session(hx509_context,
 static int p11_put_session(struct p11_module *,
 			   struct p11_slot *,
 			   CK_SESSION_HANDLE);
-static void p11_release_module(struct p11_module *);
 
 static int p11_list_keys(hx509_context,
 			 struct p11_module *,
@@ -92,6 +95,7 @@ static int p11_list_keys(hx509_context,
  */
 
 struct p11_rsa {
+    struct heim_base_uniq base;
     struct p11_module *p;
     struct p11_slot *slot;
     CK_OBJECT_HANDLE private_key;
@@ -208,8 +212,7 @@ static int
 p11_rsa_finish(RSA *rsa)
 {
     struct p11_rsa *p11rsa = RSA_get_app_data(rsa);
-    p11_release_module(p11rsa->p);
-    free(p11rsa);
+    heim_release(p11rsa);
     return 1;
 }
 
@@ -596,6 +599,13 @@ getattr_bn(struct p11_module *p,
     return bn;
 }
 
+static void
+p11rsa_free(void *ptr)
+{
+    struct p11_rsa *p11rsa = ptr;
+    heim_release(p11rsa->p);
+}
+
 static int
 collect_private_key(hx509_context context,
 		    struct p11_module *p, struct p11_slot *slot,
@@ -629,19 +639,13 @@ collect_private_key(hx509_context context,
     rsa->n = getattr_bn(p, slot, session, object, CKA_MODULUS);
     rsa->e = getattr_bn(p, slot, session, object, CKA_PUBLIC_EXPONENT);
 
-    p11rsa = calloc(1, sizeof(*p11rsa));
+    p11rsa = heim_uniq_alloc(sizeof(*p11rsa), "hx509-p11-rsa", p11rsa_free);
     if (p11rsa == NULL)
 	_hx509_abort("out of memory");
 
-    p11rsa->p = p;
+    p11rsa->p = heim_retain(p);
     p11rsa->slot = slot;
     p11rsa->private_key = object;
-
-    if (p->ref == 0)
-	_hx509_abort("pkcs11 ref == 0 on alloc");
-    p->ref++;
-    if (p->ref == UINT_MAX)
-	_hx509_abort("pkcs11 ref == UINT_MAX on alloc");
 
     RSA_set_method(rsa, &p11_rsa_pkcs1_method);
     ret = RSA_set_app_data(rsa, p11rsa);
@@ -667,8 +671,7 @@ collect_private_key(hx509_context context,
 static void
 p11_cert_release(hx509_cert cert, void *ctx)
 {
-    struct p11_module *p = ctx;
-    p11_release_module(p);
+    heim_release(ctx);
 }
 
 
@@ -694,11 +697,7 @@ collect_cert(hx509_context context,
     if (ret)
 	return ret;
 
-    if (p->ref == 0)
-	_hx509_abort("pkcs11 ref == 0 on alloc");
-    p->ref++;
-    if (p->ref == UINT_MAX)
-	_hx509_abort("pkcs11 ref to high");
+    heim_retain(p);
 
     _hx509_cert_set_release(cert, p11_cert_release, p);
 
@@ -786,6 +785,45 @@ out:
     return ret;
 }
 
+static void
+p11_module_free(void *ptr)
+{
+    struct p11_module *p = ptr;
+    unsigned int i;
+
+    for (i = 0; i < p->num_slots; i++) {
+	if (p->slot[i].flags & P11_SESSION_IN_USE)
+	    _hx509_abort("pkcs11 module release while session in use");
+	if (p->slot[i].flags & P11_SESSION) {
+	    P11FUNC(p, CloseSession, (p->slot[i].session));
+	}
+
+	if (p->slot[i].name)
+	    free(p->slot[i].name);
+	if (p->slot[i].pin) {
+	    memset(p->slot[i].pin, 0, strlen(p->slot[i].pin));
+	    free(p->slot[i].pin);
+	}
+	if (p->slot[i].mechs.num) {
+	    free(p->slot[i].mechs.list);
+
+	    if (p->slot[i].mechs.infos) {
+		int j;
+
+		for (j = 0 ; j < p->slot[i].mechs.num ; j++)
+		    free(p->slot[i].mechs.infos[j]);
+		free(p->slot[i].mechs.infos);
+	    }
+	}
+    }
+    free(p->slot);
+
+    if (p->funcs)
+	P11FUNC(p, Finalize, (NULL));
+
+    if (p->dl_handle)
+	dlclose(p->dl_handle);
+}
 
 static int
 p11_init(hx509_context context,
@@ -803,13 +841,11 @@ p11_init(hx509_context context,
     if (list == NULL)
 	return ENOMEM;
 
-    p = calloc(1, sizeof(*p));
+    p = heim_uniq_alloc(sizeof(*p), "hx509-pkcs11-module", p11_module_free);
     if (p == NULL) {
 	free(list);
 	return ENOMEM;
     }
-
-    p->ref = 1;
 
     str = strchr(list, ',');
     if (str)
@@ -927,55 +963,8 @@ p11_init(hx509_context context,
 
     return 0;
  out:
-    p11_release_module(p);
+    heim_release(p);
     return ret;
-}
-
-static void
-p11_release_module(struct p11_module *p)
-{
-    size_t i;
-
-    if (p->ref == 0)
-	_hx509_abort("pkcs11 ref to low");
-    if (--p->ref > 0)
-	return;
-
-    for (i = 0; i < p->num_slots; i++) {
-	if (p->slot[i].flags & P11_SESSION_IN_USE)
-	    _hx509_abort("pkcs11 module release while session in use");
-	if (p->slot[i].flags & P11_SESSION) {
-	    P11FUNC(p, CloseSession, (p->slot[i].session));
-	}
-
-	if (p->slot[i].name)
-	    free(p->slot[i].name);
-	if (p->slot[i].pin) {
-	    memset(p->slot[i].pin, 0, strlen(p->slot[i].pin));
-	    free(p->slot[i].pin);
-	}
-	if (p->slot[i].mechs.num) {
-	    free(p->slot[i].mechs.list);
-
-	    if (p->slot[i].mechs.infos) {
-		size_t j;
-
-		for (j = 0 ; j < p->slot[i].mechs.num ; j++)
-		    free(p->slot[i].mechs.infos[j]);
-		free(p->slot[i].mechs.infos);
-	    }
-	}
-    }
-    free(p->slot);
-
-    if (p->funcs)
-	P11FUNC(p, Finalize, (NULL));
-
-    if (p->dl_handle)
-	dlclose(p->dl_handle);
-
-    memset(p, 0, sizeof(*p));
-    free(p);
 }
 
 static int
@@ -988,7 +977,7 @@ p11_free(hx509_certs certs, void *data)
 	if (p->slot[i].certs)
 	    hx509_certs_free(&p->slot[i].certs);
     }
-    p11_release_module(p);
+    heim_release(p);
     return 0;
 }
 
@@ -1179,12 +1168,12 @@ static struct hx509_keyset_ops keyset_pkcs11 = {
     p11_printinfo
 };
 
-#endif /* HAVE_DLOPEN */
+#endif /* HEIM_KS_P11 */
 
 void
 _hx509_ks_pkcs11_register(hx509_context context)
 {
-#ifdef HAVE_DLOPEN
+#ifdef HEIM_KS_P11
     _hx509_ks_register(context, &keyset_pkcs11);
 #endif
 }

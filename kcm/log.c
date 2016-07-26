@@ -33,37 +33,40 @@
 
 #include "kcm_locl.h"
 
-RCSID("$Id$");
-
-static krb5_log_facility *logf;
+static krb5_log_facility *lfac;
 
 void
 kcm_openlog(void)
 {
     char **s = NULL, **p;
-    krb5_initlog(kcm_context, "kcm", &logf);
+    krb5_initlog(kcm_context, "kcm", &lfac);
     s = krb5_config_get_strings(kcm_context, NULL, "kcm", "logging", NULL);
     if(s == NULL)
 	s = krb5_config_get_strings(kcm_context, NULL, "logging", "kcm", NULL);
     if(s){
 	for(p = s; *p; p++)
-	    krb5_addlog_dest(kcm_context, logf, *p);
+	    krb5_addlog_dest(kcm_context, lfac, *p);
 	krb5_config_free_strings(s);
     }else
-	krb5_addlog_dest(kcm_context, logf, DEFAULT_LOG_DEST);
-    krb5_set_warn_dest(kcm_context, logf);
+	krb5_addlog_dest(kcm_context, lfac, DEFAULT_LOG_DEST);
+    krb5_set_warn_dest(kcm_context, lfac);
 }
+
+#undef __attribute__
+#define __attribute__(X)
 
 char*
 kcm_log_msg_va(int level, const char *fmt, va_list ap)
+     __attribute__ ((format (printf, 2, 0)))
 {
     char *msg;
-    krb5_vlog_msg(kcm_context, logf, &msg, level, fmt, ap);
+    krb5_vlog_msg(kcm_context, lfac, &msg, level, fmt, ap);
     return msg;
 }
 
 char*
 kcm_log_msg(int level, const char *fmt, ...)
+     __attribute__ ((format (printf, 2, 3)))
 {
     va_list ap;
     char *s;
@@ -75,6 +78,7 @@ kcm_log_msg(int level, const char *fmt, ...)
 
 void
 kcm_log(int level, const char *fmt, ...)
+     __attribute__ ((format (printf, 2, 3)))
 {
     va_list ap;
     char *s;

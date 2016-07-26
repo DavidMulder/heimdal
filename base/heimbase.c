@@ -33,29 +33,12 @@
  * SUCH DAMAGE.
  */
 
+#define HEIM_BASE_INTERNAL 1
+
 #include "baselocl.h"
 #include <syslog.h>
 
 static heim_base_atomic_type tidglobal = HEIM_TID_USER;
-
-struct heim_base {
-    heim_type_t isa;
-    heim_base_atomic_type ref_cnt;
-    HEIM_TAILQ_ENTRY(heim_base) autorel;
-    heim_auto_release_t autorelpool;
-    uintptr_t isaextra[3];
-};
-
-/* specialized version of base */
-struct heim_base_mem {
-    heim_type_t isa;
-    heim_base_atomic_type ref_cnt;
-    HEIM_TAILQ_ENTRY(heim_base) autorel;
-    heim_auto_release_t autorelpool;
-    const char *name;
-    void (*dealloc)(void *);
-    uintptr_t isaextra[1];
-};
 
 #define PTR2BASE(ptr) (((struct heim_base *)ptr) - 1)
 #define BASE2PTR(ptr) ((void *)(((struct heim_base *)ptr) + 1))
@@ -224,7 +207,18 @@ heim_cmp(heim_object_t a, heim_object_t b)
     if (isa->cmp)
 	return isa->cmp(a, b);
 
-    return (uintptr_t)a - (uintptr_t)b;
+    if (a == b)
+	return 0;
+    uintptr_t ai = (uintptr_t)a;
+    uintptr_t bi = (uintptr_t)b;
+    while (((int)(ai - bi)) == 0) {
+	ai = ai >> 8;
+	bi = bi >> 8;
+    }
+    int diff = (int)(ai - bi);
+    heim_assert(diff != 0, "pointers are the same ?");
+
+    return diff;
 }
 
 /*
@@ -239,7 +233,7 @@ memory_dealloc(void *ptr)
 	p->dealloc(ptr);
 }
 
-struct heim_type_data memory_object = {
+static struct heim_type_data memory_object = {
     HEIM_TID_MEMORY,
     "memory-object",
     NULL,
@@ -346,33 +340,6 @@ heim_base_once_f(heim_base_once_t *once, void *ctx, void (*func)(void *))
 	HEIMDAL_MUTEX_unlock(&mutex);
     }
 #endif
-}
-
-/**
- * Abort and log the failure (using syslog)
- */
-
-void
-heim_abort(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    heim_abortv(fmt, ap);
-    va_end(ap);
-}
-
-/**
- * Abort and log the failure (using syslog)
- */
-
-void
-heim_abortv(const char *fmt, va_list ap)
-{
-    static char str[1024];
-
-    vsnprintf(str, sizeof(str), fmt, ap);
-    syslog(LOG_ERR, "heim_abort: %s", str);
-    abort();
 }
 
 /*
@@ -556,4 +523,53 @@ heim_auto_release_drain(heim_auto_release_t autorel)
 	HEIMDAL_MUTEX_lock(&autorel->pool_mutex);
     }
     HEIMDAL_MUTEX_unlock(&autorel->pool_mutex);
+}
+
+/**
+ *
+ */
+
+static struct heim_type_data data_object = {
+    HEIM_TID_DATA,
+    "data-object",
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+};
+
+/**
+ * Allocate an data
+ *
+ * @return A new allocated data object, free with heim_release()
+ */
+
+heim_data_t
+heim_data_create(void *indata, size_t len)
+{
+    heim_data_t data;
+
+    data = _heim_alloc_object(&data_object, sizeof(*data) + len);
+    if (data == NULL)
+	return NULL;
+
+    data->data = ((uint8_t *)data) + sizeof(*data);
+    data->length = len;
+
+    memcpy(data->data, indata, data->length);
+
+    return data;
+}
+
+/**
+ * Get type id of an data object
+ *
+ * @return the type id
+ */
+
+heim_tid_t
+heim_data_get_type_id(void)
+{
+    return HEIM_TID_DATA;
 }

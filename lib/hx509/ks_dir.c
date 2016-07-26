@@ -34,6 +34,8 @@
 #include "hx_locl.h"
 #include <dirent.h>
 
+#ifdef HEIM_KS_DIR
+
 /*
  * The DIR keyset module is strange compared to the other modules
  * since it does lazy evaluation and really doesn't keep any local
@@ -214,8 +216,12 @@ static struct hx509_keyset_ops keyset_dir = {
     dir_iter_end
 };
 
+#endif /* HEIM_KS_DIR */
+
 void
 _hx509_ks_dir_register(hx509_context context)
 {
+#ifdef HEIM_KS_DIR
     _hx509_ks_register(context, &keyset_dir);
+#endif
 }

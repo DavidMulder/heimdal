@@ -70,6 +70,13 @@
 #ifdef HAVE_LIBUTIL_H
 #include <libutil.h>
 #endif
+#ifdef HAVE_GETPEERUCRED
+#include <ucred.h>
+#endif
+#ifdef HAVE_DOOR_CREATE
+#include <door.h>
+#include <alloca.h>
+#endif
 #include <ctype.h>
 #include <err.h>
 #include <roken.h>
@@ -77,14 +84,26 @@
 #include <base64.h>
 #include <parse_units.h>
 #include <parse_time.h>
+#include <parse_bytes.h>
 
+#ifdef __APPLE__
+#include <SystemConfiguration/SCPreferences.h>
+#include <dispatch/dispatch.h>
+#include <notify.h>
+#endif
 
 #include <krb5.h>
 #include <heim_threads.h>
-
 #include <heim-ipc.h>
 
+#include <gssapi.h>
+#include <gssapi_spi.h>
+#include <gssapi_ntlm.h>
+
+#include <heimbase.h>
+
 #include "crypto-headers.h"
+
 
 #endif /* __HEADERS_H__ */
 

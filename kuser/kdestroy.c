@@ -33,8 +33,11 @@
 
 #include "kuser_locl.h"
 
+static void usage (int status) __attribute__((noreturn));
+
 static const char *cache;
 static const char *credential;
+static const char *principal_str;
 static int help_flag;
 static int version_flag;
 #ifndef NO_AFS
@@ -47,7 +50,9 @@ struct getargs args[] = {
     { "credential",	0,   arg_string, rk_UNCONST(&credential),
       "remove one credential", "principal" },
     { "cache",		'c', arg_string, rk_UNCONST(&cache), "cache to destroy", "cache" },
+    { "principal",	'p', arg_string, &principal_str, "client credential to destroy", "principal" },
     { "all",		'A', arg_flag, &all_flag, "destroy all caches", NULL },
+    { NULL,		'a', arg_flag, &all_flag, "destroy all caches" },
 #ifndef NO_AFS
     { "unlog",		0,   arg_negative_flag, &unlog_flag,
       "do not destroy tokens", NULL },
@@ -90,7 +95,6 @@ main (int argc, char **argv)
     }
 
     argc -= optidx;
-    argv += optidx;
 
     if (argc != 0)
 	usage (1);
@@ -117,7 +121,23 @@ main (int argc, char **argv)
 	krb5_cccol_cursor_free(context, &cursor);
 
     } else {
-	if(cache == NULL) {
+	if (cache != NULL && principal_str != NULL)
+	    krb5_errx(context, 1, "Can't select on credential "
+		      "and principal at the same time");
+
+	if (principal_str) {
+	    krb5_principal p;
+
+	    ret = krb5_parse_name(context, principal_str, &p);
+	    if (ret)
+		krb5_err(context, 1, ret, "can't parse %s", principal_str);
+	    
+	    ret = krb5_cc_cache_match(context, p, &ccache);
+	    krb5_free_principal(context, p);
+	    if (ret)
+		krb5_err(context, 1, ret, "Can't find cache for %s",
+			 principal_str);
+	} else if(cache == NULL) {
 	    ret = krb5_cc_default(context, &ccache);
 	    if (ret)
 		krb5_err(context, 1, ret, "krb5_cc_default");

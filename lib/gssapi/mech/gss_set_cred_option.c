@@ -33,10 +33,10 @@
 #include "mech_locl.h"
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_set_cred_option (OM_uint32 *minor_status,
-		     gss_cred_id_t *cred_handle,
-		     const gss_OID object,
-		     const gss_buffer_t value)
+gss_set_cred_option (OM_uint32 *__nonnull minor_status,
+		     __nullable gss_cred_id_t * __nullable cred_handle,
+		     __nonnull const gss_OID object,
+		     __nullable const gss_buffer_t value)
 {
 	struct _gss_cred *cred = (struct _gss_cred *) *cred_handle;
 	OM_uint32	major_status = GSS_S_COMPLETE;
@@ -50,11 +50,9 @@ gss_set_cred_option (OM_uint32 *minor_status,
 	if (cred == NULL) {
 		struct _gss_mech_switch *m;
 
-		cred = malloc(sizeof(*cred));
+		cred = _gss_mg_alloc_cred();
 		if (cred == NULL)
 		    return GSS_S_FAILURE;
-
-		HEIM_SLIST_INIT(&cred->gc_mc);
 
 		HEIM_SLIST_FOREACH(m, &_gss_mechs, gm_link) {
 
@@ -105,7 +103,7 @@ gss_set_cred_option (OM_uint32 *minor_status,
 			if (major_status == GSS_S_COMPLETE)
 				one_ok = 1;
 			else
-				_gss_mg_error(m, major_status, *minor_status);
+				_gss_mg_error(m, *minor_status);
 
 		}
 	}

@@ -77,7 +77,7 @@ hdb_process_master_key(krb5_context context,
 	goto fail;
     if(etype != 0)
 	(*mkey)->keytab.keyblock.keytype = etype;
-    (*mkey)->keytab.timestamp = time(NULL);
+    (*mkey)->keytab.timestamp = (uint32_t)time(NULL);
     ret = krb5_crypto_init(context, key, etype, &(*mkey)->crypto);
     if(ret)
 	goto fail;
@@ -288,6 +288,7 @@ hdb_read_master_key(krb5_context context, const char *filename,
     FILE *f;
     unsigned char buf[16];
     krb5_error_code ret;
+    const char *fn;
 
     off_t len;
 
@@ -295,6 +296,10 @@ hdb_read_master_key(krb5_context context, const char *filename,
 
     if(filename == NULL)
 	filename = HDB_DB_DIR "/m-key";
+
+    fn = filename;
+    if (strncmp("FILE:", filename, 5) == 0)
+	filename = filename + 5;
 
     f = fopen(filename, "r");
     if(f == NULL) {
@@ -324,7 +329,7 @@ hdb_read_master_key(krb5_context context, const char *filename,
     } else if(buf[0] == 0x30 && len <= 127 && buf[1] == len - 2) {
 	ret = read_master_encryptionkey(context, filename, mkey);
     } else if(buf[0] == 5 && buf[1] >= 1 && buf[1] <= 2) {
-	ret = read_master_keytab(context, filename, mkey);
+	ret = read_master_keytab(context, fn, mkey);
     } else {
       /*
        * Check both LittleEndian and BigEndian since they key file
@@ -363,7 +368,7 @@ hdb_write_master_key(krb5_context context, const char *filename,
 }
 
 hdb_master_key
-_hdb_find_master_key(uint32_t *mkvno, hdb_master_key mkey)
+_hdb_find_master_key(int32_t *mkvno, hdb_master_key mkey)
 {
     hdb_master_key ret = NULL;
     while(mkey) {
@@ -372,7 +377,7 @@ _hdb_find_master_key(uint32_t *mkvno, hdb_master_key mkey)
 	if(mkvno == NULL) {
 	    if(ret == NULL || mkey->keytab.vno > ret->keytab.vno)
 		ret = mkey;
-	} else if((uint32_t)mkey->keytab.vno == *mkvno)
+	} else if(mkey->keytab.vno == *mkvno)
 	    return mkey;
 	mkey = mkey->next;
     }
@@ -489,7 +494,7 @@ hdb_unseal_keys_kvno(krb5_context context, HDB *db, krb5_kvno kvno,
     Key *tmp_val;
     time_t tmp_set_time;
     unsigned int tmp_len;
-    unsigned int kvno_diff = 0;
+    krb5_kvno kvno_diff = 0;
     krb5_kvno tmp_kvno;
     size_t i, k;
     int exclude_dead = 0;
@@ -501,7 +506,7 @@ hdb_unseal_keys_kvno(krb5_context context, HDB *db, krb5_kvno kvno,
     if ((flags & HDB_F_LIVE_CLNT_KVNOS) || (flags & HDB_F_LIVE_SVC_KVNOS)) {
 	exclude_dead = 1;
 	now = time(NULL);
-	if (HDB_F_LIVE_CLNT_KVNOS)
+	if (flags & HDB_F_LIVE_CLNT_KVNOS)
 	    kvno_diff = hdb_entry_get_kvno_diff_clnt(ent);
 	else
 	    kvno_diff = hdb_entry_get_kvno_diff_svc(ent);
@@ -526,7 +531,7 @@ hdb_unseal_keys_kvno(krb5_context context, HDB *db, krb5_kvno kvno,
 	if (exclude_dead &&
 	    ((ent->max_life != NULL &&
 	      hist_keys->val[i].set_time != NULL &&
-	      (*hist_keys->val[i].set_time) < (now - (*ent->max_life))) ||
+	      (*hist_keys->val[i].set_time) < (KerberosTime)(now - (*ent->max_life))) ||
 	    (hist_keys->val[i].kvno < kvno &&
 	     (kvno - hist_keys->val[i].kvno) > kvno_diff)))
 	    /*

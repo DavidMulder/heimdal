@@ -41,6 +41,10 @@
 #include <sys/un.h>
 #endif
 
+#define __APPLE_USE_RFC_3542 1
+
+#include <netinet/in.h>
+
 #include <sys/poll.h>
 
 #include <ctype.h>
@@ -61,6 +65,8 @@
 
 #include <heim-ipc.h>
 
+#define MAX_PACKET_SIZE (128 * 1024)
+
 #if defined(__APPLE__) && defined(HAVE_GCD)
 #include <mach/mach.h>
 #include <servers/bootstrap.h>
@@ -72,6 +78,8 @@ typedef boolean_t (*dispatch_mig_callback_t)(mach_msg_header_t *message, mach_ms
 
 mach_msg_return_t
 dispatch_mig_server(dispatch_source_t ds, size_t maxmsgsz, dispatch_mig_callback_t callback);
+#else
+#include <dispatch/private.h>
 #endif
 
 #endif
@@ -81,3 +89,13 @@ dispatch_mig_server(dispatch_source_t ds, size_t maxmsgsz, dispatch_mig_callback
 
 int
 _heim_ipc_create_cred(uid_t, gid_t, pid_t, pid_t, heim_icred *);
+
+int
+_heim_ipc_create_network_cred(struct sockaddr *, krb5_socklen_t,
+			      struct sockaddr *, krb5_socklen_t,
+			      heim_icred *);
+void
+_heim_ipc_suspend_timer(void);
+
+void
+_heim_ipc_restart_timer(void);

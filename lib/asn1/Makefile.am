@@ -41,6 +41,7 @@ gen_files_test = asn1_test_asn1.x
 gen_files_digest = asn1_digest_asn1.x
 gen_files_kx509 = asn1_kx509_asn1.x
 
+
 noinst_PROGRAMS = asn1_gen
 
 libexec_heimdal_PROGRAMS = asn1_compile asn1_print
@@ -94,6 +95,7 @@ dist_libasn1base_la_SOURCES =			\
 	der_copy.c				\
 	der_cmp.c				\
 	der_format.c				\
+	fuzzer.c				\
 	heim_asn1.h				\
 	extra.c					\
 	template.c				\

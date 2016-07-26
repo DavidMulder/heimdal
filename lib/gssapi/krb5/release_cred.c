@@ -40,7 +40,6 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_release_cred
 {
     krb5_context context;
     gsskrb5_cred cred;
-    OM_uint32 junk;
 
     *minor_status = 0;
 
@@ -64,9 +63,16 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_release_cred
 	else
 	    krb5_cc_close(context, cred->ccache);
     }
-    gss_release_oid_set(&junk, &cred->mechanisms);
     if (cred->enctypes)
 	free(cred->enctypes);
+#ifdef PKINIT
+    if (cred->cert)
+	hx509_cert_free(cred->cert);
+#endif
+    if (cred->password) {
+	memset(cred->password, 0, strlen(cred->password));
+	free(cred->password);
+    }
     HEIMDAL_MUTEX_unlock(&cred->cred_id_mutex);
     HEIMDAL_MUTEX_destroy(&cred->cred_id_mutex);
     memset(cred, 0, sizeof(*cred));

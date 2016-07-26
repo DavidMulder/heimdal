@@ -137,11 +137,13 @@ _gss_string_to_oid(const char* s, gss_OID oid)
 				}
 			}
 		}
+		if (byte_count == 0)
+			return EINVAL;
 		if (!res) {
 			res = malloc(byte_count);
 			if (!res)
 				return (ENOMEM);
-			oid->length = byte_count;
+			oid->length = (OM_uint32)byte_count;
 			oid->elements = res;
 		}
 	}
@@ -213,8 +215,12 @@ add_builtin(gssapi_mech_interface mech)
 	(*m->gm_mech.gm_inquire_names_for_mech)(&minor_status,
 	    &m->gm_mech.gm_mech_oid, &m->gm_name_types);
 
-    if (m->gm_name_types == NULL)
+    /* give sane defaults */
+    if (m->gm_name_types == NULL) {
 	gss_create_empty_oid_set(&minor_status, &m->gm_name_types);
+	gss_add_oid_set_member(&minor_status, GSS_C_NT_USER_NAME, &m->gm_name_types);
+	gss_add_oid_set_member(&minor_status, GSS_C_NT_HOSTBASED_SERVICE, &m->gm_name_types);
+    }
 
     HEIM_SLIST_INSERT_HEAD(&_gss_mechs, m, gm_link);
     return 0;
@@ -251,9 +257,18 @@ _gss_load_mech(void)
 		return;
 	}
 
-	add_builtin(__gss_krb5_initialize());
-	add_builtin(__gss_spnego_initialize());
+	/* 
+	 * order is reverse order of where they will appear in
+	 * gss_indicate_mechs(), kerberos is first in the list to
+	 * please SAP w/o configuration on what mech to use.
+	 */
+	add_builtin(__gss_pku2u_initialize());
+	add_builtin(__gss_iakerb_initialize());
 	add_builtin(__gss_ntlm_initialize());
+	add_builtin(__gss_scram_initialize());
+	add_builtin(__gss_netlogon_initialize());
+	add_builtin(__gss_spnego_initialize());
+	add_builtin(__gss_krb5_initialize());
 
 #ifdef HAVE_DLOPEN
 	fp = fopen(_PATH_GSS_MECH, "r");
@@ -315,6 +330,8 @@ _gss_load_mech(void)
 			goto bad;
 
 		m->gm_so = so;
+		m->gm_mech_oid = mech_oid;
+		m->gm_mech.gm_name = strdup(name);
 		m->gm_mech.gm_mech_oid = mech_oid;
 		m->gm_mech.gm_flags = 0;
 		m->gm_mech.gm_compat = calloc(1, sizeof(struct gss_mech_compat_desc_struct));
@@ -414,6 +431,7 @@ _gss_load_mech(void)
 		if (m != NULL) {
 			free(m->gm_mech.gm_compat);
 			free(m->gm_mech.gm_mech_oid.elements);
+			free((char *)m->gm_mech.gm_name);
 			free(m);
 		}
 		dlclose(so);
@@ -424,8 +442,8 @@ _gss_load_mech(void)
 	HEIMDAL_MUTEX_unlock(&_gss_mech_mutex);
 }
 
-gssapi_mech_interface
-__gss_get_mechanism(gss_const_OID mech)
+struct gssapi_mech_interface_desc *__nullable
+__gss_get_mechanism(__nonnull gss_const_OID mech)
 {
         struct _gss_mech_switch	*m;
 
@@ -433,6 +451,19 @@ __gss_get_mechanism(gss_const_OID mech)
 	HEIM_SLIST_FOREACH(m, &_gss_mechs, gm_link) {
 		if (gss_oid_equal(&m->gm_mech.gm_mech_oid, mech))
 			return &m->gm_mech;
+	}
+	return NULL;
+}
+
+__nullable gss_OID
+_gss_mg_support_mechanism(__nonnull gss_const_OID mech)
+{
+        struct _gss_mech_switch	*m;
+
+	_gss_load_mech();
+	HEIM_SLIST_FOREACH(m, &_gss_mechs, gm_link) {
+		if (gss_oid_equal(&m->gm_mech.gm_mech_oid, mech))
+			return &m->gm_mech_oid;
 	}
 	return NULL;
 }

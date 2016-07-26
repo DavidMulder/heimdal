@@ -41,6 +41,7 @@ krb5_error_code
 krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
 {
     krb5_kdc_configuration *c;
+    const char *s;
 
     c = calloc(1, sizeof(*c));
     if (c == NULL) {
@@ -60,7 +61,7 @@ krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
     c->allow_anonymous = FALSE;
     c->trpolicy = TRPOLICY_ALWAYS_CHECK;
     c->enable_pkinit = FALSE;
-    c->pkinit_princ_in_cert = TRUE;
+    c->pkinit_princ_in_cert = FALSE;
     c->pkinit_require_binding = TRUE;
     c->db = NULL;
     c->num_db = 0;
@@ -244,6 +245,12 @@ krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
 				    0,
 				    "kdc", "pkinit_dh_min_bits", NULL);
 
+
+    s = krb5_config_get_string(context, NULL,
+			       "kdc", "lkdc_realm", NULL);
+    if (s)
+	c->lkdc_realm = strdup(s);
+
     *config = c;
 
     return 0;
@@ -282,6 +289,6 @@ krb5_kdc_pkinit_config(krb5_context context, krb5_kdc_configuration *config)
 
     }
 
-    return 0;
 #endif /* PKINIT */
+    return 0;
 }

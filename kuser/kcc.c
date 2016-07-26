@@ -35,6 +35,8 @@
 #include <sl.h>
 #include "kcc-commands.h"
 
+static void usage (int ret) __attribute__((noreturn));
+
 krb5_context kcc_context;
 static int version_flag;
 static int help_flag;
@@ -66,6 +68,10 @@ help(void *opt, int argc, char **argv)
 int
 kgetcred(struct kgetcred_options *opt, int argc, char **argv)
 {
+    if(opt->version_flag) {
+	print_version(NULL);
+	exit(0);
+    }
     return 0;
 }
 
@@ -78,6 +84,11 @@ kvno(struct kvno_options *opt, int argc, char **argv)
 {
     struct kgetcred_options k;
     memset(&k, 0, sizeof(k));
+
+    if(opt->version_flag) {
+	print_version(NULL);
+	exit(0);
+    }
 
     k.cache_string = opt->cache_string;
     k.enctype_string = opt->enctype_string;

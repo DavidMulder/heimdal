@@ -31,9 +31,7 @@
  * SUCH DAMAGE.
  */
 
-#ifdef HAVE_CONFIG_H
 #include <config.h>
-#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -445,8 +443,18 @@ static const DH_METHOD dh_null_method = {
     dh_null_generate_params
 };
 
+#ifdef HAVE_CDSA
+extern const DH_METHOD _hc_dh_cdsa_method;
+static const DH_METHOD *dh_default_method = &_hc_dh_cdsa_method;
+#elif defined(HEIM_HC_SF)
+extern const DH_METHOD _hc_dh_sf_method;
+static const DH_METHOD *dh_default_method = &_hc_dh_sf_method;
+#elif defined(HEIM_HC_LTM)
 extern const DH_METHOD _hc_dh_ltm_method;
 static const DH_METHOD *dh_default_method = &_hc_dh_ltm_method;
+#else
+static const DH_METHOD *dh_default_method = &dh_null_method;
+#endif
 
 /**
  * Return the dummy DH implementation.
@@ -516,7 +524,7 @@ int
 i2d_DHparams(DH *dh, unsigned char **pp)
 {
     DHParameter data;
-    size_t size;
+    size_t size = 0;
     int ret;
 
     memset(&data, 0, sizeof(data));
@@ -541,14 +549,13 @@ i2d_DHparams(DH *dh, unsigned char **pp)
 	    return -1;
 	if (len != size) {
 	    abort();
-            return -1;
         }
 
-	memcpy(*pp, p, size);
+	memcpy((char *)*pp, p, size);
 	free(p);
 
 	*pp += size;
     }
 
-    return size;
+    return (int)size;
 }

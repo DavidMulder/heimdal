@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -38,12 +40,16 @@
 #include <gssapi_krb5.h>
 #include <gssapi_spnego.h>
 #include <gssapi_ntlm.h>
+#include <gssapi_spi.h>
 #include "test_common.h"
 
 static char *type_string;
 static char *mech_string;
+static char *cred_string;
 static char *ret_mech_string;
 static char *client_name;
+static char *acceptor_name_string;
+static char *password_string;
 static char *client_password;
 static int dns_canon_flag = -1;
 static int mutual_auth_flag = 0;
@@ -54,63 +60,31 @@ static int getverifymic_flag = 0;
 static int deleg_flag = 0;
 static int policy_deleg_flag = 0;
 static int server_no_deleg_flag = 0;
+static int import_export_flag = 0;
 static int ei_flag = 0;
 static char *gsskrb5_acceptor_identity = NULL;
 static char *session_enctype_string = NULL;
+static char *gsschannel_appl_data = NULL;
 static int client_time_offset = 0;
 static int server_time_offset = 0;
 static int max_loops = 0;
 static char *limit_enctype_string = NULL;
 static int version_flag = 0;
+static int homedir_flag = 1;
+static int verify_pac_flag = 0;
+static int require_pfs_flag = -1;
 static int verbose_flag = 0;
 static int help_flag	= 0;
 
 static krb5_context context;
 static krb5_enctype limit_enctype = 0;
 
-static struct {
-    const char *name;
-    gss_OID oid;
-} o2n[] = {
-    { "krb5", NULL /* GSS_KRB5_MECHANISM */ },
-    { "spnego", NULL /* GSS_SPNEGO_MECHANISM */ },
-    { "ntlm", NULL /* GSS_NTLM_MECHANISM */ },
-    { "sasl-digest-md5", NULL /* GSS_SASL_DIGEST_MD5_MECHANISM */ }
-};
-
-static void
-init_o2n(void)
-{
-    o2n[0].oid = GSS_KRB5_MECHANISM;
-    o2n[1].oid = GSS_SPNEGO_MECHANISM;
-    o2n[2].oid = GSS_NTLM_MECHANISM;
-    o2n[3].oid = GSS_SASL_DIGEST_MD5_MECHANISM;
-}
-
-static gss_OID
-string_to_oid(const char *name)
-{
-    int i;
-    for (i = 0; i < sizeof(o2n)/sizeof(o2n[0]); i++)
-	if (strcasecmp(name, o2n[i].name) == 0)
-	    return o2n[i].oid;
-    errx(1, "name '%s' not unknown", name);
-}
-
-static const char *
-oid_to_string(const gss_OID oid)
-{
-    int i;
-    for (i = 0; i < sizeof(o2n)/sizeof(o2n[0]); i++)
-	if (gss_oid_equal(oid, o2n[i].oid))
-	    return o2n[i].name;
-    return "unknown oid";
-}
-
 static void
 loop(gss_OID mechoid,
-     gss_OID nameoid, const char *target,
+     gss_const_OID nameoid, const char *target,
+     const char *acceptor_name,
      gss_cred_id_t init_cred,
+     gss_channel_bindings_t bindings,
      gss_ctx_id_t *sctx, gss_ctx_id_t *cctx,
      gss_OID *actual_mech,
      gss_cred_id_t *deleg_cred)
@@ -118,11 +92,13 @@ loop(gss_OID mechoid,
     int server_done = 0, client_done = 0;
     int num_loops = 0;
     OM_uint32 maj_stat, min_stat;
-    gss_name_t gss_target_name;
+    gss_name_t gss_target_name = GSS_C_NO_NAME,
+	gss_acceptor_name = GSS_C_NO_NAME;
     gss_buffer_desc input_token, output_token;
-    OM_uint32 flags = 0, ret_cflags, ret_sflags;
-    gss_OID actual_mech_client;
-    gss_OID actual_mech_server;
+    OM_uint32 flags = 0, ret_cflags = 0, ret_sflags = 0;
+    gss_OID actual_mech_client = NULL;
+    gss_OID actual_mech_server = NULL;
+    gss_cred_id_t acceptor_cred = GSS_C_NO_CREDENTIAL;
 
     *actual_mech = GSS_C_NO_OID;
 
@@ -148,6 +124,25 @@ loop(gss_OID mechoid,
     if (GSS_ERROR(maj_stat))
 	err(1, "import name creds failed with: %d", maj_stat);
 
+    if (acceptor_name) {
+	input_token.value = rk_UNCONST(acceptor_name);
+	input_token.length = strlen(acceptor_name);
+
+	maj_stat = gss_import_name(&min_stat,
+				   &input_token,
+				   nameoid,
+				   &gss_acceptor_name);
+	if (GSS_ERROR(maj_stat))
+	    err(1, "import acceptor name creds failed with: %d", maj_stat);
+
+	maj_stat = gss_acquire_cred(&min_stat, gss_acceptor_name,
+				    GSS_C_INDEFINITE, NULL,
+				    GSS_C_ACCEPT, &acceptor_cred,
+				    NULL, NULL);
+	if (maj_stat != GSS_S_COMPLETE)
+	    errx(1, "acquire acceptor cred failed");
+    }
+
     input_token.length = 0;
     input_token.value = NULL;
 
@@ -163,7 +158,7 @@ loop(gss_OID mechoid,
 					mechoid,
 					flags,
 					0,
-					NULL,
+					bindings,
 					&input_token,
 					&actual_mech_client,
 					&output_token,
@@ -189,9 +184,9 @@ loop(gss_OID mechoid,
 
 	maj_stat = gss_accept_sec_context(&min_stat,
 					  sctx,
-					  GSS_C_NO_CREDENTIAL,
+					  acceptor_cred,
 					  &output_token,
-					  GSS_C_NO_CHANNEL_BINDINGS,
+					  bindings,
 					  NULL,
 					  &actual_mech_server,
 					  &input_token,
@@ -217,19 +212,32 @@ loop(gss_OID mechoid,
     if (input_token.length != 0)
 	gss_release_buffer(&min_stat, &input_token);
     gss_release_name(&min_stat, &gss_target_name);
+    gss_release_name(&min_stat, &gss_acceptor_name);
+    gss_release_cred(&min_stat, &acceptor_cred);
 
     if (deleg_flag || policy_deleg_flag) {
 	if (server_no_deleg_flag) {
-	    if (*deleg_cred != GSS_C_NO_CREDENTIAL)
+	    if (deleg_cred && *deleg_cred != GSS_C_NO_CREDENTIAL)
 		errx(1, "got delegated cred but didn't expect one");
-	} else if (*deleg_cred == GSS_C_NO_CREDENTIAL)
+	} else if (deleg_cred && *deleg_cred == GSS_C_NO_CREDENTIAL)
 	    errx(1, "asked for delegarated cred but did get one");
-    } else if (*deleg_cred != GSS_C_NO_CREDENTIAL)
+    } else if (deleg_cred && *deleg_cred != GSS_C_NO_CREDENTIAL)
 	  errx(1, "got deleg_cred cred but didn't ask");
 
     if (gss_oid_equal(actual_mech_server, actual_mech_client) == 0)
 	errx(1, "mech mismatch");
     *actual_mech = actual_mech_server;
+
+    if (!!(ret_sflags & GSS_C_INTEG_FLAG) != !!(ret_cflags & GSS_C_INTEG_FLAG))
+	errx(1, "client and server doesn't have same idea about INTEG: c: %d s: %d ",
+	     !!(ret_cflags & GSS_C_INTEG_FLAG), !!(ret_sflags & GSS_C_INTEG_FLAG));
+
+    if (!!(ret_sflags & GSS_C_CONF_FLAG) != !!(ret_cflags & GSS_C_CONF_FLAG))
+	errx(1, "client and server doesn't have same idea about CONF: c: %d s: %d",
+	     !!(ret_cflags & GSS_C_CONF_FLAG), !!(ret_sflags & GSS_C_CONF_FLAG));
+
+    if (verbose_flag)
+	printf("client and server agree on CONF/INT\n");
 
     if (max_loops && num_loops > max_loops)
 	errx(1, "num loops %d was lager then max loops %d",
@@ -383,7 +391,7 @@ wrapunwrap_iov(gss_ctx_id_t cctx, gss_ctx_id_t sctx, int flags, gss_OID mechoid)
     memcpy(p, iov[5].buffer.value, iov[5].buffer.length);
     p += iov[5].buffer.length;
 
-    assert(p - ((unsigned char *)token.data) == token.length);
+    assert((size_t)(p - ((unsigned char *)token.data)) == token.length);
 
     if ((flags & (USE_SIGN_ONLY|FORCE_IOV)) == 0) {
 	gss_buffer_desc input, output;
@@ -455,6 +463,182 @@ empty_release(void)
     gss_release_oid_set(&junk, &oidset);
 }
 
+static void
+check_inquire_context(gss_ctx_id_t ctx, const char *context_str)
+{
+    OM_uint32 maj_stat, min_stat;
+    gss_name_t source, target;
+
+    maj_stat = gss_inquire_context(&min_stat, ctx, &source, &target,
+				   NULL, NULL, NULL, NULL, NULL);
+    if (maj_stat != GSS_S_COMPLETE)
+	errx(1, "gss_inquire_context(%s): %s", context_str,
+	     gssapi_err(maj_stat, min_stat, NULL));
+
+    if (verbose_flag) {
+	gss_buffer_desc buf;
+
+	if (source) {
+	    maj_stat = gss_display_name(&min_stat, source, &buf, NULL);
+	    if (maj_stat == GSS_S_COMPLETE) {
+		printf("source(%s): %.*s\n", context_str, (int)buf.length, (char*)buf.value);
+		gss_release_buffer(&min_stat, &buf);
+	    } else {
+		printf("source(%s): have not name\n", context_str);
+	    }
+	}
+
+	if (target) {
+	    maj_stat = gss_display_name(&min_stat, target, &buf, NULL);
+	    if (maj_stat == GSS_S_COMPLETE) {
+		printf("target(%s): %.*s\n", context_str, (int)buf.length, (char*)buf.value);
+		gss_release_buffer(&min_stat, &buf);
+	    } else {
+		printf("source(%s): have not name\n", context_str);
+	    }
+	}
+    }
+
+    gss_release_name(&min_stat, &source);
+    gss_release_name(&min_stat, &target);
+}
+
+/*
+ *
+ */
+
+static void
+check_export_import_sec_context(gss_ctx_id_t *initiator, gss_ctx_id_t *acceptor, gss_OID mech)
+{
+    OM_uint32 maj_stat, min_stat;
+    gss_buffer_desc buffer;
+
+    maj_stat = gss_export_sec_context(&min_stat, initiator, &buffer);
+    if (maj_stat != GSS_S_COMPLETE)
+	gssapi_err(maj_stat, min_stat, mech);
+
+    maj_stat = gss_import_sec_context(&min_stat, &buffer, initiator);
+    if (maj_stat != GSS_S_COMPLETE)
+	gssapi_err(maj_stat, min_stat, mech);
+    gss_release_buffer(&min_stat, &buffer);
+
+    wrapunwrap(*initiator, *acceptor, 1, mech);
+    wrapunwrap(*initiator, *acceptor, 0, mech);
+
+    maj_stat = gss_export_sec_context(&min_stat, acceptor, &buffer);
+    if (maj_stat != GSS_S_COMPLETE)
+	gssapi_err(maj_stat, min_stat, mech);
+
+    maj_stat = gss_import_sec_context(&min_stat, &buffer, acceptor);
+    if (maj_stat != GSS_S_COMPLETE)
+	gssapi_err(maj_stat, min_stat, mech);
+    gss_release_buffer(&min_stat, &buffer);
+
+    wrapunwrap(*acceptor, *initiator, 0, mech);
+    wrapunwrap(*acceptor, *initiator, 1, mech);
+}
+
+/*
+ *
+ */
+
+
+static void
+ac_complete(void *ctx, OM_uint32 major, gss_status_id_t status,
+	    gss_cred_id_t cred, gss_OID_set oids, OM_uint32 time_rec)
+{
+    gss_cred_id_t *client_cred = ctx;
+    OM_uint32 junk;
+
+    if (major) {
+	fprintf(stderr, "error: %d", (int)major);
+	gss_release_cred(&junk, &cred);
+	goto out;
+    }
+
+    *client_cred = cred;
+
+ out:
+    gss_release_oid_set(&junk, &oids);
+}
+
+/*
+ *
+ */
+
+static int
+check_sasl_names(void)
+{
+    gss_buffer_desc sasl_name, name, description;
+    OM_uint32 maj_stat, min_stat;
+    gss_OID desired_mech = GSS_C_NO_OID;
+    gss_OID oid = GSS_C_NO_OID;
+    gss_OID_set mech_set;
+    OM_uint32 n; 
+
+    maj_stat = gss_indicate_mechs(&min_stat, &mech_set);
+    if (maj_stat != GSS_S_COMPLETE)
+	gssapi_err(maj_stat, min_stat, GSS_C_NO_OID);
+
+    for (n = 0; n < mech_set->count; n++) {
+
+	desired_mech = &mech_set->elements[n];
+	oid = GSS_C_NO_OID;
+	
+	maj_stat = gss_inquire_saslname_for_mech(&min_stat,
+						 desired_mech,
+						 &sasl_name,
+						 &name,
+						 &description);
+	if (maj_stat)
+	    gssapi_err(maj_stat, min_stat, desired_mech);
+
+	gss_release_buffer(&min_stat, &name);
+	gss_release_buffer(&min_stat, &description);
+
+	maj_stat = gss_inquire_mech_for_saslname(&maj_stat,
+						 &sasl_name,
+						 &oid);
+	if (maj_stat) 
+	    gssapi_err(maj_stat, min_stat, desired_mech);
+
+	gss_release_buffer(&min_stat, &sasl_name);
+#if 0
+	if (!gss_oid_equal(desired_mech, oid))
+	    errx(1, "mech oid not the expected out");
+#endif
+    }
+    
+    gss_release_oid_set(&min_stat, &mech_set);
+
+    return 0;
+}
+
+/*
+ *
+ */
+
+static void
+validate_pfs(gss_ctx_id_t ctx, const char *peer)
+{
+    OM_uint32 min_stat, maj_stat;
+    gss_buffer_set_t ds;
+
+    maj_stat = gss_inquire_sec_context_by_oid(&min_stat,
+					      ctx,
+					      GSS_C_CTX_PFS_X,
+					      &ds);
+    if (maj_stat != GSS_S_COMPLETE || ds->count != 1) {
+	if (require_pfs_flag == 1)
+	    errx(1, "no PFS %s", peer);
+    } else {
+	if (require_pfs_flag == 0)
+	    errx(1, "PFS %s", peer);
+    }
+    
+    gss_release_buffer_set(&min_stat, &ds);
+}
+
 /*
  *
  */
@@ -467,7 +651,10 @@ static struct getargs args[] = {
     {"dns-canonicalize",0,arg_negative_flag, &dns_canon_flag,
      "use dns to canonicalize", NULL },
     {"mutual-auth",0,	arg_flag,	&mutual_auth_flag,"mutual auth", NULL },
+    {"cred-type",0,	arg_string,     &cred_string,  "type of cred", NULL },
     {"client-name", 0,  arg_string,     &client_name, "client name", NULL },
+    {"acceptor-name", 0,  arg_string,   &acceptor_name_string, "acceptor name", NULL },
+    {"password", 0,     arg_string,     &password_string, "password", NULL },
     {"client-password", 0,  arg_string, &client_password, "client password", NULL },
     {"limit-enctype",0,	arg_string,	&limit_enctype_string, "enctype", NULL },
     {"dce-style",0,	arg_flag,	&dce_style_flag, "dce-style", NULL },
@@ -475,6 +662,8 @@ static struct getargs args[] = {
     {"iov", 0, 		arg_flag,	&iov_flag, "wrap/unwrap iov", NULL },
     {"getverifymic",0,	arg_flag,	&getverifymic_flag,
      "get and verify mic", NULL },
+    {"import-export",0,	arg_flag,	&import_export_flag,
+     "test import and export sec context", NULL },
     {"delegate",0,	arg_flag,	&deleg_flag, "delegate credential", NULL },
     {"policy-delegate",0,	arg_flag,	&policy_deleg_flag, "policy delegate credential", NULL },
     {"server-no-delegate",0,	arg_flag,	&server_no_deleg_flag,
@@ -485,6 +674,10 @@ static struct getargs args[] = {
     {"client-time-offset",	0, arg_integer,	&client_time_offset, "time", NULL },
     {"server-time-offset",	0, arg_integer,	&server_time_offset, "time", NULL },
     {"max-loops",	0, arg_integer,	&max_loops, "time", NULL },
+    {"channel-binding",	0, arg_string,	&gsschannel_appl_data, "string", NULL },
+    {"homedir",	0,	arg_negative_flag, &homedir_flag, "don't allow homedir access", NULL },
+    {"verify-pac", 0,	arg_flag, &verify_pac_flag, "verify PAC", NULL },
+    {"require-pfs", 0,	arg_flag, 	&require_pfs_flag, "require that pfs was used", NULL },
     {"version",	0,	arg_flag,	&version_flag, "print version", NULL },
     {"verbose",	'v',	arg_flag,	&verbose_flag, "verbose", NULL },
     {"help",	0,	arg_flag,	&help_flag,  NULL, NULL }
@@ -501,25 +694,26 @@ usage (int ret)
 int
 main(int argc, char **argv)
 {
-    int optind = 0;
+    int optidx = 0;
     OM_uint32 min_stat, maj_stat;
     gss_ctx_id_t cctx, sctx;
     void *ctx;
-    gss_OID nameoid, mechoid, actual_mech, actual_mech2;
+    gss_OID actual_mech, actual_mech2;
+    gss_const_OID nameoid, mechoid;
     gss_cred_id_t client_cred = GSS_C_NO_CREDENTIAL, deleg_cred = GSS_C_NO_CREDENTIAL;
+    gss_channel_bindings_t bindings = GSS_C_NO_CHANNEL_BINDINGS;
+    gss_buffer_desc buffer;
     gss_name_t cname = GSS_C_NO_NAME;
     gss_buffer_desc credential_data = GSS_C_EMPTY_BUFFER;
 
     setprogname(argv[0]);
-
-    init_o2n();
 
     if (krb5_init_context(&context))
 	errx(1, "krb5_init_context");
 
     cctx = sctx = GSS_C_NO_CONTEXT;
 
-    if(getarg(args, sizeof(args) / sizeof(args[0]), argc, argv, &optind))
+    if(getarg(args, sizeof(args) / sizeof(args[0]), argc, argv, &optidx))
 	usage(1);
 
     if (help_flag)
@@ -530,11 +724,14 @@ main(int argc, char **argv)
 	exit(0);
     }
 
-    argc -= optind;
-    argv += optind;
+    argc -= optidx;
+    argv += optidx;
 
     if (argc != 1)
 	usage(1);
+
+    if (!homedir_flag)
+	krb5_set_home_dir_access(NULL, false);
 
     if (dns_canon_flag != -1)
 	gsskrb5_set_dns_canonicalize(dns_canon_flag);
@@ -545,13 +742,20 @@ main(int argc, char **argv)
 	nameoid = GSS_C_NT_HOSTBASED_SERVICE;
     else if (strcmp(type_string, "krb5-principal-name") == 0)
 	nameoid = GSS_KRB5_NT_PRINCIPAL_NAME;
+    else if (strcmp(type_string, "krb5-principal-name-referral") == 0)
+	nameoid = GSS_KRB5_NT_PRINCIPAL_NAME_REFERRAL;
     else
 	errx(1, "%s not suppported", type_string);
 
     if (mech_string == NULL)
 	mechoid = GSS_KRB5_MECHANISM;
-    else
-	mechoid = string_to_oid(mech_string);
+    else {
+	mechoid = gss_name_to_oid(mech_string);
+	if (mechoid == GSS_C_NO_OID)
+	    errx(1, "failed to find mech oid: %s", mech_string);
+    }
+
+
 
     if (gsskrb5_acceptor_identity) {
 	maj_stat = gsskrb5_register_acceptor_identity(gsskrb5_acceptor_identity);
@@ -565,8 +769,24 @@ main(int argc, char **argv)
 	credential_data.length = strlen(client_password);
     }
 
+    if (gsschannel_appl_data) {
+	if (strlen(gsschannel_appl_data) == 4)
+	    errx(1, "make channelbindings not 4 in length");
+
+	bindings = ecalloc(1, sizeof(*bindings));
+	bindings->application_data.value = gsschannel_appl_data;
+	bindings->application_data.length = strlen(gsschannel_appl_data);
+    }
+
     if (client_name) {
 	gss_buffer_desc cn;
+	gss_const_OID credoid = GSS_C_NO_OID;
+
+	if (cred_string) {
+	    credoid = gss_name_to_oid(cred_string);
+	    if (credoid == GSS_C_NO_OID)
+		errx(1, "failed to find cred oid: %s", cred_string);
+	}
 
 	cn.value = client_name;
 	cn.length = strlen(client_name);
@@ -575,9 +795,77 @@ main(int argc, char **argv)
 	if (maj_stat)
 	    errx(1, "gss_import_name: %s",
 		 gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
+
+
+	if (password_string) {
+	    gss_auth_identity_desc identity;
+	    OM_uint32 major;
+	    char *u, *r;
+	    
+	    /*
+	     * set the cred out to the same a mech since gss_acquire_cred_ex_f really wants one.
+	     */
+	    
+	    if (credoid == NULL)
+		credoid = mechoid;
+	    
+	    u = strdup(client_name);
+	    if (u == NULL)
+		errx(1, "out of memory");
+	    
+	    r = strchr(u, '@');
+	    if (r)
+		*r++ = '\0';
+	    else
+		r = NULL;
+
+	    memset(&identity, 0, sizeof(identity));
+
+	    identity.username = u;
+	    identity.realm = r;
+	    identity.password = password_string;
+
+	    major = gss_acquire_cred_ex_f(NULL,
+					  cname,
+					  0,
+					  GSS_C_INDEFINITE,
+					  credoid,
+					  GSS_C_INITIATE,
+					  &identity,
+					  &client_cred,
+					  ac_complete);
+	    if (major)
+		errx(1, "gss_acquire_cred_ex_f: %d", (int)major);
+	    
+	    free(u);
+
+	} else {
+	    gss_OID_set mechs = GSS_C_NULL_OID_SET;
+
+	    if (credoid != GSS_C_NO_OID) {
+		maj_stat = gss_create_empty_oid_set(&min_stat, &mechs);
+		if (maj_stat != GSS_S_COMPLETE)
+		    errx(1, "gss_create_empty_oid_set: %s",
+			 gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
+		
+		maj_stat = gss_add_oid_set_member(&min_stat, credoid, &mechs);
+		if (maj_stat != GSS_S_COMPLETE)
+		    errx(1, "gss_add_oid_set_member: %s",
+			 gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
     }
 
-    if (client_password) {
+	    maj_stat = gss_acquire_cred(&min_stat, cname, 0, mechs,
+					GSS_C_INITIATE, &client_cred, NULL, NULL);
+	    if (GSS_ERROR(maj_stat))
+		errx(1, "gss_import_name: %s",
+		     gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
+
+	    if (mechs != GSS_C_NULL_OID_SET)
+		gss_release_oid_set(&min_stat, &mechs);
+	}
+	gss_release_name(&min_stat, &cname);
+
+    } else if (client_password) {
 	maj_stat = gss_acquire_cred_with_password(&min_stat,
 						  cname,
 						  &credential_data,
@@ -604,6 +892,35 @@ main(int argc, char **argv)
 		 gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
     }
 
+    /*
+     * Check that GSS_C_NT_UUID works with IAKERB
+     */
+    
+    if (client_cred && gss_oid_equal(GSS_IAKERB_MECHANISM, mechoid)) {
+	gss_buffer_set_t buffers;
+	gss_name_t tname;
+	
+	maj_stat = gss_inquire_cred_by_oid(&min_stat, client_cred, GSS_C_NT_UUID, &buffers);
+	if (maj_stat)
+	    errx(1, "failed to find GSS_C_NT_UUID");
+	
+	gss_release_cred(&min_stat, &client_cred);
+	
+	if (buffers->count != 1)
+	    errx(1, "wrong number of buffers for GSS_C_UUID");
+	
+	maj_stat = gss_import_name(&min_stat, &buffers->elements[0], GSS_C_NT_UUID, &tname);
+	if (maj_stat != GSS_S_COMPLETE)
+	    errx(1, "import name failed");
+	
+	maj_stat = gss_acquire_cred(&min_stat, tname, GSS_C_INDEFINITE, NULL, GSS_C_INITIATE, &client_cred, NULL, NULL);
+	if (maj_stat != GSS_S_COMPLETE)
+	    errx(1, "acquire IAKERB failed");
+	
+	gss_release_name(&min_stat, &tname);
+	gss_release_buffer_set(&min_stat, &buffers);
+    }
+
     if (limit_enctype_string) {
 	krb5_error_code ret;
 
@@ -626,24 +943,103 @@ main(int argc, char **argv)
 		 gssapi_err(maj_stat, min_stat, GSS_C_NO_OID));
     }
 
-    loop(mechoid, nameoid, argv[0], client_cred,
+
+    /*
+     * generic tests.
+     */
+
+    ctx = GSS_C_NO_CONTEXT;
+
+    maj_stat = gss_inquire_context(&min_stat,
+				   (__nonnull const gss_ctx_id_t)NULL,
+				   NULL, NULL, NULL, NULL, NULL,
+				   NULL, NULL);
+    if (maj_stat != GSS_S_NO_CONTEXT)
+	errx(1, "gss_inquire_context didn't fail");
+
+    maj_stat = gss_export_sec_context(&min_stat, &cctx, &buffer);
+    if (maj_stat != GSS_S_NO_CONTEXT)
+	errx(1, "gss_export_sec_context didn't fail");
+
+    maj_stat = gss_export_sec_context(&min_stat, &cctx, NULL);
+    if (maj_stat != GSS_S_CALL_INACCESSIBLE_READ)
+	errx(1, "gss_export_sec_context didn't fail");
+
+
+    /*
+     *
+     */
+
+
+    loop(rk_UNCONST(mechoid), nameoid, argv[0], acceptor_name_string, client_cred, bindings,
 	 &sctx, &cctx, &actual_mech, &deleg_cred);
 
     if (verbose_flag)
-	printf("resulting mech: %s\n", oid_to_string(actual_mech));
+	printf("resulting mech: %s\n", gss_oid_to_name(actual_mech));
+
+    check_inquire_context(sctx, "server");
+    check_inquire_context(cctx, "client");
 
     if (ret_mech_string) {
-	gss_OID retoid;
+	gss_const_OID retoid;
 
-	retoid = string_to_oid(ret_mech_string);
+	retoid = gss_name_to_oid(ret_mech_string);
 
 	if (gss_oid_equal(retoid, actual_mech) == 0)
 	    errx(1, "actual_mech mech is not the expected type %s",
 		 ret_mech_string);
     }
 
+    /*
+     *
+     */
+
+    if (verify_pac_flag) {
+	gss_buffer_desc data;
+
+	if (verbose_flag)
+	    printf("checking for a pac...\n");
+
+	maj_stat = gsskrb5_extract_authz_data_from_sec_context(&min_stat,
+							       sctx,
+							       KRB5_AUTHDATA_WIN2K_PAC,
+							       &data);
+	if (maj_stat == GSS_S_COMPLETE) {
+	    krb5_error_code ret;
+	    krb5_pac pac = NULL;
+
+	    if (verbose_flag)
+		printf("...got pac when expecting one\n");
+
+	    ret = krb5_pac_parse(context, data.value, data.length, &pac);
+	    if (ret)
+		krb5_err(context, 1, ret, "failed to parse pac");
+
+	    gss_release_buffer(&min_stat, &data);
+
+	    if (verbose_flag)
+		printf("...manged to parse it\n");
+
+	    krb5_pac_free(context, pac);
+	} else {
+	    errx(1, "we didn't get a PAC");
+	}
+    }
+
+    /*
+     *
+     */
+
+    validate_pfs(sctx, "server");
+    validate_pfs(cctx, "client");
+
     /* XXX should be actual_mech */
-    if (gss_oid_equal(mechoid, GSS_KRB5_MECHANISM)) {
+    if (gss_oid_equal(mechoid, GSS_KRB5_MECHANISM)
+	|| gss_oid_equal(mechoid, GSS_IAKERB_MECHANISM)
+#ifdef PKINIT
+	|| gss_oid_equal(mechoid, GSS_PKU2U_MECHANISM)
+#endif
+	) {
 	time_t time;
 	gss_buffer_desc authz_data;
 	gss_buffer_desc in, out1, out2;
@@ -727,7 +1123,7 @@ main(int argc, char **argv)
 
 	if (maj_stat != GSS_S_COMPLETE)
 	    keyblock2 = NULL;
-	else if (limit_enctype && keyblock->keytype != limit_enctype)
+	else if (limit_enctype && keyblock2->keytype != limit_enctype)
 	    errx(1, "gsskrb5_get_subkey wrong enctype");
 
 	if (keyblock || keyblock2) {
@@ -747,6 +1143,9 @@ main(int argc, char **argv)
 
 	if (session_enctype_string) {
 	    krb5_enctype enctype;
+
+	    if (keyblock == NULL)
+		errx(1, "expected keyblock, didn't get one");
 
 	    ret = krb5_string_to_enctype(context,
 					 session_enctype_string,
@@ -835,6 +1234,83 @@ main(int argc, char **argv)
 
 	wrapunwrap_flag = 1;
 	getverifymic_flag = 1;
+#ifdef ENABLE_NTLM
+    } else if (gss_oid_equal(mechoid, GSS_NTLM_MECHANISM)) {
+
+	gss_buffer_set_t cds, sds;
+	int server_no_session_key = 0,
+	    client_no_session_key = 0;
+
+	maj_stat = gss_inquire_sec_context_by_oid(&min_stat,
+						  sctx,
+						  GSS_NTLM_GET_SESSION_KEY_X,
+						  &sds);
+	if (maj_stat != GSS_S_COMPLETE || sds->count != 1)
+	    server_no_session_key = 1;
+
+	maj_stat = gss_inquire_sec_context_by_oid(&min_stat,
+						  cctx,
+						  GSS_NTLM_GET_SESSION_KEY_X,
+						  &cds);
+	if (maj_stat != GSS_S_COMPLETE || cds->count != 1)
+	    client_no_session_key = 1;
+
+	if (client_no_session_key && server_no_session_key) {
+	    OM_uint32 sflags;
+
+	    sflags = 0;
+	    maj_stat = gss_inquire_context(&min_stat, sctx,
+					   NULL, NULL, NULL, NULL, &sflags, NULL, NULL);
+	    if (maj_stat)
+		errx(1, "inquire_context");
+
+	    if ((sflags & (GSS_C_CONF_FLAG | GSS_C_INTEG_FLAG)) != 0)
+		errx(1, "ntlm: server no key but int|conf flag(s)!");
+
+	    sflags = 0;
+	    maj_stat = gss_inquire_context(&min_stat, cctx,
+					   NULL, NULL, NULL, NULL, &sflags, NULL, NULL);
+	    if (maj_stat)
+		errx(1, "inquire_context");
+
+	    if ((sflags & (GSS_C_CONF_FLAG | GSS_C_INTEG_FLAG)) != 0)
+		errx(1, "ntlm: client no key but int|conf flag(s)!");
+
+	} else if (client_no_session_key) {
+	    errx(1, "ntlm: server had session key, but not server???");
+	} else if (server_no_session_key) {
+	    OM_uint32 sflags = 0;
+
+	    /*
+	     * This case is ok. Even though we didn't negotiated a
+	     * session key, the library hands one out so the client
+	     * can force use it if it wants too, useful for SMB2.
+	     *
+	     * just check that the client doesn't announce it support
+	     * signing in the ntlm flags.
+	     */
+
+	    maj_stat = gss_inquire_context(&min_stat, cctx,
+					   NULL, NULL, NULL, NULL, &sflags, NULL, NULL);
+	    if (maj_stat)
+		errx(1, "inquire_context");
+
+	    if ((sflags & (GSS_C_CONF_FLAG | GSS_C_INTEG_FLAG)) != 0)
+		errx(1, "ntlm: client had key, server not, client had int|conf flag(s)!");
+
+	    warnx("ntlm: server didn't get session key, that's ok");
+	} else {
+	    if (cds->elements[0].length != sds->elements[0].length)
+		errx(1, "key length wrong");
+
+	    if (memcmp(cds->elements[0].value, sds->elements[0].value,
+		       cds->elements[0].length) != 0)
+		errx(1, "key data wrong");
+	}
+
+	gss_release_buffer_set(&min_stat, &sds);
+	gss_release_buffer_set(&min_stat, &cds);
+#endif /* ENABLE_NTLM */
     }
 
     if (wrapunwrap_flag) {
@@ -888,6 +1364,10 @@ main(int argc, char **argv)
     }
 
 
+    if (import_export_flag) {
+	check_export_import_sec_context(&cctx, &sctx, actual_mech);
+    }
+
     gss_delete_sec_context(&min_stat, &cctx, NULL);
     gss_delete_sec_context(&min_stat, &sctx, NULL);
 
@@ -896,9 +1376,18 @@ main(int argc, char **argv)
 	gss_buffer_desc cb;
 
 	if (verbose_flag)
+	    printf("if we delegated, try again, this time o/o catching the cred\n");
+	loop(rk_UNCONST(mechoid), nameoid, argv[0], acceptor_name_string, client_cred, bindings,
+	     &sctx, &cctx, &actual_mech, NULL);
+	gss_delete_sec_context(&min_stat, &cctx, NULL);
+	gss_delete_sec_context(&min_stat, &sctx, NULL);
+
+	if (verbose_flag)
 	    printf("checking actual mech (%s) on delegated cred\n",
-		   oid_to_string(actual_mech));
-	loop(actual_mech, nameoid, argv[0], deleg_cred, &sctx, &cctx, &actual_mech2, &cred2);
+		   gss_oid_to_name(actual_mech));
+	loop(actual_mech, nameoid, argv[0], acceptor_name_string, 
+	     deleg_cred, bindings,
+	     &sctx, &cctx, &actual_mech2, &cred2);
 
 	gss_delete_sec_context(&min_stat, &cctx, NULL);
 	gss_delete_sec_context(&min_stat, &sctx, NULL);
@@ -908,7 +1397,8 @@ main(int argc, char **argv)
 	/* try again using SPNEGO */
 	if (verbose_flag)
 	    printf("checking spnego on delegated cred\n");
-	loop(GSS_SPNEGO_MECHANISM, nameoid, argv[0], deleg_cred, &sctx, &cctx,
+	loop(GSS_SPNEGO_MECHANISM, nameoid, argv[0], acceptor_name_string, 
+	     deleg_cred, bindings, &sctx, &cctx,
 	     &actual_mech2, &cred2);
 
 	gss_delete_sec_context(&min_stat, &cctx, NULL);
@@ -934,8 +1424,9 @@ main(int argc, char **argv)
 
 	    if (verbose_flag)
 		printf("checking actual mech (%s) on export/imported cred\n",
-		       oid_to_string(actual_mech));
-	    loop(actual_mech, nameoid, argv[0], cred2, &sctx, &cctx,
+		       gss_oid_to_name(actual_mech));
+	    loop(actual_mech, nameoid, argv[0], acceptor_name_string, 
+		 cred2, bindings, &sctx, &cctx,
 		 &actual_mech2, &deleg_cred);
 
 	    gss_release_cred(&min_stat, &deleg_cred);
@@ -946,7 +1437,8 @@ main(int argc, char **argv)
 	    /* try again using SPNEGO */
 	    if (verbose_flag)
 		printf("checking SPNEGO on export/imported cred\n");
-	    loop(GSS_SPNEGO_MECHANISM, nameoid, argv[0], cred2, &sctx, &cctx,
+	    loop(GSS_SPNEGO_MECHANISM, nameoid, argv[0], acceptor_name_string, 
+		 cred2, bindings, &sctx, &cctx,
 		 &actual_mech2, &deleg_cred);
 
 	    gss_release_cred(&min_stat, &deleg_cred);
@@ -963,6 +1455,8 @@ main(int argc, char **argv)
     }
 
     empty_release();
+
+    check_sasl_names();
 
     krb5_free_context(context);
 

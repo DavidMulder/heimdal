@@ -41,13 +41,14 @@
 .Nm
 .Bk -words
 .Op Fl c Ar cachefile
-.Op Fl Fl credential= Ns Ar principal
-.Op Fl Fl cache= Ns Ar cachefile
-.Op Fl A | Fl Fl all
-.Op Fl Fl no-unlog
-.Op Fl Fl no-delete-v4
-.Op Fl Fl version
-.Op Fl Fl help
+.Op Fl -credential= Ns Ar principal
+.Op Fl -principal= Ns Ar principal
+.Op Fl -cache= Ns Ar type:name
+.Op Fl A | Fl a | Fl -all
+.Op Fl -no-unlog
+.Op Fl -no-delete-v4
+.Op Fl -version
+.Op Fl -help
 .Ek
 .Sh DESCRIPTION
 .Nm
@@ -59,10 +60,14 @@ Supported options:
 remove
 .Fa principal
 from the credential cache if it exists.
+.It Fl p Ar principal
+.It Fl principal= Ns Ar principal
+The cache with client principal to remove.
 .It Fl c Ar cachefile
-.It Fl cache= Ns Ar cachefile
-The cache file to remove.
+.It Fl cache= Ns Ar type:name
+The cache to remove. If the name is path-like, the cache type cache can be omitted.
 .It Fl A
+.It Fl a
 .It Fl Fl all
 remove all credential caches.
 .It Fl Fl no-unlog

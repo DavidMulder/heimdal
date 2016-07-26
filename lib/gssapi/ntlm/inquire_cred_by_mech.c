@@ -33,8 +33,7 @@
 
 #include "ntlm.h"
 
-OM_uint32 GSSAPI_CALLCONV
-_gss_ntlm_inquire_cred_by_mech (
+OM_uint32 _gss_ntlm_inquire_cred_by_mech (
             OM_uint32 * minor_status,
             const gss_cred_id_t cred_handle,
             const gss_OID mech_type,
@@ -44,15 +43,23 @@ _gss_ntlm_inquire_cred_by_mech (
             gss_cred_usage_t * cred_usage
     )
 {
-    if (minor_status)
-	*minor_status = 0;
-    if (name)
+    if (name) {
+	if (cred_handle) {
+	    OM_uint32 major_status;
+	    major_status = _gss_ntlm_duplicate_name(minor_status, (gss_name_t)cred_handle, (gss_name_t *)name);
+	    if (major_status != GSS_S_COMPLETE)
+		return major_status;
+	} else
 	*name = GSS_C_NO_NAME;
+    }
     if (initiator_lifetime)
-	*initiator_lifetime = 0;
+	*initiator_lifetime = GSS_C_INDEFINITE;
     if (acceptor_lifetime)
 	*acceptor_lifetime = 0;
     if (cred_usage)
-	*cred_usage = 0;
-    return GSS_S_UNAVAILABLE;
+	*cred_usage = GSS_C_INITIATE;
+    if (minor_status)
+	*minor_status = 0;
+
+    return GSS_S_COMPLETE;
 }

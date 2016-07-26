@@ -3,7 +3,7 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
- * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ * Portions Copyright (c) 2009 - 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -118,6 +118,14 @@ struct sockaddr_dl;
 #include <sys/file.h>
 #endif
 
+#ifdef HAVE_NOTIFY_H
+#include <notify.h>
+#endif
+
+#include "heimbase.h"
+#include "heimbasepriv.h"
+#include "heimbase_impl.h"
+
 #include <com_err.h>
 
 #include <heimbase.h>
@@ -156,16 +164,35 @@ struct sockaddr_dl;
 
 #include <krb5_asn1.h>
 
+#if __APPLE__
+
+#include <xpc/xpc.h>
+#if !TARGET_OS_SIMULATOR
+#include <NEHelperClient.h>
+#include <network/private.h>
+#include <ne_session.h>
+#endif /* !TARGET_OS_SIMULATOR */
+
+#endif /* __APPLE__ */
+
+
 struct send_to_kdc;
 
 /* XXX glue for pkinit */
 struct hx509_certs_data;
+struct hx509_cert_data;
+struct hx509_query_data;
 struct krb5_pk_identity;
 struct krb5_pk_cert;
+struct key_data;
 struct ContentInfo;
 struct AlgorithmIdentifier;
 typedef struct krb5_pk_init_ctx_data *krb5_pk_init_ctx;
 struct krb5_dh_moduli;
+struct _krb5_srv_query_ctx;
+struct krb5_fast_state;
+struct _krb5_srp_group;
+struct _krb5_srp;
 
 /* v4 glue */
 struct _krb5_krb_auth_data;
@@ -176,14 +203,17 @@ struct _krb5_krb_auth_data;
 #include <krb5_err.h>
 #include <asn1_err.h>
 #ifdef PKINIT
+#include <heimbase.h>
 #include <hx509.h>
 #endif
 
+#include "heim_threads.h"
 #include "crypto.h"
+#include "dns_sd.h"
 
 #include <krb5-private.h>
 
-#include "heim_threads.h"
+extern const char _krb5_wellknown_lkdc[];
 
 #define ALLOC(X, N) (X) = calloc((N), sizeof(*(X)))
 #define ALLOC_SEQ(X, N) do { (X)->len = (N); ALLOC((X)->val, (N)); } while(0)
@@ -237,9 +267,13 @@ struct _krb5_get_init_creds_opt_private {
     krb5_pk_init_ctx pk_init_ctx;
     krb5_get_init_creds_tristate addressless;
     int flags;
-#define KRB5_INIT_CREDS_CANONICALIZE		1
-#define KRB5_INIT_CREDS_NO_C_CANON_CHECK	2
-#define KRB5_INIT_CREDS_NO_C_NO_EKU_CHECK	4
+#define KRB5_INIT_CREDS_DONE					1
+#define KRB5_INIT_CREDS_CANONICALIZE				2
+#define KRB5_INIT_CREDS_NO_C_CANON_CHECK			4
+#define KRB5_INIT_CREDS_NO_C_NO_EKU_CHECK			8
+#define KRB5_INIT_CREDS_PKU2U					16
+#define KRB5_INIT_CREDS_PKINIT_KX_VALID				32
+#define KRB5_INIT_CREDS_PKINIT_NO_KRBTGT_OTHERNAME_CHECK	64
     struct {
         krb5_gic_process_last_req func;
         void *ctx;
@@ -249,17 +283,21 @@ struct _krb5_get_init_creds_opt_private {
 typedef uint32_t krb5_enctype_set;
 
 typedef struct krb5_context_data {
+    struct heim_base_uniq base;
     krb5_enctype *etypes;
     krb5_enctype *etypes_des;/* deprecated */
     krb5_enctype *as_etypes;
     krb5_enctype *tgs_etypes;
     krb5_enctype *permitted_enctypes;
-    char **default_realms;
+    heim_array_t default_realms;
     time_t max_skew;
     time_t kdc_timeout;
+    time_t host_timeout;
     unsigned max_retries;
     int32_t kdc_sec_offset;
     int32_t kdc_usec_offset;
+    char **config_files;
+    time_t last_config_update;
     krb5_config_section *cf;
     struct et_list *et_list;
     struct krb5_log_facility *warn_dest;
@@ -289,6 +327,8 @@ typedef struct krb5_context_data {
     int default_cc_name_set;
     void *mutex;			/* protects error_string */
     int large_msg_size;
+    int max_msg_size;
+    krb5_deltat tgs_negative_timeout;		/* timeout for TGS negative cache */
     int flags;
 #define KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME	1
 #define KRB5_CTX_F_CHECK_PAC			2
@@ -299,6 +339,7 @@ typedef struct krb5_context_data {
 #ifdef PKINIT
     hx509_context hx509ctx;
 #endif
+    unsigned int num_kdc_requests;
 } krb5_context_data;
 
 #ifndef KRB5_USE_PATH_TOKENS
@@ -307,25 +348,22 @@ typedef struct krb5_context_data {
 #define KRB5_DEFAULT_CCNAME_FILE "FILE:%{TEMP}/krb5cc_%{uid}"
 #endif
 #define KRB5_DEFAULT_CCNAME_API "API:"
-#define KRB5_DEFAULT_CCNAME_KCM_KCM "KCM:%{uid}"
-#define KRB5_DEFAULT_CCNAME_KCM_API "API:%{uid}"
+#define KRB5_DEFAULT_CCNAME_KCM_KCM "KCM:%{uid}-%{asid}"
+#define KRB5_DEFAULT_CCNAME_KCM_API "API:%{uid}-%{asid}"
 
 #define EXTRACT_TICKET_ALLOW_CNAME_MISMATCH		1
 #define EXTRACT_TICKET_ALLOW_SERVER_MISMATCH		2
 #define EXTRACT_TICKET_MATCH_REALM			4
 #define EXTRACT_TICKET_AS_REQ				8
 #define EXTRACT_TICKET_TIMESYNC				16
+#define EXTRACT_TICKET_REQUIRE_ENC_PA			32
 
 /*
  * Configurable options
  */
 
 #ifndef KRB5_DEFAULT_CCTYPE
-#ifdef __APPLE__
-#define KRB5_DEFAULT_CCTYPE (&krb5_acc_ops)
-#else
 #define KRB5_DEFAULT_CCTYPE (&krb5_fcc_ops)
-#endif
 #endif
 
 #ifndef KRB5_ADDRESSLESS_DEFAULT
@@ -334,6 +372,18 @@ typedef struct krb5_context_data {
 
 #ifndef KRB5_FORWARDABLE_DEFAULT
 #define KRB5_FORWARDABLE_DEFAULT TRUE
+#endif
+
+#ifndef KRB5_DNS_DOMAIN_REALM_DEFAULT
+#define KRB5_DNS_DOMAIN_REALM_DEFAULT TRUE
+#endif
+
+#ifndef KRB5_CONFIGURATION_CHANGE_NOTIFY_NAME
+#define KRB5_CONFIGURATION_CHANGE_NOTIFY_NAME "org.h5l.Kerberos.configuration-changed"
+#endif
+
+#ifndef KRB5_FALLBACK_DEFAULT
+#define KRB5_FALLBACK_DEFAULT TRUE
 #endif
 
 #ifdef PKINIT
@@ -355,5 +405,83 @@ enum krb5_pk_type {
 };
 
 #endif /* PKINIT */
+
+struct _krb5_srv_query_ctx;
+
+
+struct srv_reply {
+    struct heim_base_uniq base;
+    uint16_t port;
+    uint16_t priority;
+    int32_t weight;
+    struct _krb5_srv_query_ctx *query;
+    heim_sema_t sema;
+    DNSServiceRef srv_sd;
+    char *hostname;
+    krb5_krbhst_info *hostinfo;
+    struct {
+	unsigned int getAddrDone:1;
+	unsigned int recvIPv4:1;
+	unsigned int recvIPv6:1;
+	unsigned int failedIPv4:1;
+	unsigned int failedIPv6:1;
+    } flags;
+};
+
+struct _krb5_srv_query_ctx {
+    struct heim_base_uniq base;
+    krb5_context context;
+    heim_sema_t sema;
+    struct krb5_krbhst_data *handle;
+    char *domain;
+    int def_port;
+    int proto_num;
+    const char *path;
+
+#ifdef __APPLE__
+    struct {
+	unsigned srvQueryDone:1;
+    } state;
+    int port;
+
+    /* replys */
+    struct srv_reply **array;
+    size_t len;
+#endif
+};
+
+struct krb5_fast_state {
+    enum PA_FX_FAST_REQUEST_enum type;
+    unsigned int flags;
+#define KRB5_FAST_REPLY_KEY_USE_TO_ENCRYPT_THE_REPLY	0x0001
+#define KRB5_FAST_REPLY_KEY_USE_IN_TRANSACTION		0x0002
+#define KRB5_FAST_KDC_REPLY_KEY_REPLACED		0x0004
+#define KRB5_FAST_REPLY_REPLY_VERIFED			0x0008
+#define KRB5_FAST_STRONG				0x0010
+#define KRB5_FAST_EXPECTED				0x0020 /* in exchange with KDC, fast was discovered */
+#define KRB5_FAST_REQUIRED				0x0040 /* fast required by action of caller */
+#define KRB5_FAST_DISABLED				0x0080
+
+#define KRB5_FAST_AP_ARMOR_SERVICE			0x0100
+#define KRB5_FAST_OPTIMISTIC				0x0200  /* Optimistic try, like Anon + PKINIT or service fast bit */
+#define KRB5_FAST_REQUIRE_ENC_PA			0x0400
+
+#define KRB5_FAST_AS_REQ				0x1000
+
+
+    krb5_keyblock *reply_key;
+    krb5_ccache armor_ccache;
+    krb5_auth_context armor_ac;
+    KrbFastArmor *armor_data;
+    krb5_principal armor_service;
+    krb5_crypto armor_crypto;
+    krb5_keyblock armor_key;
+    krb5_keyblock *strengthen_key;
+};
+
+struct krb5_decrypt_tkt_with_subkey_state {
+    krb5_keyblock *subkey;
+    struct krb5_fast_state *fast_state;
+};
 
 #endif /* __KRB5_LOCL_H__ */

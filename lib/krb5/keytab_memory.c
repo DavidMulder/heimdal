@@ -33,6 +33,8 @@
 
 #include "krb5_locl.h"
 
+#ifdef HEIM_KT_MEMORY
+
 /* memory operations -------------------------------------------- */
 
 struct mkt_data {
@@ -234,3 +236,5 @@ const krb5_kt_ops krb5_mkt_ops = {
     mkt_add_entry,
     mkt_remove_entry
 };
+
+#endif /* HEIM_KT_MEMORY */

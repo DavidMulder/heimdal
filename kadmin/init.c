@@ -39,8 +39,8 @@
 
 static kadm5_ret_t
 create_random_entry(krb5_principal princ,
-		    unsigned max_life,
-		    unsigned max_rlife,
+		    krb5_deltat max_life,
+		    krb5_deltat max_rlife,
 		    uint32_t attributes)
 {
     kadm5_principal_ent_rec ent;
@@ -231,6 +231,15 @@ init(struct init_options *opt, int argc, char **argv)
 			    KRB5_KDB_REQUIRES_PRE_AUTH);
 	krb5_free_principal(context, princ);
 
+
+	/* Create `WELLKNOWN/org.h5l.fast-cookie' for FAST cookie */
+	krb5_make_principal(context, &princ, realm,
+			    KRB5_WELLKNOWN_NAME, "org.h5l.fast-cookie", NULL);
+	create_random_entry(princ, 60*60, 60*60,
+			    KRB5_KDB_REQUIRES_PRE_AUTH|
+			    KRB5_KDB_DISALLOW_TGT_BASED|
+			    KRB5_KDB_DISALLOW_ALL_TIX);
+	krb5_free_principal(context, princ);
 
 	/* Create `default' */
 	{

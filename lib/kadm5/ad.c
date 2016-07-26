@@ -509,7 +509,9 @@ static kadm5_ret_t
 kadm5_ad_chpass_principal(void *server_handle,
 			  krb5_principal principal,
 			  int keepold,
-			  const char *password)
+			  const char *password,
+			  int n_ks_tuple,
+			  krb5_key_salt_tuple *ks_tuple)
 {
     kadm5_ad_context *context = server_handle;
     krb5_data result_code_string, result_string;
@@ -566,7 +568,9 @@ static kadm5_ret_t
 kadm5_ad_create_principal(void *server_handle,
 			  kadm5_principal_ent_t entry,
 			  uint32_t mask,
-			  const char *password)
+			  const char *password,
+			  int n_ks_tuple,
+			  krb5_key_salt_tuple *ks_tuple)
 {
     kadm5_ad_context *context = server_handle;
 

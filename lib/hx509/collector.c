@@ -194,7 +194,7 @@ match_localkeyid(hx509_context context,
     if (ret == 0) {
 
 	if (value->private_key)
-	    _hx509_cert_assign_key(cert, value->private_key);
+	    _hx509_cert_set_key(cert, value->private_key);
 	hx509_cert_free(cert);
     }
     return ret;
@@ -231,7 +231,7 @@ match_keys(hx509_context context, struct private_key *value, hx509_certs certs)
 
 	ret = _hx509_match_keys(c, value->private_key);
 	if (ret) {
-	    _hx509_cert_assign_key(c, value->private_key);
+	    _hx509_cert_set_key(c, value->private_key);
 	    hx509_cert_free(c);
 	    found = 0;
 	    break;

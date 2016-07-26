@@ -283,3 +283,48 @@ krb5_get_all_server_addrs (krb5_context context, krb5_addresses *res)
 {
     return get_addrs_int (context, res, LOOP | SCAN_INTERFACES);
 }
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_get_all_any_addrs(krb5_context context, krb5_addresses *res)
+{
+    krb5_error_code ret;
+    krb5_addresses as;
+    krb5_address a;
+    struct sockaddr_storage ss;
+    krb5_socklen_t sa_size;
+    unsigned int n;
+    int types[] = {
+	AF_INET6,
+	AF_INET
+    };
+
+    memset(&a, 0, sizeof(a));
+
+    res->len = 0;
+    res->val = NULL;
+
+    for (n = 0; n < sizeof(types)/sizeof(types[0]); n++) {
+	sa_size = sizeof(ss);
+	ret = krb5_anyaddr(context, types[n], (struct sockaddr *)&ss, &sa_size, 0);
+	if (ret)
+	    continue;
+
+	ret = krb5_sockaddr2address(context, (struct sockaddr *)&ss, &a);
+	if (ret)
+	    continue;
+
+	as.val = &a;
+	as.len = 1;
+	ret = krb5_append_addresses(context, res, &as);
+	krb5_free_address(context, &a);
+	if(ret) {
+	    krb5_free_addresses(context, res);
+	    return ret;
+	}
+    }
+    if (res->len == 0) {
+	krb5_set_error_message(context, ENXIO, N_("no addresses found", ""));
+	return (ENXIO);
+    }
+    return 0;
+}

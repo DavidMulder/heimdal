@@ -160,6 +160,11 @@ ${context} --mech-type=ntlm \
         host@host.test.h5l.se || \
         { exitcode=1 ; echo "test failed"; }
 
+echo "CommonAuth"
+${test_commonauth} || { exitcode=1 ; echo "commonauth failed" ; }
+echo "scram"
+${test_scram} || { exitcode=1 ; echo "scram failed" ; }
+
 trap "" EXIT
 
 echo "killing kdc (${kdcpid})"

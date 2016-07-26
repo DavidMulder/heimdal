@@ -29,19 +29,19 @@
 #include "mech_locl.h"
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_inquire_context(OM_uint32 *minor_status,
-    const gss_ctx_id_t context_handle,
-    gss_name_t *src_name,
-    gss_name_t *targ_name,
-    OM_uint32 *lifetime_rec,
-    gss_OID *mech_type,
-    OM_uint32 *ctx_flags,
-    int *locally_initiated,
-    int *xopen)
+gss_inquire_context(OM_uint32 *__nonnull minor_status,
+    __nonnull const gss_ctx_id_t context_handle,
+    __nullable gss_name_t * __nullable src_name,
+    __nullable gss_name_t * __nullable targ_name,
+    OM_uint32 * __nullable lifetime_rec,
+    __nullable gss_OID * __nullable mech_type,
+    OM_uint32 * __nullable ctx_flags,
+    int * __nullable locally_initiated,
+    int * __nullable xopen)
 {
 	OM_uint32 major_status;
 	struct _gss_context *ctx = (struct _gss_context *) context_handle;
-	gssapi_mech_interface m = ctx->gc_mech;
+	gssapi_mech_interface m;
 	struct _gss_name *name;
 	gss_name_t src_mn, targ_mn;
 
@@ -60,6 +60,13 @@ gss_inquire_context(OM_uint32 *minor_status,
 	    *mech_type = GSS_C_NO_OID;
 	src_mn = targ_mn = GSS_C_NO_NAME;
 
+	if (ctx == NULL || ctx->gc_ctx == NULL) {
+	    *minor_status = 0;
+	    return GSS_S_NO_CONTEXT;
+	}
+
+	m = ctx->gc_mech;
+
 	major_status = m->gm_inquire_context(minor_status,
 	    ctx->gc_ctx,
 	    src_name ? &src_mn : NULL,
@@ -71,12 +78,12 @@ gss_inquire_context(OM_uint32 *minor_status,
 	    xopen);
 
 	if (major_status != GSS_S_COMPLETE) {
-		_gss_mg_error(m, major_status, *minor_status);
+		_gss_mg_error(m, *minor_status);
 		return (major_status);
 	}
 
 	if (src_name) {
-		name = _gss_make_name(m, src_mn);
+		name = _gss_create_name(src_mn, m);
 		if (!name) {
 			if (mech_type)
 				*mech_type = GSS_C_NO_OID;
@@ -88,7 +95,7 @@ gss_inquire_context(OM_uint32 *minor_status,
 	}
 
 	if (targ_name) {
-		name = _gss_make_name(m, targ_mn);
+		name = _gss_create_name(targ_mn, m);
 		if (!name) {
 			if (mech_type)
 				*mech_type = GSS_C_NO_OID;

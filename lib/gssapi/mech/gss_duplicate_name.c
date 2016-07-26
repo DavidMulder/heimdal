@@ -29,14 +29,16 @@
 #include "mech_locl.h"
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_duplicate_name(OM_uint32 *minor_status,
-    const gss_name_t src_name,
-    gss_name_t *dest_name)
+gss_duplicate_name(OM_uint32 *__nonnull minor_status,
+    __nonnull const gss_name_t src_name,
+    __nonnull gss_name_t * __nullable dest_name)
 {
 	OM_uint32		major_status;
 	struct _gss_name	*name = (struct _gss_name *) src_name;
 	struct _gss_name	*new_name;
 	struct _gss_mechanism_name *mn;
+
+	_gss_mg_check_name(src_name);
 
 	*minor_status = 0;
 	*dest_name = GSS_C_NO_NAME;
@@ -59,13 +61,11 @@ gss_duplicate_name(OM_uint32 *minor_status,
 				 mn->gmn_mech_oid, &mn2);
 		}
 	} else {
-		new_name = malloc(sizeof(struct _gss_name));
+		new_name = _gss_create_name(NULL, NULL);
 		if (!new_name) {
 			*minor_status = ENOMEM;
 			return (GSS_S_FAILURE);
 		}
-		memset(new_name, 0, sizeof(struct _gss_name));
-		HEIM_SLIST_INIT(&new_name->gn_mn);
 		*dest_name = (gss_name_t) new_name;
 
 		HEIM_SLIST_FOREACH(mn, &name->gn_mn, gmn_link) {

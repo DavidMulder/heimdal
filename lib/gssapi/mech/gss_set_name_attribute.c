@@ -33,11 +33,11 @@
 #include "mech_locl.h"
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_set_name_attribute(OM_uint32 *minor_status,
-		       gss_name_t input_name,
+gss_set_name_attribute(OM_uint32 *__nonnull minor_status,
+		       __nonnull gss_name_t input_name,
 		       int complete,
-		       gss_buffer_t attr,
-		       gss_buffer_t value)
+		       __nonnull gss_buffer_t attr,
+		       __nullable gss_buffer_t value)
 {
     OM_uint32 major_status = GSS_S_UNAVAILABLE;
     struct _gss_name *name = (struct _gss_name *) input_name;
@@ -60,7 +60,7 @@ gss_set_name_attribute(OM_uint32 *minor_status,
                                                 attr,
                                                 value);
         if (GSS_ERROR(major_status))
-            _gss_mg_error(m, major_status, *minor_status);
+            _gss_mg_error(m, *minor_status);
         else
             break;
     }

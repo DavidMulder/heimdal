@@ -48,7 +48,6 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_inquire_context (
     krb5_context context;
     OM_uint32 ret;
     gsskrb5_ctx ctx = (gsskrb5_ctx)context_handle;
-    gss_name_t name;
 
     if (src_name)
 	*src_name = GSS_C_NO_NAME;
@@ -60,15 +59,25 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_inquire_context (
     HEIMDAL_MUTEX_lock(&ctx->ctx_id_mutex);
 
     if (src_name) {
-	name = (gss_name_t)ctx->source;
-	ret = _gsskrb5_duplicate_name (minor_status, name, src_name);
+	if (ctx->source == NULL) {
+	    ret = KRB5KDC_ERR_CLIENT_NOTYET;
+	    goto failed;
+	}
+	ret = _gsskrb5_duplicate_name(minor_status,
+				      (gss_name_t)ctx->source,
+				      src_name);
 	if (ret)
 	    goto failed;
     }
 
     if (targ_name) {
-	name = (gss_name_t)ctx->target;
-	ret = _gsskrb5_duplicate_name (minor_status, name, targ_name);
+	if (ctx->target == NULL) {
+	    ret = KRB5KDC_ERR_SERVICE_NOTYET;
+	    goto failed;
+	}
+	ret = _gsskrb5_duplicate_name(minor_status,
+				      (gss_name_t)ctx->target,
+				      targ_name);
 	if (ret)
 	    goto failed;
     }
@@ -76,14 +85,14 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_inquire_context (
     if (lifetime_rec) {
 	ret = _gsskrb5_lifetime_left(minor_status,
 				     context,
-				     ctx->lifetime,
+				     ctx->endtime,
 				     lifetime_rec);
 	if (ret)
 	    goto failed;
     }
 
     if (mech_type)
-	*mech_type = GSS_KRB5_MECHANISM;
+	*mech_type = ctx->mech;
 
     if (ctx_flags)
 	*ctx_flags = ctx->flags;

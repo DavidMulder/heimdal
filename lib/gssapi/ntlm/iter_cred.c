@@ -34,13 +34,13 @@
  */
 
 #include "ntlm.h"
+#include <gssapi_spi.h>
 
-void GSSAPI_CALLCONV
+void
 _gss_ntlm_iter_creds_f(OM_uint32 flags,
 		       void *userctx ,
 		       void (*cred_iter)(void *, gss_OID, gss_cred_id_t))
 {
-#ifdef HAVE_KCM
     krb5_error_code ret;
     krb5_context context = NULL;
     krb5_storage *request, *response;
@@ -62,7 +62,9 @@ _gss_ntlm_iter_creds_f(OM_uint32 flags,
     while (1) {
 	uint32_t morep;
 	char *user = NULL, *domain = NULL;
+	kcmuuid_t uuid;
 	ntlm_cred dn;
+	size_t sret;
 
 	ret = krb5_ret_uint32(response, &morep);
 	if (ret) goto out;
@@ -76,6 +78,12 @@ _gss_ntlm_iter_creds_f(OM_uint32 flags,
 	    free(user);
 	    goto out;
 	}
+	sret = krb5_storage_read(response, uuid, sizeof(uuid));
+	if (sret != sizeof(uuid)) {
+	    free(user);
+	    free(domain);
+	    goto out;
+	}
 
 	dn = calloc(1, sizeof(*dn));
 	if (dn == NULL) {
@@ -83,8 +91,10 @@ _gss_ntlm_iter_creds_f(OM_uint32 flags,
 	    free(domain);
 	    goto out;
 	}
-	dn->username = user;
+	dn->user = user;
 	dn->domain = domain;
+	dn->flags = NTLM_UUID;
+	memcpy(dn->uuid, uuid, sizeof(dn->uuid));
 
 	cred_iter(userctx, GSS_NTLM_MECHANISM, (gss_cred_id_t)dn);
     }
@@ -94,6 +104,5 @@ _gss_ntlm_iter_creds_f(OM_uint32 flags,
  done:
     if (context)
 	krb5_free_context(context);
-#endif /* HAVE_KCM */
     (*cred_iter)(userctx, NULL, NULL);
 }

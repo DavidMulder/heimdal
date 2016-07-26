@@ -81,7 +81,9 @@ dist_libhdb_la_SOURCES =			\
 	ext.c					\
 	$(ldap)					\
 	hdb.c					\
+	hdb-mitdb.c				\
 	hdb-sqlite.c				\
+	hdb-od.c				\
 	hdb-keytab.c				\
 	hdb-mitdb.c				\
 	hdb_locl.h				\

@@ -33,6 +33,9 @@
 
 #include "krb5_locl.h"
 
+#undef HEIMDAL_PRINTF_ATTRIBUTE
+#define HEIMDAL_PRINTF_ATTRIBUTE(x)
+
 /**
  * Reset the (potentially uninitalized) krb5_data structure.
  *
@@ -97,7 +100,7 @@ krb5_free_data(krb5_context context,
  */
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
-krb5_data_alloc(krb5_data *p, int len)
+krb5_data_alloc(krb5_data *p, size_t len)
 {
     p->data = malloc(len);
     if(len && p->data == NULL)
@@ -119,7 +122,7 @@ krb5_data_alloc(krb5_data *p, int len)
  */
 
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
-krb5_data_realloc(krb5_data *p, int len)
+krb5_data_realloc(krb5_data *p, size_t len)
 {
     void *tmp;
     tmp = realloc(p->data, len);
@@ -204,8 +207,37 @@ KRB5_LIB_FUNCTION int KRB5_LIB_CALL
 krb5_data_cmp(const krb5_data *data1, const krb5_data *data2)
 {
     if (data1->length != data2->length)
-	return data1->length - data2->length;
+	return (int)(data1->length - data2->length);
     return memcmp(data1->data, data2->data, data1->length);
+}
+
+/**
+ * Print using a printf formater into a krb5_data.
+ * 
+ * NUL is not included in the length, but the string is allocated with
+ * one so its safe to print the string using "%s" if there is no
+ * embedded NULs.
+ *
+ */
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_data_format(krb5_data *data, const char *fmt, ...)
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 2, 3))
+{
+    va_list args;
+    char *str = NULL;
+    int res;
+
+    va_start(args, fmt);
+    res = vasprintf (&str, fmt, args);
+    va_end(args);
+    if (str == NULL || res < 0)
+	return ENOMEM;
+
+    data->length = res;
+    data->data = str;
+
+    return 0;
 }
 
 /**
@@ -223,6 +255,6 @@ KRB5_LIB_FUNCTION int KRB5_LIB_CALL
 krb5_data_ct_cmp(const krb5_data *data1, const krb5_data *data2)
 {
     if (data1->length != data2->length)
-	return data1->length - data2->length;
+	return (int)(data1->length - data2->length);
     return ct_memcmp(data1->data, data2->data, data1->length);
 }

@@ -88,7 +88,7 @@ ENGINE_finish(ENGINE *engine)
     if(engine->destroy)
 	(*engine->destroy)(engine);
 
-    memset(engine, 0, sizeof(engine));
+    memset(engine, 0, sizeof(*engine));
     engine->references = -1;
 
 
@@ -236,9 +236,20 @@ ENGINE_load_builtin_engines(void)
 
     ENGINE_set_id(engine, "builtin");
     ENGINE_set_name(engine,
-		    "Heimdal crypto builtin (ltm) engine version " PACKAGE_VERSION);
+		    "Heimdal crypto builtin engine version " PACKAGE_VERSION);
+#ifdef HAVE_CDSA
+    ENGINE_set_DH(engine, DH_cdsa_method());
+    ENGINE_set_RSA(engine, RSA_cdsa_method());
+#elif defined(HEIM_HC_SF)
+    ENGINE_set_RSA(engine, RSA_sf_method());
+    ENGINE_set_DH(engine, DH_sf_method());
+#elif defined(HEIM_HC_LTM)
     ENGINE_set_RSA(engine, RSA_ltm_method());
     ENGINE_set_DH(engine, DH_ltm_method());
+#else
+    ENGINE_set_RSA(engine, RSA_tfm_method());
+    ENGINE_set_DH(engine, DH_tfm_method());
+#endif
 
     ret = add_engine(engine);
     if (ret != 1)
@@ -378,7 +389,7 @@ ENGINE_by_dso(const char *path, const char *id)
 ENGINE *
 ENGINE_by_id(const char *id)
 {
-    int i;
+    size_t i;
 
     for (i = 0; i < num_engines; i++) {
 	if (strcmp(id, engines[i]->id) == 0) {

@@ -32,30 +32,30 @@
 
 #include "kcm_locl.h"
 
-RCSID("$Id$");
-
 krb5_error_code
 kcm_ccache_refresh(krb5_context context,
 		   kcm_ccache ccache,
-		   krb5_creds **credp)
+		   time_t *expire)
 {
     krb5_error_code ret;
     krb5_creds in, *out;
     krb5_kdc_flags flags;
     krb5_const_realm realm;
     krb5_ccache_data ccdata;
+    struct kcm_creds *kcred;
 
     memset(&in, 0, sizeof(in));
+    *expire = 0;
 
     KCM_ASSERT_VALID(ccache);
 
+    kcm_log(0, "Refresh credentials");
+
     if (ccache->client == NULL) {
 	/* no primary principal */
-	kcm_log(0, "Refresh credentials requested but no client principal");
+	kcm_log(0, "Renew credentials requested but no client principal");
 	return KRB5_CC_NOTFOUND;
     }
-
-    HEIMDAL_MUTEX_lock(&ccache->mutex);
 
     /* Fake up an internal ccache */
     kcm_internal_ccache(context, ccache, &ccdata);
@@ -66,8 +66,7 @@ kcm_ccache_refresh(krb5_context context,
     if (ccache->server != NULL) {
 	ret = krb5_copy_principal(context, ccache->server, &in.server);
 	if (ret) {
-	    kcm_log(0, "Failed to copy service principal: %s",
-		    krb5_get_err_text(context, ret));
+	    kcm_log(0, "Failed to copy service principal: %s", ccache->name);
 	    goto out;
 	}
     } else {
@@ -75,8 +74,7 @@ kcm_ccache_refresh(krb5_context context,
 	ret = krb5_make_principal(context, &in.server, realm,
 				  KRB5_TGS_NAME, realm, NULL);
 	if (ret) {
-	    kcm_log(0, "Failed to make TGS principal for realm %s: %s",
-		    realm, krb5_get_err_text(context, ret));
+	    kcm_log(0, "Failed to make TGS principal for realm %s", realm);
 	    goto out;
 	}
     }
@@ -90,6 +88,20 @@ kcm_ccache_refresh(krb5_context context,
     flags.b.renewable = TRUE;
     flags.b.renew = TRUE;
 
+    /*
+     * Capture the forwardable/proxyable bit from previous matching
+     * service ticket, we can't use initial since that get lost in the
+     * first renewal.
+     */
+
+    for (kcred = ccache->creds; kcred != NULL; kcred = kcred->next) {
+	if (krb5_principal_compare(context, kcred->cred.server, in.server)) {
+	    flags.b.forwardable = kcred->cred.flags.b.forwardable;
+	    flags.b.proxiable = kcred->cred.flags.b.proxiable;
+	    break;
+	}
+    }
+
     ret = krb5_get_kdc_cred(context,
 			    &ccdata,
 			    flags,
@@ -98,26 +110,27 @@ kcm_ccache_refresh(krb5_context context,
 			    &in,
 			    &out);
     if (ret) {
-	kcm_log(0, "Failed to renew credentials for cache %s: %s",
-		ccache->name, krb5_get_err_text(context, ret));
+	kcm_log(0, "Failed to renew credentials for cache %s",
+		ccache->name);
 	goto out;
     }
+
+    *expire = out->times.endtime;
 
     /* Swap them in */
     kcm_ccache_remove_creds_internal(context, ccache);
 
-    ret = kcm_ccache_store_cred_internal(context, ccache, out, 0, credp);
+    ret = kcm_ccache_store_cred_internal(context, ccache, out, NULL, 0);
     if (ret) {
-	kcm_log(0, "Failed to store credentials for cache %s: %s",
-		ccache->name, krb5_get_err_text(context, ret));
+	kcm_log(0, "Failed to store credentials for cache %s",
+		ccache->name);
 	krb5_free_creds(context, out);
 	goto out;
     }
 
     free(out); /* but not contents */
-
 out:
-    HEIMDAL_MUTEX_unlock(&ccache->mutex);
+    krb5_free_principal(context, in.server);
 
     return ret;
 }

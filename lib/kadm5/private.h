@@ -36,10 +36,12 @@
 #ifndef __kadm5_privatex_h__
 #define __kadm5_privatex_h__
 
+#include <gssapi.h>
+
 struct kadm_func {
-    kadm5_ret_t (*chpass_principal) (void *, krb5_principal, int, const char*);
+    kadm5_ret_t (*chpass_principal) (void *, krb5_principal, int, const char*, int, krb5_key_salt_tuple *);
     kadm5_ret_t (*create_principal) (void*, kadm5_principal_ent_t,
-				     uint32_t, const char*);
+				     uint32_t, const char*, int, krb5_key_salt_tuple *);
     kadm5_ret_t (*delete_principal) (void*, krb5_principal);
     kadm5_ret_t (*destroy) (void*);
     kadm5_ret_t (*flush) (void*);
@@ -130,6 +132,19 @@ typedef struct kadm5_ad_context {
     char *base_dn;
 } kadm5_ad_context;
 
+typedef struct kadm5_mit_context {
+    krb5_context context;
+    krb5_boolean my_context;
+    struct kadm_func funcs;
+    /* */
+    char *admin_server;
+    char *realm;
+    int kadmind_port;
+    kadm5_config_params config;
+    krb5_principal caller;
+    void *gsscontext;
+} kadm5_mit_context;
+
 enum kadm_ops {
     kadm_get,
     kadm_delete,
@@ -146,6 +161,36 @@ enum kadm_ops {
 
 #define KADMIN_APPL_VERSION "KADM0.1"
 #define KADMIN_OLD_APPL_VERSION "KADM0.0"
+
+struct _kadm5_xdr_opaque_auth {
+    uint32_t flavor;
+    krb5_data data;
+};
+
+struct _kadm5_xdr_call_header {
+    uint32_t xid;
+    uint32_t rpcvers;
+    uint32_t prog;
+    uint32_t vers;
+    uint32_t proc;
+    struct _kadm5_xdr_opaque_auth cred;
+    krb5_data headercopy;
+    struct _kadm5_xdr_opaque_auth verf;
+};
+
+struct _kadm5_xdr_gcred {
+    uint32_t version;
+    uint32_t proc;
+    uint32_t seq_num;
+    uint32_t service;
+    krb5_data handle;
+};
+
+struct _kadm5_xdr_gacred {
+    uint32_t version;
+    uint32_t auth_msg;
+    krb5_data handle;
+};
 
 #include "kadm5-private.h"
 

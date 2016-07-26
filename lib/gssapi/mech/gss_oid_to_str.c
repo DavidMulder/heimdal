@@ -33,8 +33,28 @@
 
 #include "mech_locl.h"
 
+/**
+ * Turn an mech OID into an name
+ *
+ * Try to turn a OID into a mechanism name. If a matching OID can't be
+ * found, this function will return NULL.
+ *
+ * The caller must free the oid_str buffer with gss_release_buffer()
+ * when done with the string.
+ *	  
+ * @param minor_status an minor status code
+ * @param oid an oid
+ * @param oid_str buffer that will point to a NUL terminated string that is the numreric OID
+ *
+ * @returns a gss major status code
+ *
+ * @ingroup gssapi
+ */
+
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_oid_to_str(OM_uint32 *minor_status, gss_OID oid, gss_buffer_t oid_str)
+gss_oid_to_str(OM_uint32 *__nonnull minor_status,
+	       __nonnull gss_OID oid,
+	       __nonnull gss_buffer_t oid_str)
 {
     int ret;
     size_t size;
@@ -66,20 +86,52 @@ gss_oid_to_str(OM_uint32 *minor_status, gss_OID oid, gss_buffer_t oid_str)
     return GSS_S_COMPLETE;
 }
 
-GSSAPI_LIB_FUNCTION const char * GSSAPI_LIB_CALL
-gss_oid_to_name(gss_const_OID oid)
+/**
+ * Turn an mech OID into an name
+ *
+ * Try to turn a OID into a mechanism name. If a matching OID can't be
+ * found, this function will return NULL.
+ *
+ * @param oid an mechanism oid
+ *
+ * @returns pointer a static strng to a name or NULL when not found.
+ *	  
+ * @ingroup gssapi
+ */
+
+GSSAPI_LIB_FUNCTION const char * __nullable GSSAPI_LIB_CALL
+gss_oid_to_name(__nonnull gss_const_OID oid)
 {
     size_t i;
 
     for (i = 0; _gss_ont_mech[i].oid; i++) {
-	if (gss_oid_equal(oid, _gss_ont_mech[i].oid))
+	if (gss_oid_equal(oid, _gss_ont_mech[i].oid)) {
+	    if (_gss_ont_mech[i].short_desc)
+		return _gss_ont_mech[i].short_desc;
 	    return _gss_ont_mech[i].name;
+    }
     }
     return NULL;
 }
 
-GSSAPI_LIB_FUNCTION gss_OID GSSAPI_LIB_CALL
-gss_name_to_oid(const char *name)
+/**
+ * Turn an mech name into an OID
+ *
+ * Try to turn a string/name into an OID. If a static OID can't be
+ * found, this function will return NULL.
+ * 
+ * WARNING: do _NOT_ call gss_release_oid() on the OID returned.
+ *
+ * @param name name of a OID
+ *
+ * @returns pointer a static OID or GSS_C_NO_OID when not found.
+ *
+ *	  
+ * @ingroup gssapi
+ */
+
+GSSAPI_LIB_FUNCTION __nullable gss_const_OID GSSAPI_LIB_CALL
+gss_name_to_oid(const char *__nonnull name)
 {
     size_t i, partial = (size_t)-1;
 
@@ -94,5 +146,6 @@ gss_name_to_oid(const char *name)
     }
     if (partial != (size_t)-1)
 	return _gss_ont_mech[partial].oid;
+
     return NULL;
 }

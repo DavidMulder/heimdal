@@ -353,16 +353,16 @@ print_entry_long(struct get_entry_data *data, kadm5_principal_ent_t princ)
 {
     char buf[1024];
     struct field_info *f;
-    int width = 0;
+    size_t width = 0;
 
     for(f = data->chead; f != NULL; f = f->next) {
-	int w = strlen(f->header ? f->header : f->ff->def_longheader);
+	size_t w = strlen(f->header ? f->header : f->ff->def_longheader);
 	if(w > width)
 	    width = w;
     }
     for(f = data->chead; f != NULL; f = f->next) {
 	format_field(princ, f->ff->fieldvalue, f->ff->subvalue, buf, sizeof(buf), 0);
-	printf("%*s: %s\n", width, f->header ? f->header : f->ff->def_longheader, buf);
+	printf("%*s: %s\n", (int)width, f->header ? f->header : f->ff->def_longheader, buf);
     }
     printf("\n");
 }
@@ -521,9 +521,7 @@ get_entry(struct get_options *opt, int argc, char **argv)
 int
 list_princs(struct list_options *opt, int argc, char **argv)
 {
-    if(sizeof(struct get_options) != sizeof(struct list_options)) {
-	krb5_warnx(context, "programmer error: sizeof(struct get_options) != sizeof(struct list_options)");
-	return 0;
-    }
+    assert(sizeof(struct get_options) == sizeof(struct list_options));
+
     return getit((struct get_options*)opt, "list", argc, argv);
 }

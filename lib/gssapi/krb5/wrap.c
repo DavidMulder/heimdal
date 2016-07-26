@@ -100,7 +100,7 @@ _gsskrb5i_get_token_key(const gsskrb5_ctx ctx,
 	 * Only use the initiator subkey or ticket session key if an
 	 * acceptor subkey was not required.
 	 */
-	if ((ctx->more_flags & ACCEPTOR_SUBKEY) == 0)
+	if ((ctx->gk5c.flags & GK5C_ACCEPTOR_SUBKEY) == 0)
 	    _gsskrb5i_get_initiator_subkey(ctx, context, key);
     }
     if (*key == NULL) {
@@ -110,6 +110,7 @@ _gsskrb5i_get_token_key(const gsskrb5_ctx ctx,
     return 0;
 }
 
+#if defined(HEIM_KRB5_DES) || defined(HEIM_KRB5_DES3)
 static OM_uint32
 sub_wrap_size (
             OM_uint32 req_output_size,
@@ -126,13 +127,14 @@ sub_wrap_size (
 
     total_len -= req_output_size; /* token length */
     if (total_len < req_output_size) {
-        *max_input_size = (req_output_size - total_len);
+        *max_input_size = (OM_uint32)(req_output_size - total_len);
         (*max_input_size) &= (~(OM_uint32)(blocksize - 1));
     } else {
         *max_input_size = 0;
     }
     return GSS_S_COMPLETE;
 }
+#endif
 
 OM_uint32 GSSAPI_CALLCONV
 _gsskrb5_wrap_size_limit (
@@ -152,7 +154,7 @@ _gsskrb5_wrap_size_limit (
   GSSAPI_KRB5_INIT (&context);
 
   if (ctx->more_flags & IS_CFX)
-      return _gssapi_wrap_size_cfx(minor_status, ctx, context,
+      return _gssapi_wrap_size_cfx(minor_status, &ctx->gk5c, context,
 				   conf_req_flag, qop_req,
 				   req_output_size, max_input_size);
 
@@ -165,27 +167,31 @@ _gsskrb5_wrap_size_limit (
   }
 
   switch (key->keytype) {
+#ifdef HEIM_KRB5_DES
   case KRB5_ENCTYPE_DES_CBC_CRC :
   case KRB5_ENCTYPE_DES_CBC_MD4 :
   case KRB5_ENCTYPE_DES_CBC_MD5 :
-#ifdef HEIM_WEAK_CRYPTO
       ret = sub_wrap_size(req_output_size, max_input_size, 8, 22);
-#else
-      ret = GSS_S_FAILURE;
-#endif
       break;
+#endif
+
+#ifdef HEIM_KRB5_DES3
+  case KRB5_ENCTYPE_DES3_CBC_MD5 :
+  case KRB5_ENCTYPE_DES3_CBC_SHA1 :
+      ret = sub_wrap_size(req_output_size, max_input_size, 8, 34);
+      break;
+#endif
+
+#ifdef HEIM_KRB5_ARCFOUR
   case KRB5_ENCTYPE_ARCFOUR_HMAC_MD5:
   case KRB5_ENCTYPE_ARCFOUR_HMAC_MD5_56:
       ret = _gssapi_wrap_size_arcfour(minor_status, ctx, context,
 				      conf_req_flag, qop_req,
 				      req_output_size, max_input_size, key);
       break;
-  case KRB5_ENCTYPE_DES3_CBC_MD5 :
-  case KRB5_ENCTYPE_DES3_CBC_SHA1 :
-      ret = sub_wrap_size(req_output_size, max_input_size, 8, 34);
-      break;
+#endif
   default :
-      abort();
+      ret = GSS_S_FAILURE;
       break;
   }
   krb5_free_keyblock (context, key);
@@ -193,7 +199,7 @@ _gsskrb5_wrap_size_limit (
   return ret;
 }
 
-#ifdef HEIM_WEAK_CRYPTO
+#ifdef HEIM_KRB5_DES
 
 static OM_uint32
 wrap_des
@@ -209,7 +215,7 @@ wrap_des
            )
 {
   u_char *p;
-  EVP_MD_CTX *md5;
+  CCDigestRef md5;
   u_char hash[16];
   DES_key_schedule schedule;
   EVP_CIPHER_CTX des_ctx;
@@ -267,21 +273,24 @@ wrap_des
   krb5_generate_random_block(p, 8);
   memcpy (p + 8, input_message_buffer->value,
 	  input_message_buffer->length);
-  memset (p + 8 + input_message_buffer->length, padlength, padlength);
+  memset (p + 8 + input_message_buffer->length, (int)padlength, padlength);
 
   /* checksum */
-  md5 = EVP_MD_CTX_create();
-  EVP_DigestInit_ex(md5, EVP_md5(), NULL);
-  EVP_DigestUpdate(md5, p - 24, 8);
-  EVP_DigestUpdate(md5, p, datalen);
-  EVP_DigestFinal_ex(md5, hash, NULL);
-  EVP_MD_CTX_destroy(md5);
+  md5 = CCDigestCreate(kCCDigestMD5);
+  CCDigestUpdate(md5, p - 24, 8);
+  CCDigestUpdate(md5, p, datalen);
+  CCDigestFinal(md5, hash);
+  CCDigestDestroy(md5);
 
   memset (&zero, 0, sizeof(zero));
   memcpy (&deskey, key->keyvalue.data, sizeof(deskey));
+#ifndef __APPLE_PRIVATE__
   DES_set_key_unchecked (&deskey, &schedule);
   DES_cbc_cksum ((void *)hash, (void *)hash, sizeof(hash),
 		 &schedule, &zero);
+#else
+  CCDesCBCCksum(hash, hash, sizeof(hash), deskey, sizeof(deskey), &zero);
+#endif
   memcpy (p - 8, hash, 8);
 
   /* sequence number */
@@ -333,6 +342,8 @@ wrap_des
 }
 
 #endif
+
+#ifdef HEIM_KRB5_DES3
 
 static OM_uint32
 wrap_des3
@@ -402,7 +413,7 @@ wrap_des3
   krb5_generate_random_block(p + 28, 8);
   memcpy (p + 28 + 8, input_message_buffer->value,
 	  input_message_buffer->length);
-  memset (p + 28 + 8 + input_message_buffer->length, padlength, padlength);
+  memset (p + 28 + 8 + input_message_buffer->length, (int)padlength, padlength);
 
   ret = krb5_crypto_init(context, key, 0, &crypto);
   if (ret) {
@@ -461,14 +472,14 @@ wrap_des3
   }
 
   {
-      DES_cblock ivec;
+      unsigned char ivec[8];
 
       memcpy (&ivec, p + 8, 8);
       ret = krb5_encrypt_ivec (context,
 			       crypto,
 			       KRB5_KU_USAGE_SEQ,
 			       seq, 8, &encdata,
-			       &ivec);
+			       ivec);
   }
   krb5_crypto_destroy (context, crypto);
   if (ret) {
@@ -524,6 +535,7 @@ wrap_des3
   *minor_status = 0;
   return GSS_S_COMPLETE;
 }
+#endif
 
 OM_uint32 GSSAPI_CALLCONV
 _gsskrb5_wrap
@@ -547,7 +559,8 @@ _gsskrb5_wrap
   GSSAPI_KRB5_INIT (&context);
 
   if (ctx->more_flags & IS_CFX)
-      return _gssapi_wrap_cfx (minor_status, ctx, context, conf_req_flag,
+      return _gssapi_wrap_cfx (minor_status, &ctx->gk5c,
+			       context, conf_req_flag,
 			       input_message_buffer, conf_state,
 			       output_message_buffer);
 
@@ -560,31 +573,35 @@ _gsskrb5_wrap
   }
 
   switch (key->keytype) {
+#ifdef HEIM_KRB5_DES
   case KRB5_ENCTYPE_DES_CBC_CRC :
   case KRB5_ENCTYPE_DES_CBC_MD4 :
   case KRB5_ENCTYPE_DES_CBC_MD5 :
-#ifdef HEIM_WEAK_CRYPTO
       ret = wrap_des (minor_status, ctx, context, conf_req_flag,
 		      qop_req, input_message_buffer, conf_state,
 		      output_message_buffer, key);
-#else
-      ret = GSS_S_FAILURE;
-#endif
       break;
+#endif
+
+#ifdef HEIM_KRB5_DES3
   case KRB5_ENCTYPE_DES3_CBC_MD5 :
   case KRB5_ENCTYPE_DES3_CBC_SHA1 :
       ret = wrap_des3 (minor_status, ctx, context, conf_req_flag,
 		       qop_req, input_message_buffer, conf_state,
 		       output_message_buffer, key);
       break;
+#endif
+
+#ifdef HEIM_KRB5_ARCFOUR
   case KRB5_ENCTYPE_ARCFOUR_HMAC_MD5:
   case KRB5_ENCTYPE_ARCFOUR_HMAC_MD5_56:
       ret = _gssapi_wrap_arcfour (minor_status, ctx, context, conf_req_flag,
 				  qop_req, input_message_buffer, conf_state,
 				  output_message_buffer, key);
       break;
+#endif
   default :
-      abort();
+      ret = GSS_S_FAILURE;
       break;
   }
   krb5_free_keyblock (context, key);

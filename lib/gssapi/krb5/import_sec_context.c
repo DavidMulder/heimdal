@@ -194,9 +194,9 @@ _gsskrb5_import_sec_context (
     ctx->more_flags = tmp;
     if (krb5_ret_int32 (sp, &tmp))
 	goto failure;
-    ctx->lifetime = tmp;
+    ctx->endtime = tmp;
 
-    ret = _gssapi_msg_order_import(minor_status, sp, &ctx->order);
+    ret = _gssapi_msg_order_import(minor_status, sp, &ctx->gk5c.order);
     if (ret)
         goto failure;
 
@@ -219,8 +219,8 @@ failure:
 	krb5_free_address (context, localp);
     if (remotep)
 	krb5_free_address (context, remotep);
-    if(ctx->order)
-	_gssapi_msg_order_destroy(&ctx->order);
+    if(ctx->gk5c.order)
+	_gssapi_msg_order_destroy(&ctx->gk5c.order);
     HEIMDAL_MUTEX_destroy(&ctx->ctx_id_mutex);
     krb5_storage_free (sp);
     free (ctx);

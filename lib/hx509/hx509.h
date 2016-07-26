@@ -37,6 +37,7 @@
 #define HEIMDAL_HX509_H 1
 
 #include <rfc2459_asn1.h>
+#include <heimbase.h>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -51,6 +52,7 @@ typedef struct hx509_private_key *hx509_private_key;
 typedef struct hx509_private_key_ops hx509_private_key_ops;
 typedef struct hx509_validate_ctx_data *hx509_validate_ctx;
 typedef struct hx509_verify_ctx_data *hx509_verify_ctx;
+typedef struct hx509_evaluate_data *hx509_evaluate;
 typedef struct hx509_revoke_ctx_data *hx509_revoke_ctx;
 typedef struct hx509_query_data hx509_query;
 typedef void * hx509_cursor;

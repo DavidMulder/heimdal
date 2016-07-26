@@ -42,7 +42,8 @@ RCSID("$Id$");
 kadm5_ret_t
 _kadm5_set_keys(kadm5_server_context *context,
 		hdb_entry *ent,
-		const char *password)
+		const char *password,
+		uint32_t n_ks_tuple, krb5_key_salt_tuple *ks_tuple)
 {
     Key *keys;
     size_t num_keys;
@@ -50,13 +51,19 @@ _kadm5_set_keys(kadm5_server_context *context,
 
     ret = hdb_generate_key_set_password(context->context,
 					ent->principal,
-					password, &keys, &num_keys);
+					password, n_ks_tuple, ks_tuple,
+					&keys, &num_keys);
     if (ret)
 	return ret;
 
+
     _kadm5_free_keys (context->context, ent->keys.len, ent->keys.val);
     ent->keys.val = keys;
-    ent->keys.len = num_keys;
+    ent->keys.len = (int)num_keys;
+
+    ret = hdb_entry_set_srp_verifiers(context->context, ent, password, 0);
+    if (ret)
+	return ret;
 
     hdb_entry_set_pw_change_time(context->context, ent, 0);
 
@@ -112,6 +119,8 @@ _kadm5_set_keys2(kadm5_server_context *context,
     int one_key_set = 1;
     int replace_hist_keys = 0;
 
+    assert(n_key_data >= 0);
+
     if (n_key_data == 0) {
 	/* Clear all keys! */
 	ret = hdb_clear_extension(context->context, ent,
@@ -127,7 +136,7 @@ _kadm5_set_keys2(kadm5_server_context *context,
     ext.data.element = choice_HDB_extension_data_hist_keys;
     memset(hist_keys, 0, sizeof (*hist_keys));
 
-    for (i = 0; i < n_key_data; i++) {
+    for (i = 0; i < (size_t)n_key_data; i++) {
 	if (kvno != -1 && kvno != key_data[i].key_data_kvno) {
 	    one_key_set = 0;
 	    break;
@@ -155,7 +164,7 @@ _kadm5_set_keys2(kadm5_server_context *context,
 	    if (ent->kvno == 0)
 		ent->kvno = 1;
 	    /* Below we need key_data[*].kvno to be reasonable */
-	    for (i = 0; i < n_key_data; i++)
+	    for (i = 0; i < (size_t)n_key_data; i++)
 		key_data[i].key_data_kvno = ent->kvno;
 	} else {
 	    /*
@@ -166,7 +175,7 @@ _kadm5_set_keys2(kadm5_server_context *context,
 	}
     }
 
-    for (i = 0; i < n_key_data; i++) {
+    for (i = 0; i < (size_t)n_key_data; i++) {
 	if (key_data[i].key_data_kvno == ent->kvno) {
 	    /* A current key; add to current key set */
 	    setup_Key(&key, &salt, key_data, i);
@@ -189,7 +198,7 @@ _kadm5_set_keys2(kadm5_server_context *context,
 
 	memset(&hkset, 0, sizeof (hkset)); /* set set_time */
 	hkset.kvno = key_data[i].key_data_kvno;
-	for (k = 0; k < n_key_data; k++) {
+	for (k = 0; k < (size_t)n_key_data; k++) {
 	    /* Find all keys of this kvno and add them to the new keyset */
 	    if (key_data[k].key_data_kvno != hkset.kvno)
 		continue;
@@ -330,19 +339,20 @@ _kadm5_set_keys_randomly (kadm5_server_context *context,
 {
    krb5_keyblock *kblock = NULL;
    kadm5_ret_t ret = 0;
-   int des_keyblock;
+   ssize_t des_keyblock;
    size_t i, num_keys;
    Key *keys;
 
    ret = hdb_generate_key_set(context->context, ent->principal,
-			      n_ks_tuple, ks_tuple, &keys, &num_keys, 1);
+			      n_ks_tuple, ks_tuple,
+			      &keys, &num_keys, 1);
    if (ret)
 	return ret;
 
    kblock = malloc(num_keys * sizeof(kblock[0]));
    if (kblock == NULL) {
 	ret = ENOMEM;
-	_kadm5_free_keys (context->context, num_keys, keys);
+	_kadm5_free_keys (context->context, (int)num_keys, keys);
 	return ret;
    }
    memset(kblock, 0, num_keys * sizeof(kblock[0]));
@@ -385,16 +395,16 @@ out:
 	for (i = 0; i < num_keys; ++i)
 	    krb5_free_keyblock_contents (context->context, &kblock[i]);
 	free(kblock);
-	_kadm5_free_keys (context->context, num_keys, keys);
+	_kadm5_free_keys (context->context, (int)num_keys, keys);
 	return ret;
    }
 
    _kadm5_free_keys (context->context, ent->keys.len, ent->keys.val);
    ent->keys.val = keys;
-   ent->keys.len = num_keys;
+   ent->keys.len = (int)num_keys;
    if (n_keys && new_keys) {
        *new_keys     = kblock;
-       *n_keys       = num_keys;
+       *n_keys       = (int)num_keys;
    }
 
    hdb_entry_set_pw_change_time(context->context, ent, 0);

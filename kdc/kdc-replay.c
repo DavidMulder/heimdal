@@ -173,7 +173,7 @@ main(int argc, char **argv)
 	krb5_set_real_time(context, tv.tv_sec, 0);
 
 	ret = krb5_kdc_process_request(context, config, d.data, d.length,
-				       &r, NULL, astr,
+				       &r,  astr,
 				       (struct sockaddr *)&sa, 0);
 	if (ret)
 	    krb5_err(context, 1, ret, "krb5_kdc_process_request");

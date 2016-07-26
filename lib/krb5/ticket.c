@@ -325,6 +325,36 @@ out:
     return ret;
 }
 
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+_krb5_get_ad(krb5_context context,
+	     const AuthorizationData *ad,
+	     krb5_keyblock *sessionkey,
+	     int type,
+	     krb5_data *data)
+{
+    krb5_boolean found = FALSE;
+    krb5_error_code ret;
+
+    krb5_data_zero(data);
+
+    if (ad == NULL) {
+	krb5_set_error_message(context, ENOENT,
+			       N_("No authorization data", ""));
+	return ENOENT; /* XXX */
+    }
+
+    ret = find_type_in_ad(context, type, data, &found, TRUE, sessionkey, ad, 0);
+    if (ret)
+	return ret;
+    if (!found) {
+	krb5_set_error_message(context, ENOENT,
+			       N_("Have no authorization data of type %d", ""),
+			       type);
+	return ENOENT; /* XXX */
+    }
+    return 0;
+}
+
 /**
  * Extract the authorization data type of type from the ticket. Store
  * the field in data. This function is to use for kerberos
@@ -592,10 +622,16 @@ check_client_referral(krb5_context context,
     return 0;
 
 noreferral:
-    if (krb5_principal_compare(context, requested, mapped) == FALSE) {
+    if (krb5_principal_compare(context, requested, mapped) == FALSE &&
+	!rep->enc_part.flags.enc_pa_rep)
+    {
+	char *mname = NULL;
+	krb5_unparse_name(context, mapped, &mname);
 	krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
-			       N_("Not same client principal returned "
-				  "as requested", ""));
+			       N_("Not same client principal returned (%s)"
+				  "as requested", ""),
+			       mname ? mname : "<unknown name>");
+	krb5_xfree(mname);
 	return KRB5KRB_AP_ERR_MODIFIED;
     }
     return 0;
@@ -651,11 +687,11 @@ _krb5_extract_ticket(krb5_context context,
 		     krb5_kdc_rep *rep,
 		     krb5_creds *creds,
 		     krb5_keyblock *key,
-		     krb5_const_pointer keyseed,
 		     krb5_key_usage key_usage,
 		     krb5_addresses *addrs,
 		     unsigned nonce,
 		     unsigned flags,
+		     krb5_data *request,
 		     krb5_decrypt_proc decrypt_proc,
 		     krb5_const_pointer decryptarg)
 {
@@ -673,6 +709,48 @@ _krb5_extract_ticket(krb5_context context,
     ret = (*decrypt_proc)(context, key, key_usage, decryptarg, rep);
     if (ret)
 	goto out;
+
+    if (rep->enc_part.flags.enc_pa_rep && request && (flags & EXTRACT_TICKET_REQUIRE_ENC_PA)) {
+	krb5_crypto crypto = NULL;
+	Checksum cksum;
+	PA_DATA *pa = NULL;
+	int idx = 0;
+
+	_krb5_debugx(context, 5, "processing enc-ap-rep");
+
+	if (rep->enc_part.encrypted_pa_data == NULL ||
+	    (pa = krb5_find_padata(rep->enc_part.encrypted_pa_data->val,
+				   rep->enc_part.encrypted_pa_data->len,
+				   KRB5_PADATA_REQ_ENC_PA_REP,
+				   &idx)) == NULL)
+	{
+	    _krb5_debugx(context, 5, "KRB5_PADATA_REQ_ENC_PA_REP missing");
+	    ret = KRB5KRB_AP_ERR_MODIFIED;
+	    goto out;
+	}
+	
+	ret = krb5_crypto_init(context, key, 0, &crypto);
+	if (ret)
+	    goto out;
+	
+	ret = decode_Checksum(pa->padata_value.data,
+			      pa->padata_value.length,
+			      &cksum, NULL);
+	if (ret) {
+	    krb5_crypto_destroy(context, crypto);
+	    goto out;
+	}
+	
+	ret = krb5_verify_checksum(context, crypto,
+				   KRB5_KU_AS_REQ,
+				   request->data, request->length,
+				   &cksum);
+	krb5_crypto_destroy(context, crypto);
+	free_Checksum(&cksum);
+	_krb5_debug(context, 5, ret, "enc-ap-rep: %svalid", (ret == 0) ? "" : "in");
+	if (ret)
+	    goto out;
+    }
 
     /* save session key */
 
@@ -741,6 +819,8 @@ _krb5_extract_ticket(krb5_context context,
 	    strcmp(rep->enc_part.srealm, crealm) != 0)
 	{
 	    ret = KRB5KRB_AP_ERR_MODIFIED;
+	    krb5_set_error_message(context, ret, "server realm (%s) doesn't match client's (%s)", 
+				   srealm, crealm);
 	    krb5_clear_error_message(context);
 	    goto out;
 	}
@@ -764,7 +844,7 @@ _krb5_extract_ticket(krb5_context context,
 				 "libdefaults",
 				 "kdc_timesync",
 				 NULL)) {
-	context->kdc_sec_offset = rep->enc_part.authtime - sec_now;
+	context->kdc_sec_offset = (int32_t)(rep->enc_part.authtime - sec_now);
 	krb5_timeofday (context, &sec_now);
     }
 
@@ -776,11 +856,11 @@ _krb5_extract_ticket(krb5_context context,
 	tmp_time = rep->enc_part.authtime;
 
     if (creds->times.starttime == 0
-	&& abs(tmp_time - sec_now) > context->max_skew) {
+	&& krb5_time_abs(tmp_time, sec_now) > context->max_skew) {
 	ret = KRB5KRB_AP_ERR_SKEW;
 	krb5_set_error_message (context, ret,
-				N_("time skew (%d) larger than max (%d)", ""),
-			       abs(tmp_time - sec_now),
+				N_("time skew (%ld) larger than max (%d)", ""),
+				(long)krb5_time_abs(tmp_time, sec_now),
 			       (int)context->max_skew);
 	goto out;
     }
@@ -788,6 +868,7 @@ _krb5_extract_ticket(krb5_context context,
     if (creds->times.starttime != 0
 	&& tmp_time != creds->times.starttime) {
 	krb5_clear_error_message (context);
+	krb5_set_error_message(context, ret, "startime is not the requested startime");
 	ret = KRB5KRB_AP_ERR_MODIFIED;
 	goto out;
     }
@@ -802,6 +883,7 @@ _krb5_extract_ticket(krb5_context context,
     if (creds->times.renew_till != 0
 	&& tmp_time > creds->times.renew_till) {
 	krb5_clear_error_message (context);
+	krb5_set_error_message(context, ret, "renewtime is past the requested renewtime");
 	ret = KRB5KRB_AP_ERR_MODIFIED;
 	goto out;
     }
@@ -814,6 +896,7 @@ _krb5_extract_ticket(krb5_context context,
 	&& rep->enc_part.endtime > creds->times.endtime) {
 	krb5_clear_error_message (context);
 	ret = KRB5KRB_AP_ERR_MODIFIED;
+	krb5_set_error_message(context, ret, "endtime is past the requested endtime");
 	goto out;
     }
 
@@ -844,6 +927,9 @@ _krb5_extract_ticket(krb5_context context,
 
 
 out:
+    if (ret)
+	_krb5_debugx(context, 5, "_krb5_extract_ticket failed with %d", ret);
+
     memset (rep->enc_part.key.keyvalue.data, 0,
 	    rep->enc_part.key.keyvalue.length);
     return ret;

@@ -55,7 +55,7 @@ typedef struct krb5_kdc_configuration {
     time_t kdc_warn_pwexpire; /* time before expiration to print a warning */
 
     struct HDB **db;
-    int num_db;
+    unsigned int num_db;
 
     krb5_boolean encode_as_rep_as_tgs_rep; /* bug compatibility */
 
@@ -92,19 +92,20 @@ typedef struct krb5_kdc_configuration {
     const char *kx509_template;
     const char *kx509_ca;
 
+    char *lkdc_realm;
+
 } krb5_kdc_configuration;
 
 struct krb5_kdc_service {
     unsigned int flags;
 #define KS_KRB5		1
-#define KS_NO_LENGTH	2
     krb5_error_code (*process)(krb5_context context,
 			       krb5_kdc_configuration *config,
 			       krb5_data *req_buffer,
 			       krb5_data *reply,
 			       const char *from,
 			       struct sockaddr *addr,
-			       int datagram_reply,
+			       size_t max_reply_size,
 			       int *claim);
 };
 

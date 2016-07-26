@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2004, PADL Software Pty Ltd.
  * All rights reserved.
@@ -131,7 +132,7 @@ allowed_enctypes(OM_uint32 *minor_status,
 {
     OM_uint32 major_stat;
     krb5_error_code ret;
-    size_t len, i;
+    size_t len, i, j;
     krb5_enctype *enctypes = NULL;
     krb5_storage *sp = NULL;
     gsskrb5_cred cred;
@@ -164,7 +165,7 @@ allowed_enctypes(OM_uint32 *minor_status,
 	goto out;
     }
 
-    for (i = 0; i < len; i++) {
+    for (j = 0, i = 0; i < len; i++) {
 	uint32_t e;
 
 	ret = krb5_ret_uint32(sp, &e);
@@ -173,9 +174,10 @@ allowed_enctypes(OM_uint32 *minor_status,
 	    major_stat =  GSS_S_FAILURE;
 	    goto out;
 	}
-	enctypes[i] = e;
+	if (krb5_enctype_valid(context, e) == 0)
+	    enctypes[j++] = e;
     }
-    enctypes[i] = 0;
+    enctypes[j++] = 0;
 
     if (cred->enctypes)
 	free(cred->enctypes);
@@ -215,7 +217,6 @@ no_ci_flags(OM_uint32 *minor_status,
 
 }
 
-
 OM_uint32 GSSAPI_CALLCONV
 _gsskrb5_set_cred_option
            (OM_uint32 *minor_status,
@@ -238,10 +239,8 @@ _gsskrb5_set_cred_option
     if (gss_oid_equal(desired_object, GSS_KRB5_SET_ALLOWABLE_ENCTYPES_X))
 	return allowed_enctypes(minor_status, context, cred_handle, value);
 
-    if (gss_oid_equal(desired_object, GSS_KRB5_CRED_NO_CI_FLAGS_X)) {
+    if (gss_oid_equal(desired_object, GSS_KRB5_CRED_NO_CI_FLAGS_X))
 	return no_ci_flags(minor_status, context, cred_handle, value);
-    }
-
 
     *minor_status = EINVAL;
     return GSS_S_FAILURE;

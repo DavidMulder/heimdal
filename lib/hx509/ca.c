@@ -474,7 +474,7 @@ hx509_ca_tbs_add_crl_dp_uri(hx509_context context,
     {
 	DistributionPointName name;
 	GeneralName gn;
-	size_t size;
+	size_t size = 0;
 
 	name.element = choice_DistributionPointName_fullName;
 	name.u.fullName.len = 1;
@@ -599,7 +599,7 @@ hx509_ca_tbs_add_san_pkinit(hx509_context context,
 {
     heim_octet_string os;
     KRB5PrincipalName p;
-    size_t size;
+    size_t size = 0;
     int ret;
     char *s = NULL;
 
@@ -691,7 +691,7 @@ add_utf8_san(hx509_context context,
 {
     const PKIXXmppAddr ustring = (const PKIXXmppAddr)(intptr_t)string;
     heim_octet_string os;
-    size_t size;
+    size_t size = 0;
     int ret;
 
     os.length = 0;
@@ -990,7 +990,7 @@ ca_sign(hx509_context context,
     heim_octet_string data;
     Certificate c;
     TBSCertificate *tbsc;
-    size_t size;
+    size_t size = 0;
     int ret;
     const AlgorithmIdentifier *sigalg;
     time_t notBefore;
@@ -1082,7 +1082,7 @@ ca_sign(hx509_context context,
     if (tbs->flags.serial) {
 	ret = der_copy_heim_integer(&tbs->serial, &tbsc->serialNumber);
 	if (ret) {
-	    hx509_set_error_string(context, 0, ret, "Out of memory");
+	    hx509_set_error_string(context, 0, ret, "Failed to copy integer");
 	    goto out;
 	}
     } else {
@@ -1094,8 +1094,12 @@ ca_sign(hx509_context context,
 	    goto out;
 	}
 	/* XXX diffrent */
-	RAND_bytes(tbsc->serialNumber.data, tbsc->serialNumber.length);
-	((unsigned char *)tbsc->serialNumber.data)[0] &= 0x7f;
+	if (CCRandomCopyBytes(kCCRandomDefault, tbsc->serialNumber.data, tbsc->serialNumber.length) != 0) {
+	    ret = HX509_CRYPTO_OUT_OF_RANDOM;
+	    hx509_set_error_string(context, 0, ret, "Out of random");
+	    goto out;
+	}
+	    
     }
     /* signature            AlgorithmIdentifier, */
     ret = copy_AlgorithmIdentifier(sigalg, &tbsc->signature);
@@ -1264,18 +1268,17 @@ ca_sign(hx509_context context,
 
     /* Add Subject Key Identifier */
     {
+	uint8_t hash[CC_SHA1_DIGEST_LENGTH];
 	SubjectKeyIdentifier si;
-	unsigned char hash[SHA_DIGEST_LENGTH];
 
 	{
-	    EVP_MD_CTX *ctx;
+	    CCDigestRef ctx;
 
-	    ctx = EVP_MD_CTX_create();
-	    EVP_DigestInit_ex(ctx, EVP_sha1(), NULL);
-	    EVP_DigestUpdate(ctx, tbs->spki.subjectPublicKey.data,
+	    ctx = CCDigestCreate(kCCDigestMD5);
+	    CCDigestUpdate(ctx, tbs->spki.subjectPublicKey.data,
 			     tbs->spki.subjectPublicKey.length / 8);
-	    EVP_DigestFinal_ex(ctx, hash, NULL);
-	    EVP_MD_CTX_destroy(ctx);
+	    CCDigestFinal(ctx, hash);
+	    CCDigestDestroy(ctx);
 	}
 
 	si.data = hash;

@@ -33,7 +33,7 @@
 
 #include "gsskrb5_locl.h"
 
-#ifdef HEIM_WEAK_CRYPTO
+#ifdef HEIM_KRB5_DES
 
 static OM_uint32
 unwrap_des
@@ -48,7 +48,7 @@ unwrap_des
 {
   u_char *p, *seq;
   size_t len;
-  EVP_MD_CTX *md5;
+  CCDigestRef md5;
   u_char hash[16];
   EVP_CIPHER_CTX des_ctx;
   DES_key_schedule schedule;
@@ -60,7 +60,7 @@ unwrap_des
   OM_uint32 ret;
   int cstate;
   int cmp;
-  int token_len;
+  size_t token_len;
 
   if (IS_DCE_STYLE(context_handle)) {
      token_len = 22 + 8 + 15; /* 45 */
@@ -93,6 +93,8 @@ unwrap_des
   p += 2;
   p += 16;
 
+  memset (&zero, 0, sizeof(zero));
+
   len = p - (u_char *)input_message_buffer->value;
 
   if(cstate) {
@@ -123,18 +125,20 @@ unwrap_des
         return ret;
   }
 
-  md5 = EVP_MD_CTX_create();
-  EVP_DigestInit_ex(md5, EVP_md5(), NULL);
-  EVP_DigestUpdate(md5, p - 24, 8);
-  EVP_DigestUpdate(md5, p, input_message_buffer->length - len);
-  EVP_DigestFinal_ex(md5, hash, NULL);
-  EVP_MD_CTX_destroy(md5);
+  md5 = CCDigestCreate(kCCDigestMD5);
+  CCDigestUpdate(md5, p - 24, 8);
+  CCDigestUpdate(md5, p, input_message_buffer->length - len);
+  CCDigestFinal(md5, hash);
+  CCDigestDestroy(md5);
 
-  memset (&zero, 0, sizeof(zero));
   memcpy (&deskey, key->keyvalue.data, sizeof(deskey));
+#ifndef __APPLE_PRIVATE__
   DES_set_key_unchecked (&deskey, &schedule);
   DES_cbc_cksum ((void *)hash, (void *)hash, sizeof(hash),
 		 &schedule, &zero);
+#else
+  CCDesCBCCksum(hash, hash, sizeof(hash), deskey, sizeof(deskey), &zero);
+#endif
   if (ct_memcmp (p - 8, hash, 8) != 0)
     return GSS_S_BAD_MIC;
 
@@ -153,7 +157,7 @@ unwrap_des
   memset (&schedule, 0, sizeof(schedule));
 
   seq = p;
-  _gsskrb5_decode_om_uint32(seq, &seq_number);
+  _gss_mg_decode_le_uint32(seq, &seq_number);
 
   if (context_handle->more_flags & LOCAL)
       cmp = ct_memcmp(&seq[4], "\xff\xff\xff\xff", 4);
@@ -165,7 +169,7 @@ unwrap_des
     return GSS_S_BAD_MIC;
   }
 
-  ret = _gssapi_msg_order_check(context_handle->order, seq_number);
+  ret = _gssapi_msg_order_check(context_handle->gk5c.order, seq_number);
   if (ret) {
     HEIMDAL_MUTEX_unlock(&context_handle->ctx_id_mutex);
     return ret;
@@ -187,6 +191,7 @@ unwrap_des
 }
 #endif
 
+#ifdef HEIM_KRB5_DES3
 static OM_uint32
 unwrap_des3
            (OM_uint32 * minor_status,
@@ -211,7 +216,7 @@ unwrap_des3
   krb5_crypto crypto;
   Checksum csum;
   int cmp;
-  int token_len;
+  size_t token_len;
 
   if (IS_DCE_STYLE(context_handle)) {
      token_len = 34 + 8 + 15; /* 57 */
@@ -294,14 +299,14 @@ unwrap_des3
       return GSS_S_FAILURE;
   }
   {
-      DES_cblock ivec;
+      unsigned char ivec[8];
 
-      memcpy(&ivec, p + 8, 8);
+      memcpy(ivec, p + 8, 8);
       ret = krb5_decrypt_ivec (context,
 			       crypto,
 			       KRB5_KU_USAGE_SEQ,
 			       p, 8, &seq_data,
-			       &ivec);
+			       ivec);
   }
   krb5_crypto_destroy (context, crypto);
   if (ret) {
@@ -317,7 +322,7 @@ unwrap_des3
   }
 
   seq = seq_data.data;
-  _gsskrb5_decode_om_uint32(seq, &seq_number);
+  _gss_mg_decode_le_uint32(seq, &seq_number);
 
   if (context_handle->more_flags & LOCAL)
       cmp = ct_memcmp(&seq[4], "\xff\xff\xff\xff", 4);
@@ -331,7 +336,7 @@ unwrap_des3
       return GSS_S_BAD_MIC;
   }
 
-  ret = _gssapi_msg_order_check(context_handle->order, seq_number);
+  ret = _gssapi_msg_order_check(context_handle->gk5c.order, seq_number);
   if (ret) {
       *minor_status = 0;
       HEIMDAL_MUTEX_unlock(&context_handle->ctx_id_mutex);
@@ -379,6 +384,7 @@ unwrap_des3
 	  output_message_buffer->length);
   return GSS_S_COMPLETE;
 }
+#endif
 
 OM_uint32 GSSAPI_CALLCONV _gsskrb5_unwrap
            (OM_uint32 * minor_status,
@@ -402,7 +408,7 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_unwrap
   GSSAPI_KRB5_INIT (&context);
 
   if (ctx->more_flags & IS_CFX)
-      return _gssapi_unwrap_cfx (minor_status, ctx, context,
+      return _gssapi_unwrap_cfx (minor_status, &ctx->gk5c, context,
 				 input_message_buffer, output_message_buffer,
 				 conf_state, qop_state);
 
@@ -417,31 +423,36 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_unwrap
   *minor_status = 0;
 
   switch (key->keytype) {
+#ifdef HEIM_KRB5_DES
   case KRB5_ENCTYPE_DES_CBC_CRC :
   case KRB5_ENCTYPE_DES_CBC_MD4 :
   case KRB5_ENCTYPE_DES_CBC_MD5 :
-#ifdef HEIM_WEAK_CRYPTO
       ret = unwrap_des (minor_status, ctx,
 			input_message_buffer, output_message_buffer,
 			conf_state, qop_state, key);
-#else
-      ret = GSS_S_FAILURE;
-#endif
       break;
+#endif
+
+#ifdef HEIM_KRB5_DES3
   case KRB5_ENCTYPE_DES3_CBC_MD5 :
   case KRB5_ENCTYPE_DES3_CBC_SHA1 :
       ret = unwrap_des3 (minor_status, ctx, context,
 			 input_message_buffer, output_message_buffer,
 			 conf_state, qop_state, key);
       break;
+#endif
+
+#ifdef HEIM_KRB5_ARCFOUR
   case KRB5_ENCTYPE_ARCFOUR_HMAC_MD5:
   case KRB5_ENCTYPE_ARCFOUR_HMAC_MD5_56:
       ret = _gssapi_unwrap_arcfour (minor_status, ctx, context,
 				    input_message_buffer, output_message_buffer,
 				    conf_state, qop_state, key);
       break;
+#endif
+
   default :
-      abort();
+      ret = GSS_S_FAILURE;
       break;
   }
   krb5_free_keyblock (context, key);

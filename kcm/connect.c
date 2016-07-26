@@ -50,9 +50,10 @@ kcm_service(void *ctx, const heim_idata *req,
     krb5_data_zero(&rep);
 
     peercred.uid = heim_ipc_cred_get_uid(cred);
-    peercred.gid = heim_ipc_cred_get_gid(cred);
     peercred.pid = heim_ipc_cred_get_pid(cred);
     peercred.session = heim_ipc_cred_get_session(cred);
+    peercred.execpath[0] = '\0';
+
 
     if (req->length < 4) {
 	kcm_log(1, "malformed request from process %d (too short)",
@@ -78,6 +79,10 @@ kcm_service(void *ctx, const heim_idata *req,
     /* buf is now pointing at opcode */
 
     ret = kcm_dispatch(kcm_context, &peercred, &request, &rep);
+
+    static int num_req = 0;
+    if (num_req++ > max_num_requests)
+	heim_sipc_timeout(0);
 
     (*complete)(cctx, ret, &rep);
     krb5_data_free(&rep);

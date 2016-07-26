@@ -193,7 +193,7 @@ kdc_alloc(OM_uint32 *minor, void **ctx)
 }
 
 static int
-kdc_probe(OM_uint32 *minor, void *ctx, const char *realm)
+kdc_probe(OM_uint32 *minor, void *ctx, const char *realm, unsigned int *flags)
 {
     struct ntlmkrb5 *c = ctx;
     krb5_error_code ret;
@@ -204,7 +204,7 @@ kdc_probe(OM_uint32 *minor, void *ctx, const char *realm)
 	return ret;
 
     if ((flags & (1|2|4)) == 0)
-	return EINVAL;
+	return HNTLM_ERR_AUTH;
 
     return 0;
 }
@@ -241,6 +241,7 @@ kdc_destroy(OM_uint32 *minor, void *ctx)
 
 static OM_uint32
 kdc_type2(OM_uint32 *minor_status,
+	  ntlm_ctx ntlmctx,
 	  void *ctx,
 	  uint32_t flags,
 	  const char *hostname,
@@ -251,7 +252,7 @@ kdc_type2(OM_uint32 *minor_status,
     struct ntlmkrb5 *c = ctx;
     krb5_error_code ret;
     struct ntlm_type2 type2;
-    krb5_data challange;
+    krb5_data challenge;
     struct ntlm_buf data;
     krb5_data ti;
 
@@ -293,18 +294,18 @@ kdc_type2(OM_uint32 *minor_status,
     }
     *ret_flags = type2.flags;
 
-    ret = krb5_ntlm_init_get_challange(c->context, c->ntlm, &challange);
+    ret = krb5_ntlm_init_get_challenge(c->context, c->ntlm, &challenge);
     if (ret) {
 	*minor_status = ret;
 	return GSS_S_FAILURE;
     }
 
-    if (challange.length != sizeof(type2.challenge)) {
-	*minor_status = EINVAL;
+    if (challenge.length != sizeof(type2.challenge)) {
+	*minor_status = HNTLM_ERR_INVALID_LENGTH;
 	return GSS_S_FAILURE;
     }
-    memcpy(type2.challenge, challange.data, sizeof(type2.challenge));
-    krb5_data_free(&challange);
+    memcpy(type2.challenge, challenge.data, sizeof(type2.challenge));
+    krb5_data_free(&challenge);
 
     ret = krb5_ntlm_init_get_targetname(c->context, c->ntlm,
 					&type2.targetname);
@@ -337,6 +338,16 @@ kdc_type2(OM_uint32 *minor_status,
     return GSS_S_COMPLETE;
 }
 
+static OM_uint32
+kdc_ti(OM_uint32 *minor_status,
+       ntlm_ctx ntlmctx,
+       void *ctx,
+       const char *hostname,
+       const char *domain)
+{
+    return GSS_S_FAILURE;
+}
+
 /*
  *
  */
@@ -345,13 +356,25 @@ static OM_uint32
 kdc_type3(OM_uint32 *minor_status,
 	  void *ctx,
 	  const struct ntlm_type3 *type3,
-	  struct ntlm_buf *sessionkey)
+	  ntlm_cred accept_cred,
+	  uint32_t *flags,
+	  uint32_t *avflags,
+	  struct ntlm_buf *sessionkey,
+	  ntlm_name *name, struct ntlm_buf *uuid,
+	  struct ntlm_buf *pac)
 {
     struct ntlmkrb5 *c = ctx;
     krb5_error_code ret;
 
+    *avflags = *flags = 0;
+
     sessionkey->data = NULL;
     sessionkey->length = 0;
+    *name = NULL;
+    uuid->data = NULL;
+    uuid->length = 0;
+    pac->data = NULL;
+    pac->length = 0;
 
     ret = krb5_ntlm_req_set_flags(c->context, c->ntlm, type3->flags);
     if (ret) goto out;
@@ -387,7 +410,7 @@ kdc_type3(OM_uint32 *minor_status,
 	goto out;
 
     if (krb5_ntlm_rep_get_status(c->context, c->ntlm) != TRUE) {
-	ret = EINVAL;
+	ret = HNTLM_ERR_AUTH;
 	goto out;
     }
 
@@ -427,12 +450,13 @@ kdc_free_buffer(struct ntlm_buf *sessionkey)
  */
 
 struct ntlm_server_interface ntlmsspi_kdc_digest = {
+    "kdc"
     kdc_alloc,
     kdc_destroy,
     kdc_probe,
-    kdc_type2,
     kdc_type3,
-    kdc_free_buffer
+    kdc_free_buffer,
+    kdc_ti
 };
 
 #endif /* DIGEST */

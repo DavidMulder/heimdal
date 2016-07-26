@@ -47,6 +47,7 @@ typedef struct krb5_mcache {
     struct krb5_mcache *next;
     time_t mtime;
     krb5_deltat kdc_offset;
+    krb5_uuid uuid;
 } krb5_mcache;
 
 static HEIMDAL_MUTEX mcc_mutex = HEIMDAL_MUTEX_INITIALIZER;
@@ -56,7 +57,24 @@ static struct krb5_mcache *mcc_head;
 
 #define MISDEAD(X)	((X)->dead)
 
-static const char* KRB5_CALLCONV
+static void
+drop_content(krb5_context context, krb5_mcache *m)
+{
+    struct link *l;
+
+    l = m->creds;
+    while (l != NULL) {
+	struct link *old;
+	
+	krb5_free_cred_contents (context, &l->cred);
+	old = l;
+	l = l->next;
+	free (old);
+    }
+    m->creds = NULL;
+}
+
+static const char*
 mcc_get_name(krb5_context context,
 	     krb5_ccache id)
 {
@@ -98,6 +116,8 @@ mcc_alloc(const char *name)
     m->creds = NULL;
     m->mtime = time(NULL);
     m->kdc_offset = 0;
+    krb5_generate_random_block(m->uuid, sizeof(m->uuid));
+    
     m->next = mcc_head;
     mcc_head = m;
     HEIMDAL_MUTEX_unlock(&mcc_mutex);
@@ -161,11 +181,22 @@ mcc_initialize(krb5_context context,
 	       krb5_principal primary_principal)
 {
     krb5_mcache *m = MCACHE(id);
+    krb5_error_code ret;
+    krb5_principal p;
+
     m->dead = 0;
     m->mtime = time(NULL);
-    return krb5_copy_principal (context,
-				primary_principal,
-				&m->primary_principal);
+    ret = krb5_copy_principal(context, primary_principal, &p);
+    if (ret)
+	return ret;
+
+    if (m->primary_principal)
+	krb5_free_principal(context, m->primary_principal);
+    m->primary_principal = p;
+
+    drop_content(context, m);
+
+    return 0;
 }
 
 static int
@@ -195,7 +226,6 @@ mcc_destroy(krb5_context context,
 	    krb5_ccache id)
 {
     krb5_mcache **n, *m = MCACHE(id);
-    struct link *l;
 
     if (m->refcnt == 0)
 	krb5_abortx(context, "mcc_destroy: refcnt already 0");
@@ -217,16 +247,7 @@ mcc_destroy(krb5_context context,
 	}
 	m->dead = 1;
 
-	l = m->creds;
-	while (l != NULL) {
-	    struct link *old;
-
-	    krb5_free_cred_contents (context, &l->cred);
-	    old = l;
-	    l = l->next;
-	    free (old);
-	}
-	m->creds = NULL;
+	drop_content(context, m);
     }
     return 0;
 }
@@ -483,6 +504,36 @@ mcc_get_kdc_offset(krb5_context context, krb5_ccache id, krb5_deltat *kdc_offset
     return 0;
 }
 
+static krb5_error_code
+mcc_get_uuid(krb5_context context, krb5_ccache id, krb5_uuid uuid)
+{
+    krb5_mcache *m = MCACHE(id);
+    memcpy(uuid, m->uuid, sizeof(m->uuid));
+    return 0;
+}
+
+static krb5_error_code
+mcc_resolve_by_uuid(krb5_context context, krb5_ccache id, krb5_uuid uuid)
+{
+    krb5_mcache *m;
+    
+    HEIMDAL_MUTEX_lock(&mcc_mutex);
+    for (m = mcc_head; m != NULL; m = m->next)
+	if (memcmp(m->uuid, uuid, sizeof(m->uuid)) == 0)
+	    break;
+    HEIMDAL_MUTEX_unlock(&mcc_mutex);
+    if (m == NULL) {
+	krb5_clear_error_message(context);
+	return KRB5_CC_END;
+    }
+
+    m->refcnt++;
+    id->data.data = m;
+    id->data.length = sizeof(*m);
+
+    return 0;
+}
+
 
 /**
  * Variable containing the MEMORY based credential cache implemention.
@@ -516,5 +567,9 @@ KRB5_LIB_VARIABLE const krb5_cc_ops krb5_mcc_ops = {
     NULL,
     mcc_lastchange,
     mcc_set_kdc_offset,
-    mcc_get_kdc_offset
+    mcc_get_kdc_offset,
+    NULL,
+    NULL,
+    mcc_get_uuid,
+    mcc_resolve_by_uuid
 };

@@ -29,9 +29,9 @@
 #include "mech_locl.h"
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_import_sec_context(OM_uint32 *minor_status,
-    const gss_buffer_t interprocess_token,
-    gss_ctx_id_t *context_handle)
+gss_import_sec_context(OM_uint32 *__nonnull minor_status,
+    __nonnull const gss_buffer_t interprocess_token,
+    __nonnull gss_ctx_id_t * __nullable context_handle)
 {
 	OM_uint32 major_status;
 	gssapi_mech_interface m;
@@ -68,11 +68,12 @@ gss_import_sec_context(OM_uint32 *minor_status,
 		*minor_status = ENOMEM;
 		return (GSS_S_FAILURE);
 	}
+	memset(ctx, 0, sizeof(struct _gss_context));
 	ctx->gc_mech = m;
 	major_status = m->gm_import_sec_context(minor_status,
 	    &buf, &ctx->gc_ctx);
 	if (major_status != GSS_S_COMPLETE) {
-		_gss_mg_error(m, major_status, *minor_status);
+		_gss_mg_error(m, *minor_status);
 		free(ctx);
 	} else {
 		*context_handle = (gss_ctx_id_t) ctx;

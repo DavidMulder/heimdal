@@ -95,9 +95,12 @@ Setting up a realm
 * Cross realm::                 
 * Transit policy::              
 * Setting up DNS::              
+* How clients locate Kerberos KDCs::
 * Using LDAP to store the database::  
 * Providing Kerberos credentials to servers and programs::  
 * Setting up PK-INIT::
+* KDC maintainence::
+* Debugging Kerberos problems::
 
 Applications
 

@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2010 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -69,7 +71,7 @@ hdb_find_extension(const hdb_entry *entry, int type)
 	return NULL;
 
     for (i = 0; i < entry->extensions->len; i++)
-	if (entry->extensions->val[i].data.element == (unsigned)type)
+	if (entry->extensions->val[i].data.element == (enum HDB_extension_data_enum)type)
 	    return &entry->extensions->val[i];
     return NULL;
 }
@@ -186,7 +188,7 @@ hdb_clear_extension(krb5_context context,
 	return 0;
 
     for (i = 0; i < entry->extensions->len; i++) {
-	if (entry->extensions->val[i].data.element == (unsigned)type) {
+	if (entry->extensions->val[i].data.element == (enum HDB_extension_data_enum)type) {
 	    free_HDB_extension(&entry->extensions->val[i]);
 	    memmove(&entry->extensions->val[i],
 		    &entry->extensions->val[i + 1],
@@ -214,6 +216,64 @@ hdb_entry_get_pkinit_acl(const hdb_entry *entry, const HDB_Ext_PKINIT_acl **a)
 	*a = &ext->data.u.pkinit_acl;
     else
 	*a = NULL;
+
+    return 0;
+}
+
+krb5_error_code
+hdb_entry_set_pkinit_acl(hdb_entry *entry,
+			 const char *subject,
+			 const char *issuer,
+			 const char *anchor)
+{
+    HDB_extension *ext;
+    HDB_Ext_PKINIT_acl *a;
+    void *ptr;
+
+    ext = hdb_find_extension(entry, choice_HDB_extension_data_pkinit_acl);
+    if (ext == NULL) {
+	if (entry->extensions == NULL) {
+	    entry->extensions = calloc(1, sizeof(*entry->extensions));
+	    if (entry->extensions == NULL)
+		return ENOMEM;
+	}
+
+	ptr = realloc(entry->extensions->val,
+		      (entry->extensions->len + 1) *
+		      sizeof(entry->extensions->val[0]));
+	if (ptr == NULL)
+	    return ENOMEM;
+	entry->extensions->val = ptr;
+
+	memset(&entry->extensions->val[entry->extensions->len], 0,
+	       sizeof(entry->extensions->val[0]));
+
+	entry->extensions->val[entry->extensions->len].data.element =
+	    choice_HDB_extension_data_pkinit_acl;
+	a = &entry->extensions->val[entry->extensions->len].data.u.pkinit_acl;
+	entry->extensions->len++;
+    } else {
+	a = &ext->data.u.pkinit_acl;
+    }
+
+    ptr = realloc(a->val, (a->len + 1) * sizeof(a->val[0]));
+    if (ptr == NULL)
+	return ENOMEM;
+    a->val = ptr;
+    memset(&a->val[a->len], 0, sizeof(a->val[0]));
+
+    a->val[a->len].subject = strdup(subject);
+
+    if (issuer) {
+	a->val[a->len].issuer = malloc(sizeof(*a->val[a->len].issuer));
+	*(a->val[a->len].issuer) = strdup(issuer);
+    }
+
+    if (anchor) {
+	a->val[a->len].anchor = malloc(sizeof(*a->val[a->len].anchor));
+	*(a->val[a->len].anchor) = strdup(anchor);
+    }
+    a->len++;
 
     return 0;
 }
@@ -280,14 +340,16 @@ int
 hdb_entry_get_password(krb5_context context, HDB *db,
 		       const hdb_entry *entry, char **p)
 {
+    heim_utf8_string str;
+    heim_octet_string pw;
     HDB_extension *ext;
-    char *str;
     int ret;
 
+    *p = NULL;
+
     ext = hdb_find_extension(entry, choice_HDB_extension_data_password);
-    if (ext) {
-	heim_utf8_string xstr;
-	heim_octet_string pw;
+    if (ext == NULL)
+	return 0;
 
 	if (db->hdb_master_key_set && ext->data.u.password.mkvno) {
 	    hdb_master_key key;
@@ -314,13 +376,13 @@ hdb_entry_get_password(krb5_context context, HDB *db,
 	    return ret;
 	}
 
-	xstr = pw.data;
-	if (xstr[pw.length - 1] != '\0') {
+    str = pw.data;
+    if (str[pw.length - 1] != '\0') {
 	    krb5_set_error_message(context, EINVAL, "malformed password");
 	    return EINVAL;
 	}
 
-	*p = strdup(xstr);
+    *p = strdup(str);
 
 	der_free_octet_string(&pw);
 	if (*p == NULL) {
@@ -329,17 +391,6 @@ hdb_entry_get_password(krb5_context context, HDB *db,
 	}
 	return 0;
     }
-
-    ret = krb5_unparse_name(context, entry->principal, &str);
-    if (ret == 0) {
-	krb5_set_error_message(context, ENOENT,
-			       "no password attribute for %s", str);
-	free(str);
-    } else
-	krb5_clear_error_message(context);
-
-    return ENOENT;
-}
 
 int
 hdb_entry_set_password(krb5_context context, HDB *db,
@@ -433,7 +484,7 @@ hdb_entry_get_aliases(const hdb_entry *entry, const HDB_Ext_Aliases **a)
     return 0;
 }
 
-unsigned int
+krb5_kvno
 hdb_entry_get_kvno_diff_clnt(const hdb_entry *entry)
 {
     const HDB_extension *ext;
@@ -465,7 +516,7 @@ hdb_entry_clear_kvno_diff_clnt(krb5_context context, hdb_entry *entry)
 			       choice_HDB_extension_data_hist_kvno_diff_clnt);
 }
 
-unsigned int
+krb5_kvno
 hdb_entry_get_kvno_diff_svc(const hdb_entry *entry)
 {
     const HDB_extension *ext;

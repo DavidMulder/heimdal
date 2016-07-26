@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -33,12 +35,12 @@
 
 #include "ntlm.h"
 
-OM_uint32 GSSAPI_CALLCONV _gss_ntlm_release_cred
+OM_uint32 _gss_ntlm_release_cred
            (OM_uint32 * minor_status,
             gss_cred_id_t * cred_handle
            )
 {
-    ntlm_cred cred;
+    gss_name_t name;
 
     if (minor_status)
 	*minor_status = 0;
@@ -46,18 +48,9 @@ OM_uint32 GSSAPI_CALLCONV _gss_ntlm_release_cred
     if (cred_handle == NULL || *cred_handle == GSS_C_NO_CREDENTIAL)
 	return GSS_S_COMPLETE;
 
-    cred = (ntlm_cred)*cred_handle;
+    name = (gss_name_t)*cred_handle;
     *cred_handle = GSS_C_NO_CREDENTIAL;
 
-    if (cred->username)
-	free(cred->username);
-    if (cred->domain)
-	free(cred->domain);
-    if (cred->key.data) {
-	memset(cred->key.data, 0, cred->key.length);
-	free(cred->key.data);
-    }
-
-    return GSS_S_COMPLETE;
+    return _gss_ntlm_release_name(minor_status, &name);
 }
 

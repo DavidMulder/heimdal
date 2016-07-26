@@ -43,22 +43,19 @@ krb5_build_ap_req (krb5_context context,
 {
   krb5_error_code ret = 0;
   AP_REQ ap;
-  Ticket t;
   size_t len;
 
   ap.pvno = 5;
   ap.msg_type = krb_ap_req;
-  memset(&ap.ap_options, 0, sizeof(ap.ap_options));
+
   ap.ap_options.use_session_key = (ap_options & AP_OPTS_USE_SESSION_KEY) > 0;
   ap.ap_options.mutual_required = (ap_options & AP_OPTS_MUTUAL_REQUIRED) > 0;
 
-  ap.ticket.tkt_vno = 5;
-  copy_Realm(&cred->server->realm, &ap.ticket.realm);
-  copy_PrincipalName(&cred->server->name, &ap.ticket.sname);
-
-  decode_Ticket(cred->ticket.data, cred->ticket.length, &t, &len);
-  copy_EncryptedData(&t.enc_part, &ap.ticket.enc_part);
-  free_Ticket(&t);
+  ret = decode_Ticket(cred->ticket.data, cred->ticket.length, &ap.ticket, &len);
+  if (ret) {
+      krb5_data_zero(retdata);
+      return ret;
+  }
 
   ap.authenticator.etype = enctype;
   ap.authenticator.kvno  = NULL;
@@ -68,7 +65,9 @@ krb5_build_ap_req (krb5_context context,
 		     &ap, &len, ret);
   if(ret == 0 && retdata->length != len)
       krb5_abortx(context, "internal error in ASN.1 encoder");
+  else if (ret)
+      krb5_data_zero(retdata);
+
   free_AP_REQ(&ap);
   return ret;
-
 }

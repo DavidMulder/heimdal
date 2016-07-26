@@ -113,7 +113,6 @@ _gss_import_export_name(OM_uint32 *minor_status,
 	len -= t;
 
 	t = (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
-	p += 4;
 	len -= 4;
 
 	if (!composite && len != t)
@@ -129,14 +128,14 @@ _gss_import_export_name(OM_uint32 *minor_status,
 	major_status = m->gm_import_name(minor_status,
 	    input_name_buffer, GSS_C_NT_EXPORT_NAME, &new_canonical_name);
 	if (major_status != GSS_S_COMPLETE) {
-		_gss_mg_error(m, major_status, *minor_status);
+		_gss_mg_error(m, *minor_status);
 		return major_status;
 	}
 
 	/*
 	 * Now we make a new name and mark it as an MN.
 	 */
-	name = _gss_make_name(m, new_canonical_name);
+	name = _gss_create_name(new_canonical_name, m);
 	if (!name) {
 		m->gm_release_name(minor_status, &new_canonical_name);
 		return (GSS_S_FAILURE);
@@ -174,24 +173,21 @@ _gss_import_export_name(OM_uint32 *minor_status,
  */
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_import_name(OM_uint32 *minor_status,
-    const gss_buffer_t input_name_buffer,
-    const gss_OID input_name_type,
-    gss_name_t *output_name)
+gss_import_name(OM_uint32 *__nonnull minor_status,
+    __nonnull const gss_buffer_t input_name_buffer,
+    __nullable gss_const_OID input_name_type,
+    __nonnull gss_name_t * __nullable output_name)
 {
         struct _gss_mechanism_name *mn;
-	gss_OID			name_type = input_name_type;
-	OM_uint32		major_status, ms;
+	gss_OID			name_type = rk_UNCONST(input_name_type);
+	OM_uint32		major_status, junk;
 	struct _gss_name	*name;
         struct _gss_mech_switch	*m;
 	gss_name_t		rname;
 
 	*output_name = GSS_C_NO_NAME;
 
-	if (input_name_buffer->length == 0) {
-		*minor_status = 0;
-		return (GSS_S_BAD_NAME);
-	}
+	/* Allow empty names since that's valid (ANONYMOUS for example) */
 
 	_gss_load_mech();
 
@@ -213,7 +209,7 @@ gss_import_name(OM_uint32 *minor_status,
 
 
 	*minor_status = 0;
-	name = calloc(1, sizeof(struct _gss_name));
+	name = _gss_create_name(NULL, NULL);
 	if (!name) {
 		*minor_status = ENOMEM;
 		return (GSS_S_FAILURE);
@@ -224,7 +220,8 @@ gss_import_name(OM_uint32 *minor_status,
 	major_status = _gss_copy_oid(minor_status,
 	    name_type, &name->gn_type);
 	if (major_status) {
-		free(name);
+		rname = (gss_name_t)name;
+		gss_release_name(&junk, (gss_name_t *)&rname);
 		return (GSS_S_FAILURE);
 	}
 
@@ -260,9 +257,13 @@ gss_import_name(OM_uint32 *minor_status,
 			? &name->gn_type : GSS_C_NO_OID),
 		    &mn->gmn_name);
 		if (major_status != GSS_S_COMPLETE) {
-			_gss_mg_error(&m->gm_mech, major_status, *minor_status);
+			_gss_mg_error(&m->gm_mech, *minor_status);
 			free(mn);
-			goto out;
+			/**
+			 * If we failed to import the name in a mechanism, it will be ignored as long as its possible to import name in some other mechanism.
+			 * We will catch the failure later though in gss_init_sec_context() or other function that the mechanism doesn't have name.
+			 */
+			continue;
 		}
 
 		mn->gmn_mech = &m->gm_mech;
@@ -270,8 +271,8 @@ gss_import_name(OM_uint32 *minor_status,
 		HEIM_SLIST_INSERT_HEAD(&name->gn_mn, mn, gmn_link);
 	}
 
-	/*
-	 * If we can't find a mn for the name, bail out already here.
+	/**
+	 * If we can't find a mechanism name for the name, we fail though.
 	 */
 
 	mn = HEIM_SLIST_FIRST(&name->gn_mn);
@@ -286,6 +287,6 @@ gss_import_name(OM_uint32 *minor_status,
 
  out:
 	rname = (gss_name_t)name;
-	gss_release_name(&ms, &rname);
+	gss_release_name(&junk, &rname);
 	return major_status;
 }

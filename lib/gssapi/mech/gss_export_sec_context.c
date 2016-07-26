@@ -29,16 +29,32 @@
 #include "mech_locl.h"
 
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_export_sec_context(OM_uint32 *minor_status,
-    gss_ctx_id_t *context_handle,
-    gss_buffer_t interprocess_token)
+gss_export_sec_context(OM_uint32 *__nonnull minor_status,
+    __nonnull gss_ctx_id_t * __nullable context_handle,
+    __nullable gss_buffer_t interprocess_token)
 {
 	OM_uint32 major_status;
-	struct _gss_context *ctx = (struct _gss_context *) *context_handle;
-	gssapi_mech_interface m = ctx->gc_mech;
+	struct _gss_context *ctx;
+	gssapi_mech_interface m;
 	gss_buffer_desc buf;
 
+	*minor_status = 0;
+
+	if (interprocess_token)
 	_mg_buffer_zero(interprocess_token);
+	else
+	    return GSS_S_CALL_INACCESSIBLE_READ;
+
+	if (context_handle == NULL)
+	    return GSS_S_NO_CONTEXT;
+
+	ctx = (struct _gss_context *) *context_handle;
+	if (ctx == NULL || ctx->gc_ctx == NULL) {
+	    *minor_status = 0;
+	    return GSS_S_NO_CONTEXT;
+	}
+
+	m = ctx->gc_mech;
 
 	major_status = m->gm_export_sec_context(minor_status,
 	    &ctx->gc_ctx, &buf);
@@ -70,7 +86,7 @@ gss_export_sec_context(OM_uint32 *minor_status,
 		memcpy(p + 2 + m->gm_mech_oid.length, buf.value, buf.length);
 		gss_release_buffer(minor_status, &buf);
 	} else {
-		_gss_mg_error(m, major_status, *minor_status);
+		_gss_mg_error(m, *minor_status);
 	}
 
 	return (major_status);

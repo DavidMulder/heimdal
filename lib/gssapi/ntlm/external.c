@@ -3,6 +3,8 @@
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -33,30 +35,79 @@
 
 #include "ntlm.h"
 
-static gss_mo_desc ntlm_mo[] = {
+#ifdef ENABLE_NTLM
+
+int __gss_ntlm_is_digest_service = 0;
+
+static int
+get_signing_supported(gss_const_OID mech, gss_mo_desc *mo, gss_buffer_t value)
     {
-	GSS_C_MA_SASL_MECH_NAME,
+    OM_uint32 major, minor;
+    ntlm_ctx ctx;
+    int def = 0;
+
+    if (!__gss_ntlm_is_digest_service) {
+
+	major = _gss_ntlm_allocate_ctx(&minor, NULL, &ctx);
+	if (major == GSS_S_COMPLETE) {
+	    gss_ctx_id_t gctx = (gss_ctx_id_t)ctx;
+	    
+	    if ((ctx->probe_flags & NSI_NO_SIGNING) == 0)
+		def = 1;
+	    
+	    _gss_ntlm_delete_sec_context(&minor, &gctx, NULL);
+	}
+    }
+    if (!def)
+	return _gss_mo_get_option_0(mech, mo, value);
+
+    return _gss_mo_get_option_1(mech, mo, value);
+}
+
+
+
+static gss_mo_desc _gssntlm_mech_options[] = {
+    {
+	GSS_C_NTLM_V1,
 	GSS_MO_MA,
-	"SASL mech name",
-	rk_UNCONST("NTLM"),
-	_gss_mo_get_ctx_as_string,
-	NULL
+	"NTLMv1",
+	NULL,
+	_gss_mo_get_option_0
     },
     {
-	GSS_C_MA_MECH_NAME,
+	GSS_C_NTLM_FORCE_V1,
 	GSS_MO_MA,
-	"Mechanism name",
-	rk_UNCONST("NTLMSPP"),
-	_gss_mo_get_ctx_as_string,
-	NULL
+	"Force NTLMv1",
+	NULL,
+	_gss_mo_get_option_0
     },
     {
-	GSS_C_MA_MECH_DESCRIPTION,
+	GSS_C_NTLM_V2,
 	GSS_MO_MA,
-	"Mechanism description",
-	rk_UNCONST("Heimdal NTLMSSP Mechanism"),
-	_gss_mo_get_ctx_as_string,
-	NULL
+	"NTLMv2",
+	NULL,
+	_gss_mo_get_option_1
+    },
+    {
+	GSS_C_NTLM_SESSION_KEY,
+	GSS_MO_MA,
+	"NTLM session key",
+	NULL,
+	get_signing_supported
+    },
+    {
+	GSS_C_NTLM_SUPPORT_CHANNELBINDINGS,
+	GSS_MO_MA,
+	"NTLM support channel bindings",
+	NULL,
+	_gss_mo_get_option_1
+    },
+    {
+	GSS_C_NTLM_SUPPORT_LM2,
+	GSS_MO_MA,
+	"NTLM support LM2",
+	NULL,
+	_gss_mo_get_option_1
     }
 };
 
@@ -76,7 +127,7 @@ static gssapi_mech_interface_desc ntlm_mech = {
     _gss_ntlm_verify_mic,
     _gss_ntlm_wrap,
     _gss_ntlm_unwrap,
-    _gss_ntlm_display_status,
+    NULL,
     NULL,
     _gss_ntlm_compare_name,
     _gss_ntlm_display_name,
@@ -99,31 +150,49 @@ static gssapi_mech_interface_desc ntlm_mech = {
     NULL,
     NULL,
     NULL,
+    _gss_ntlm_wrap_iov,
+    _gss_ntlm_unwrap_iov,
+    _gss_ntlm_wrap_iov_length,
     NULL,
     NULL,
     NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
+    _gss_ntlm_acquire_cred_ext,
     _gss_ntlm_iter_creds_f,
     _gss_ntlm_destroy_cred,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    ntlm_mo,
-    sizeof(ntlm_mo) / sizeof(ntlm_mo[0]),
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
+    _gss_ntlm_cred_hold,
+    _gss_ntlm_cred_unhold,
+    _gss_ntlm_cred_label_get,
+    _gss_ntlm_cred_label_set,
+    _gssntlm_mech_options,
+    sizeof(_gssntlm_mech_options) / sizeof(_gssntlm_mech_options[0])
 };
+
+#endif
 
 gssapi_mech_interface
 __gss_ntlm_initialize(void)
 {
+#ifdef ENABLE_NTLM
 	return &ntlm_mech;
+#else
+	return NULL;
+#endif
 }
+
+/*
+ * Binary compat, thse version are missing the trailer "_oid_desc"
+ * that the autogenerged version have.
+ */
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ntlm_v1 =
+    {6, rk_UNCONST("\x2a\x85\x70\x2b\x0d\x19")};
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ntlm_v2 =
+    {6, rk_UNCONST("\x2a\x85\x70\x2b\x0d\x1a")};
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ntlm_session_key =
+    {6, rk_UNCONST("\x2a\x85\x70\x2b\x0d\x1b")};
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ntlm_force_v1 =
+    {6, rk_UNCONST("\x2a\x85\x70\x2b\x0d\x1c")};
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ntlm_support_channelbindings =
+    {6, rk_UNCONST("\x2a\x85\x70\x2b\x0d\x1d")};
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ntlm_support_lm2 =
+    {6, rk_UNCONST("\x2a\x85\x70\x2b\x0d\x1f")};
+
