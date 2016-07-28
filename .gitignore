@@ -219,9 +219,6 @@ asn1_*.[cx]
 /lib/editline/testit
 /lib/gssapi/gss
 /lib/gssapi/gsstool
-/lib/gssapi/krb5/gsskrb5-private.h
-/lib/gssapi/ntlm/ntlm-private.h
-/lib/gssapi/spnego/spnego-private.h
 /lib/gssapi/test_acquire_cred
 /lib/gssapi/test_add_store_cred
 /lib/gssapi/test_cfx
