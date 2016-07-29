@@ -93,6 +93,7 @@ test_memory(void)
 static int
 test_mutex(void)
 {
+#ifdef ENABLE_PTHREAD_SUPPORT
     HEIMDAL_MUTEX m = HEIMDAL_MUTEX_INITIALIZER;
 
     HEIMDAL_MUTEX_lock(&m);
@@ -103,6 +104,7 @@ test_mutex(void)
     HEIMDAL_MUTEX_lock(&m);
     HEIMDAL_MUTEX_unlock(&m);
     HEIMDAL_MUTEX_destroy(&m);
+#endif
 
     return 0;
 }
@@ -110,6 +112,7 @@ test_mutex(void)
 static int
 test_rwlock(void)
 {
+#ifdef ENABLE_PTHREAD_SUPPORT
     HEIMDAL_RWLOCK l = HEIMDAL_RWLOCK_INITIALIZER;
 
     HEIMDAL_RWLOCK_rdlock(&l);
@@ -136,6 +139,7 @@ test_rwlock(void)
 	err(1, "HEIMDAL_RWLOCK_tryrdlock() failed with lock not held");
     HEIMDAL_RWLOCK_unlock(&l);
     HEIMDAL_RWLOCK_destroy(&l);
+#endif
 
     return 0;
 }
