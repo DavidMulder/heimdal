@@ -177,7 +177,7 @@ RC2_CBC_encrypt(krb5_context context,
                 struct _krb5_key_data *key,
                 void *data,
                 size_t len,
-                krb5_boolean encrypt,
+                krb5_boolean ngencrypt,
                 int usage,
                 void *ivec)
 {
@@ -187,7 +187,7 @@ RC2_CBC_encrypt(krb5_context context,
         ivec = &local_ivec;
         memset(local_ivec, 0, sizeof(local_ivec));
     }
-    RC2_cbc_encrypt(data, data, len, s, ivec, encrypt);
+    RC2_cbc_encrypt(data, data, len, s, ivec, ngencrypt);
     return 0;
 }
 /* End VAS Modification */
