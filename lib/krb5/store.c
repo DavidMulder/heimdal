@@ -1074,7 +1074,7 @@ KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_ret_principal(krb5_storage *sp,
 		   krb5_principal *princ)
 {
-    size_t i;   /* VAS Modification - change from int to size_t */
+    int i;
     int ret;
     krb5_principal p;
     int32_t type;

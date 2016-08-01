@@ -44,7 +44,7 @@
 #include <getarg.h>
 
 static void
-print_gss_err(OM_uint32 stat, int status_type, gss_OID mech)
+print_gss_err(OM_uint32 l_stat, int status_type, gss_OID mech)
 {
     gss_buffer_desc str;
     OM_uint32 maj;
@@ -53,12 +53,12 @@ print_gss_err(OM_uint32 stat, int status_type, gss_OID mech)
     int first = 1;
 
     do {
-        maj = gss_display_status(&min, stat, status_type, mech, &msg_ctx,
+        maj = gss_display_status(&min, l_stat, status_type, mech, &msg_ctx,
                                  &str);
         if (maj != GSS_S_COMPLETE) {
             fprintf(stderr, "Error displaying GSS %s error (%lu): %lu, %lu",
                     status_type == GSS_C_GSS_CODE ? "major" : "minor",
-                    (unsigned long)stat, (unsigned long)maj,
+                    (unsigned long)l_stat, (unsigned long)maj,
                     (unsigned long)min);
             return;
         }

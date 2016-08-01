@@ -205,7 +205,9 @@ static struct _krb5_key_type keytype_rc2 = {
     NULL, /* XXX salt */
     NULL,
     rc2_get_params,
-    rc2_set_params
+    rc2_set_params,
+    NULL,
+    NULL
 };
 /* End VAS Modification */
 

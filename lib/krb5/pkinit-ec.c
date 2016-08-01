@@ -235,7 +235,4 @@ _krb5_pk_eckey_free(void *eckey)
 }
 
 #else
-
-static char lib_krb5_pkinit_ec_c = '\0';
-
 #endif

@@ -209,7 +209,6 @@ krb5_parse_name_flags(krb5_context context,
     int no_realm = flags & KRB5_PRINCIPAL_PARSE_NO_REALM;
     int require_realm = flags & KRB5_PRINCIPAL_PARSE_REQUIRE_REALM;
     int enterprise = flags & KRB5_PRINCIPAL_PARSE_ENTERPRISE;
-    int ignore_realm = flags & KRB5_PRINCIPAL_PARSE_IGNORE_REALM;
     int no_def_realm = flags & KRB5_PRINCIPAL_PARSE_NO_DEF_REALM;
 
     /* VAS Modification -- SAP Validation was complaining    *
@@ -369,11 +368,11 @@ krb5_parse_name_flags(krb5_context context,
         strupr( realm );
 #endif
     {
-        const char *p;
+        const char *np;
 
-        p = krb5_config_get_string(context, NULL, "libvas", "mit-realm", NULL );
-        if( p && *p != '\0' && strcasecmp( p, realm ) == 0 )
-            strcpy( realm, p );
+        np = krb5_config_get_string(context, NULL, "libvas", "mit-realm", NULL );
+        if( np && *np != '\0' && strcasecmp( np, realm ) == 0 )
+            strcpy( realm, np );
         else
             strupr( realm );
     }
@@ -1495,7 +1494,7 @@ static void
 tolower_str(char *s)
 {
     for (; *s != '\0'; s++) {
-        if (isupper(*s))
+        if (isupper((int)*s))
             *s = tolower_ascii(*s);
     }
 }

@@ -7,7 +7,7 @@ AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation -
 endif
 AM_CPPFLAGS += -I$(srcdir)/../lib/krb5 \
 	$(INCLUDE_libintl) \
-	-DHEIMDAL_LOCALEDIR='"$(localedir)"'
+	-DHEIMDAL_LOCALEDIR='"$(localedir)"' -Wno-unused-but-set-variable
 
 man_MANS = \
 	kinit.1 \

@@ -779,7 +779,7 @@ kadm5_log_preamble(kadm5_server_context *context,
         return ret;
     log_context->last_time = now;
 
-    if (op < kadm_first || op > kadm_last)
+    if (op > kadm_last)
         return ERANGE;
     return krb5_store_uint32(sp, op);
 }

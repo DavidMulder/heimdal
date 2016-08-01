@@ -234,19 +234,19 @@ gss_display_status(OM_uint32 *minor_status,
         else
         {
             OM_uint32        message_content;
-            gss_buffer_desc  status_string;
+            gss_buffer_desc  lstatus_string;
             
             maj_junk = m->gm_display_status( &min_junk,
                                              status_value, 
                                              GSS_C_MECH_CODE,
                                              &m->gm_mech_oid,
                                              &message_content,
-                                             &status_string );
-            if( status_string.length > 0 )
+                                             &lstatus_string );
+            if( lstatus_string.length > 0 )
             {
-                buf = malloc(status_string.length+1);
-                memset( buf, 0, status_string.length+1);
-                memcpy( buf, status_string.value, status_string.length);
+                buf = malloc(lstatus_string.length+1);
+                memset( buf, 0, lstatus_string.length+1);
+                memcpy( buf, lstatus_string.value, lstatus_string.length);
             }
         }
         /* End VAS Modification */

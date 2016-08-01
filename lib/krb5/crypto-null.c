@@ -49,8 +49,10 @@ static struct _krb5_key_type keytype_null = {
     NULL,
     NULL,
     NULL,
-    NULL
+    NULL,
 /* End VAS Modification */
+    NULL,
+    NULL
 };
 
 static krb5_error_code
