@@ -46,6 +46,22 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+#ifndef LLONG_MAX
+#ifdef LONG_LONG_MAX
+#define LLONG_MAX LONG_LONG_MAX
+#endif
+#endif
+
+#ifndef ULLONG_MAX
+#ifdef ULONG_LONG_MAX
+#define ULLONG_MAX ULONG_LONG_MAX
+#endif
+#endif
+
+#ifndef LLONG_MIN
+#define LLONG_MIN (-LLONG_MAX - 1LL)
+#endif
+
 /*
  * Convert a string to a long long integer.
  *
