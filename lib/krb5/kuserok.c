@@ -158,13 +158,7 @@ check_owner_dir(krb5_context context,
 	return EACCES;
     }
 
-#ifdef HAVE_DIRFD
     if (fstat(dirfd(dir), &st) == -1) {
-#elif defined(__sun) && defined(__XOPEN_OR_POSIX)
-    if (fstat(dir->d_fd, &st) == -1) {
-#elif defined(__sun) || defined(__hpux) || defined(_AIX)
-    if (fstat(dir->dd_fd, &st) == -1) {
-#endif
 	krb5_set_error_message(context, EACCES,
 			       "fstat(%s) of k5login.d failed",
 			       filename);
