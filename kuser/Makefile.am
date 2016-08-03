@@ -5,6 +5,10 @@ include $(top_srcdir)/Makefile.am.common
 if DARWIN
 AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation -lobjc /System/Library/Frameworks/Security.framework/Security
 endif
+if HAVE_AFS
+afs_lib = $(LIB_kafs)
+endif
+
 AM_CPPFLAGS += -I$(srcdir)/../lib/krb5 \
 	$(INCLUDE_libintl) \
 	-DHEIMDAL_LOCALEDIR='"$(localedir)"' -Wno-unused-but-set-variable
@@ -23,19 +27,14 @@ libexec_PROGRAMS = kdigest kimpersonate
 
 noinst_PROGRAMS = kverify kdecode_ticket generate-requests
 
-if HAVE_AFS
-afs_lib = $(LIB_kafs)
-endif
-
 kinit_LDADD = \
-    $(afs_lib) \
-    $(top_builddir)/lib/wind/libwind.la \
-    $(top_builddir)/lib/krb5/libkrb5.la \
-    $(top_builddir)/lib/ntlm/libheimntlm.la \
-    $(LIB_hcrypto) \
-    $(top_builddir)/lib/asn1/libasn1.la \
-    $(LIB_libintl) \
-    $(LIB_roken)
+	$(afs_lib) \
+	$(top_builddir)/lib/krb5/libkrb5.la \
+	$(top_builddir)/lib/ntlm/libheimntlm.la \
+	$(LIB_hcrypto) \
+	$(top_builddir)/lib/asn1/libasn1.la \
+	$(LIB_libintl) \
+	$(LIB_roken)
 
 kdestroy_LDADD	= $(kinit_LDADD)
 

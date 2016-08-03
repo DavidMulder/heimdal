@@ -20,6 +20,9 @@ endif
 if HAVE_AFS
 dir_afs = kafs
 endif
+if HAVE_AFS
+dir_afs = kafs
+endif
 
 SUBDIRS = \
 	roken \
