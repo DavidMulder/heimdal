@@ -36,6 +36,10 @@
 #include "hi_locl.h"
 #include <assert.h>
 
+#if defined(HAVE_GETPEEREID) && defined(_AIX)
+int getpeereid (int socket, uid_t *euid, gid_t *egid);
+#endif
+
 #define MAX_PACKET_SIZE (128 * 1024)
 
 struct heim_sipc {
