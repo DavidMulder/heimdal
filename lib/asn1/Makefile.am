@@ -51,14 +51,14 @@ libexec_heimdal_PROGRAMS = asn1_compile asn1_print
 # Vintela modification
 # not using _der_timegm
 # check-timegm
-TESTS = check-der check-gen check-ber check-template
+TESTS = check-der check-gen check-ber
 check_PROGRAMS = $(TESTS)
 
 asn1_gen_SOURCES = asn1_gen.c
 asn1_print_SOURCES = asn1_print.c
 check_der_SOURCES = check-der.c check-common.c check-common.h
 
-check_template_SOURCES = check-template.c check-common.c check-common.h
+check_template_SOURCES = check-common.c check-common.h
 nodist_check_template_SOURCES = $(gen_files_test_template)
 
 dist_check_gen_SOURCES = check-gen.c check-common.c check-common.h
