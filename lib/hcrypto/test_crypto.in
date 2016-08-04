@@ -85,7 +85,12 @@ done
 ./example_evp_cipher 1 ${srcdir}/test_crypto.in test-out-1 || \
     { echo "1 failed" ; exit 1; }
 
-for a in 7 15 16 17 31 ; do
+UPPER="32 33"
+uname -a | egrep -e SunOS -e 5.10 2>&1 >/dev/null
+if [ $? -eq 0 ] ; then
+    UPPER=
+fi
+for a in 7 15 16 17 31 $UPPER ; do
     ./example_evp_cipher $a ${srcdir}/test_crypto.in test-out-$a
     cmp test-out-1 test-out-$a || { echo "cmp $a failed" ; exit 1; }
 done
