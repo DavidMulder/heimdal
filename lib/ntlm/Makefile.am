@@ -34,10 +34,6 @@ if DARWIN
 AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation
 endif
 
-TESTS = test_ntlm
-
-check_PROGRAMS = test_ntlm
-
 LDADD = libheimntlm.la $(LIB_roken)
 
 EXTRA_DIST = \
