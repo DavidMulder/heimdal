@@ -1104,6 +1104,25 @@ krb5_sendto_context(krb5_context context,
 	    type = KRB5_KRBHST_KDC;
     }
 
+    /* VAS Modification <jeff.webb@quest.com>
+     *
+     * VAS "overrides" many functions with libvas counterparts.
+     * In 1.2.1 it looks like they have put a send_to hook in, but
+     * because the sendto is only a small portion of what is overridden
+     * then VAS will not use their interface just yet. This means that it
+     * will continue doing what it was doing under the 0.7 source
+     */
+    if (context->sendto_func) {
+        if (!ctx->krbhst) {
+            krb5_krbhst_handle handle = NULL;
+            ret = krb5_krbhst_init(context, realm, type, &handle);
+            if (ret)
+                goto out;
+            _krb5_sendto_ctx_set_krb5hst(context, ctx, handle);
+        }
+        return (context->sendto_func(context, send_data, ctx->krbhst, receive));
+    }
+
     ctx->send_data = send_data;
 
     if ((int)send_data->length > context->large_msg_size)
