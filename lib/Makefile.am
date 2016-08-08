@@ -17,9 +17,6 @@ endif
 if SQLITE3
 dir_sqlite = sqlite
 endif
-if HAVE_AFS
-dir_afs = kafs
-endif
 if !NO_AFS
 dir_afs = kafs
 endif
