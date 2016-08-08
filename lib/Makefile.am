@@ -20,7 +20,7 @@ endif
 if HAVE_AFS
 dir_afs = kafs
 endif
-if HAVE_AFS
+if !NO_AFS
 dir_afs = kafs
 endif
 
