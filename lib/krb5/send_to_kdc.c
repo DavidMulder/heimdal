@@ -1114,7 +1114,6 @@ krb5_sendto_context(krb5_context context,
      */
     if (context->sendto_func) {
         if (!ctx->krbhst) {
-            krb5_krbhst_handle handle = NULL;
             ret = krb5_krbhst_init(context, realm, type, &handle);
             if (ret)
                 goto out;
