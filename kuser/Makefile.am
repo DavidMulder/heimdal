@@ -5,7 +5,7 @@ include $(top_srcdir)/Makefile.am.common
 if DARWIN
 AM_LDFLAGS = -lobjc /System/Library/Frameworks/Foundation.framework/Foundation -lobjc /System/Library/Frameworks/Security.framework/Security
 endif
-if !NO_AFS
+if HAVE_AFS
 afs_lib = $(LIB_kafs)
 endif
 
