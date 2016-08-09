@@ -288,11 +288,26 @@ _krb5_fast_cf2 (
 	krb5_keyblock */*armorkey*/,
 	krb5_crypto */*armor_crypto*/);
 
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+_krb5_find_capath (
+	krb5_context /*context*/,
+	const char */*client_realm*/,
+	const char */*local_realm*/,
+	const char */*server_realm*/,
+	krb5_boolean /*use_hierachical*/,
+	char ***/*rpath*/,
+	size_t */*npath*/);
+
 KRB5_LIB_FUNCTION struct _krb5_checksum_type * KRB5_LIB_CALL
 _krb5_find_checksum (krb5_cksumtype /*type*/);
 
 KRB5_LIB_FUNCTION struct _krb5_encryption_type * KRB5_LIB_CALL
 _krb5_find_enctype (krb5_enctype /*type*/);
+
+KRB5_LIB_FUNCTION void KRB5_LIB_CALL
+_krb5_free_capath (
+	krb5_context /*context*/,
+	char **/*capath*/);
 
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 _krb5_free_key_data (
