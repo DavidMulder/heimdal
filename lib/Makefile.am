@@ -20,7 +20,7 @@ endif
 if SQLITE3
 dir_sqlite = sqlite
 endif
-if HAVE_AFS
+if !NO_AFS
 dir_afs = kafs
 endif
 if IPC

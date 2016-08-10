@@ -23,7 +23,7 @@ libexec_PROGRAMS = kdigest kimpersonate
 
 noinst_PROGRAMS = kverify kdecode_ticket generate-requests
 
-if HAVE_AFS
+if !NO_AFS
 afs_lib = $(LIB_kafs)
 endif
 

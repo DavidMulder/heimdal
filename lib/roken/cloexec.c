@@ -61,12 +61,6 @@ void ROKEN_LIB_FUNCTION
 rk_cloexec_dir(DIR * d)
 {
 #ifndef _WIN32
-#ifdef HAVE_DIRFD
     rk_cloexec(dirfd(d));
-#elif defined(__sun) && defined(__XOPEN_OR_POSIX)
-    rk_cloexec(d->d_fd);
-#elif defined(__sun) || defined(__hpux) || defined(_AIX)
-    rk_cloexec(d->dd_fd);
-#endif
 #endif
 }

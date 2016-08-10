@@ -139,39 +139,6 @@ srv_find_realm(krb5_context context, krb5_krbhst_info ***res, int *count,
     return 0;
 }
 
-
-struct krb5_krbhst_data {
-    char *realm;
-    unsigned int flags;
-    int def_port;
-    int port;			/* hardwired port number if != 0 */
-#define KD_CONFIG		 1
-#define KD_SRV_UDP		 2
-#define KD_SRV_TCP		 4
-#define KD_SRV_HTTP		 8
-#define KD_FALLBACK		16
-#define KD_CONFIG_EXISTS	32
-#define KD_LARGE_MSG		64
-#define KD_PLUGIN	       128
-    krb5_error_code (*get_next)(krb5_context, struct krb5_krbhst_data *,
-				krb5_krbhst_info**);
-
-    unsigned int fallback_count;
-
-    struct krb5_krbhst_info *hosts, **index, **end;
-
-    /* VAS Addition - wynn.wilkes@quest.com 
-     * This field will be set to the value passed to krb5_krbhst_init() to 
-     * indicate what type of server this is. It will be set to either 
-     * KRB5_KRBHST_KDC, KRB5_KRBHST_ADMIN, KRB5_KRBHST_CHANGEPW, or 
-     * KRB5_KRBHST_KRB524. This will be used by the VAS sendto override code
-     * to help determine what type of server we're communicating with so that
-     * we can decide what port should be used.
-     */
-    int krbhst_type;
-    /* End VAS Addition */
-};
-
 static krb5_boolean
 krbhst_empty(const struct krb5_krbhst_data *kd)
 {
