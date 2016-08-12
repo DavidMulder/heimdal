@@ -40,6 +40,7 @@
 #define UI_UTIL_read_pw_string hc_UI_UTIL_read_pw_string
 
 int	UI_UTIL_read_pw_string(char *, int, const char *, int); /* XXX */
+int UI_UTIL_read_pw_string_with_verify_prompt(char*, int, char*, char*);
 
 #endif /* _HEIM_UI_H */
 

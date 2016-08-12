@@ -211,3 +211,33 @@ UI_UTIL_read_pw_string(char *buf, int length, const char *prompt, int verify)
     }
     return ret;
 }
+
+int
+UI_UTIL_read_pw_string_with_verify_prompt(char *buf, int length, char *prompt, char* verify)
+{
+    int ret;
+
+    ret = read_string("", prompt, buf, length, 0);
+    if (ret)
+        return ret;
+
+    if (verify)
+    {
+        char *buf2;
+        buf2 = malloc(length);
+        if (buf2 == NULL)
+            return 1;
+
+        ret = read_string("", verify, buf2, length, 0);
+        if (ret)
+        {
+            free(buf2);
+            return ret;
+        }
+        if (strcmp(buf2, buf) != 0)
+            ret = 1;
+        free(buf2);
+    }
+    return ret;
+}
+
