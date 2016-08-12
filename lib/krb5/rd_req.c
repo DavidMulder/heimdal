@@ -902,14 +902,15 @@ krb5_rd_req_ctx(krb5_context context,
 	if (id == NULL)
 	    goto out;
 
-	if (server == NULL) {
 	    ret = _krb5_principalname2krb5_principal(context,
 						     &service,
 						     ap_req.ticket.sname,
 						     ap_req.ticket.realm);
 	    if (ret)
 		goto out;
-	    server = service;
+
+    if(server == NULL){
+        server = service;
 	}
 
 	ret = get_key_from_keytab(context,
