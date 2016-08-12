@@ -40,6 +40,9 @@ _gss_mech_cred_find(gss_const_cred_id_t cred_handle, gss_OID mech_type)
 	HEIM_SLIST_FOREACH(mc, &cred->gc_mc, gmc_link) {
 		if (gss_oid_equal(mech_type, mc->gmc_mech_oid))
 			return mc->gmc_cred;
+        if( gss_oid_equal(mech_type, GSS_MSKRB5_MECHANISM) &&
+            gss_oid_equal(mc->gmc_mech_oid, GSS_KRB5_MECHANISM) )
+            return mc->gmc_cred;
 	}
 	return GSS_C_NO_CREDENTIAL;
 }
