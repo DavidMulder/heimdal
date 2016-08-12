@@ -48,6 +48,10 @@
 #endif
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct getargs{
     const char *long_name;
     char short_name;
@@ -108,5 +112,9 @@ arg_printusage_i18n (struct getargs *args,
 
 ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL
 free_getarg_strings (getarg_strings *);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __GETARG_H__ */
