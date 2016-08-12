@@ -55,12 +55,14 @@
 
 #include "crypto-headers.h"
 #include <krb5.h>
-#include <kadm5/admin.h>
-#include <kadm5/kadm5_err.h>
 
 #include <sl.h>
 #include <getarg.h>
 #include <hex.h>
+
+#ifdef HAVE_STRINGS_H
+#include <strings.h>
+#endif
 
 extern krb5_context context;
 

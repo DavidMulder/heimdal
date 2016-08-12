@@ -86,81 +86,12 @@ command = {
 	max_args = "0"
 }
 command = {
-	name = "change"
-	option = {
-		long = "realm"
-		short = "r"
-		type = "string"
-		argument = "realm"
-		help = "realm to use"
-	}
-	option = {
-		long = "admin-server"
-		short = "a"
-		type = "string"
-		argument = "host"
-		help = "server to contact"
-	}
-	option = {
-		long = "server-port"
-		short = "s"
-		type = "integer"
-		argument = "port number"
-		help = "port number on server"
-	}
-	function = "kt_change"
-	argument = "[principal...]"
-	help = "Change keys for specified principals (default all)."
-}
-command = {
 	name = "copy"
 	function = "kt_copy"
 	argument = "source destination"
 	min_args = "2"
 	max_args = "2"
 	help = "Copies one keytab to another."
-}
-command = {
-	name = "get"
-	option = {
-		long = "principal"
-		short = "p"
-		type = "string"
-		help = "admin principal"
-		argument = "principal"
-	}
-	option = {
-		long = "enctypes"
-		short = "e"
-		type = "strings"
-		help = "encryption types to use"
-		argument = "enctype"
-	}
-	option = {
-		long = "realm"
-		short = "r"
-		type = "string"
-		argument = "realm"
-		help = "realm to use"
-	}
-	option = {
-		long = "admin-server"
-		short = "a"
-		type = "string"
-		argument = "host"
-		help = "server to contact"
-	}
-	option = {
-		long = "server-port"
-		short = "s"
-		type = "integer"
-		argument = "port number"
-		help = "port number on server"
-	}
-	function = "kt_get"
-	min_args = "1"
-	argument = "principal..."
-	help = "Change keys for specified principals, and add them to the keytab."
 }
 command = {
 	name = "list"
@@ -193,7 +124,6 @@ command = {
 }
 command = {
 	name = "remove"
-	name = "delete"
 	option = {
 		long = "principal"
 		short = "p"

@@ -33,6 +33,7 @@
 
 #include "ktutil_locl.h"
 #include <err.h>
+#include <vers.h>
 
 RCSID("$Id$");
 
