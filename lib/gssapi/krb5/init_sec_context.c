@@ -874,7 +874,8 @@ OM_uint32 GSSAPI_CALLCONV _gsskrb5_init_sec_context
     }
 
     if (mech_type != GSS_C_NO_OID &&
-	!gss_oid_equal(mech_type, GSS_KRB5_MECHANISM))
+       (!gss_oid_equal(mech_type, GSS_KRB5_MECHANISM) &&
+       !gss_oid_equal(mech_type, GSS_MSKRB5_MECHANISM)) )
 	return GSS_S_BAD_MECH;
 
     if (input_token == GSS_C_NO_BUFFER || input_token->length == 0) {
