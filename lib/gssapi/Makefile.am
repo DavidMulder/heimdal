@@ -269,7 +269,7 @@ $(test_context_OBJECTS): $(BUILTHEADERS)
 
 $(libgssapi_la_OBJECTS): $(srcdir)/version-script.map
 
-BUILT_SOURCES = $(spnego_files:.x=.c) $(gssapi_files:.x=.c)
+BUILT_SOURCES = $(spnego_files:.x=.c) $(gssapi_files:.x=.c) gkrb5_err.h gkrb5_err.c
 
 $(libgssapi_la_OBJECTS): gkrb5_err.h
 gkrb5_err.h: $(srcdir)/krb5/gkrb5_err.et

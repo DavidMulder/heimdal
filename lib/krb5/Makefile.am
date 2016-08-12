@@ -398,6 +398,8 @@ CLEANFILES = \
 	heim_err.c heim_err.h \
 	k524_err.c k524_err.h
 
+BUILT_SOURCES = krb5_err.c krb5_err.h krb_err.c krb_err.h heim_err.c heim_err.h k524_err.c k524_err.h
+
 $(libkrb5_la_OBJECTS): krb5_err.h krb_err.h heim_err.h k524_err.h
 
 test_config_strings.out: test_config_strings.cfg

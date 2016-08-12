@@ -58,7 +58,8 @@ main(int argc, char **argv)
 {
     size_t sz;
     size_t buf_sz;
-    int i, j;
+    size_t i;
+    int j;
 
     for (i = 0; i < sizeof(tests)/sizeof(tests[0]); ++i) {
 	char *buf;
