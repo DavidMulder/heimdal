@@ -152,6 +152,8 @@ gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_nt_export_name_oid_desc =
 gss_OID_desc GSSAPI_LIB_VARIABLE __gss_krb5_nt_principal_name_oid_desc =
     {10, rk_UNCONST("\x2a\x86\x48\x86\xf7\x12\x01\x02\x02\x01") };
 
+gss_OID gss_nt_krb5_name = &__gss_krb5_nt_principal_name_oid_desc;
+
 /*
  * draft-ietf-cat-iakerb-09, IAKERB:
  *   The mechanism ID for IAKERB proxy GSS-API Kerberos, in accordance
