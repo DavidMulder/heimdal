@@ -436,6 +436,9 @@ __gss_get_mechanism(gss_const_OID mech)
 	HEIM_SLIST_FOREACH(m, &_gss_mechs, gm_link) {
 		if (gss_oid_equal(&m->gm_mech.gm_mech_oid, mech))
 			return &m->gm_mech;
+        if( gss_oid_equal( mech, GSS_MSKRB5_MECHANISM ) &&
+            gss_oid_equal( &m->gm_mech.gm_mech_oid, GSS_KRB5_MECHANISM ) )
+            return &m->gm_mech ;
 	}
 	return NULL;
 }
