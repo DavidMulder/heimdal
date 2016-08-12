@@ -936,7 +936,7 @@ heim_ntlm_encode_type2(const struct ntlm_type2 *type2, struct ntlm_buf *data)
     CHECK(put_string(out, ucs2, type2->targetname), 0);
     CHECK_SIZE(krb5_storage_write(out, type2->targetinfo.data,
 			     type2->targetinfo.length),
-	  type2->targetinfo.length);
+	  (int32_t)type2->targetinfo.length);
 
     {
 	krb5_data d;

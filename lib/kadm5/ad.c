@@ -414,7 +414,7 @@ nt2unixtime(const char *str)
     unsigned long long t;
     t = strtoll(str, NULL, 10);
     t = ((t - NTTIME_EPOCH) / (long long)10000000);
-    if (t > (((time_t)(~(long long)0)) >> 1))
+    if (t > (long long)(((time_t)(~(long long)0)) >> 1))
 	return 0;
     return (time_t)t;
 }
