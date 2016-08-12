@@ -750,7 +750,8 @@ get_key_from_keytab(krb5_context context,
 		    krb5_ap_req *ap_req,
 		    krb5_const_principal server,
 		    krb5_keytab keytab,
-		    krb5_keyblock **out_key)
+		    krb5_keyblock **out_key,
+		    int get_highest)
 {
     krb5_keytab_entry entry;
     krb5_error_code ret;
@@ -762,10 +763,30 @@ get_key_from_keytab(krb5_context context,
     else
 	real_keytab = keytab;
 
+    if (get_highest > 0)
+        kvno = 0;
+    else if (get_highest < 0)
+    {
+        /* Get the highest first so we can then request the next to
+         * highest */
+        ret = krb5_kt_get_entry (context,
+                                 real_keytab,
+                                 server,
+                                 0,
+                                 ap_req->ticket.enc_part.etype,
+                                 &entry);
+        if (!ret && entry.vno > 0) {
+            kvno = entry.vno - 1;
+        }
+        krb5_kt_free_entry (context, &entry);
+    }
+    else
+    {
     if (ap_req->ticket.enc_part.kvno)
 	kvno = *ap_req->ticket.enc_part.kvno;
     else
 	kvno = 0;
+    }
 
     ret = krb5_kt_get_entry (context,
 			     real_keytab,
@@ -821,6 +842,8 @@ krb5_rd_req_ctx(krb5_context context,
     krb5_rd_req_out_ctx o = NULL;
     krb5_keytab id = NULL, keytab = NULL;
     krb5_principal service = NULL;
+    int got_key_from_keytab = 0;
+    krb5_keyblock *keyblock = NULL;
 
     *outctx = NULL;
 
@@ -893,7 +916,8 @@ krb5_rd_req_ctx(krb5_context context,
 				  &ap_req,
 				  server,
 				  id,
-				  &o->keyblock);
+				  &o->keyblock,
+				  0);
 	if (ret) {
 	    /* If caller specified a server, fail. */
 	    if (service == NULL && (context->flags & KRB5_CTX_F_RD_REQ_IGNORE) == 0)
@@ -903,6 +927,7 @@ krb5_rd_req_ctx(krb5_context context,
 	     */
 	    o->keyblock = NULL;
 	}
+    got_key_from_keytab = 1;
     }
 
     if (o->keyblock) {
@@ -920,8 +945,63 @@ krb5_rd_req_ctx(krb5_context context,
 				  &o->ticket,
 				  KRB5_KU_AP_REQ_AUTH);
 
+    if (got_key_from_keytab && ret)
+    {
+        int do_again = 1;
+TRYAGAIN:
+        if (o->keyblock)
+            krb5_free_keyblock (context, keyblock);
+        keyblock = NULL;
+        ret = get_key_from_keytab( context,
+                                   &ap_req,
+                                   server,
+                                   inctx->keytab,
+                                   &o->keyblock,
+                                   do_again == 1 ? 1 : -1); /* get highest */
+
 	if (ret)
+    {
 	    goto out;
+    }
+
+        ret = krb5_verify_ap_req( context,
+                                  auth_context,
+                                  &ap_req,
+                                  server,
+                                  o->keyblock,
+                                  0,
+                                  &o->ap_req_options,
+                                  &o->ticket );
+
+        /* If the highest kvno didn't work AND the users kvno is
+         * 1, then this might by Win2k behavior, and we need to use
+         * the second-highest entry to verify, as the ticket could
+         * be from before the latest password change. */
+        if( ret &&
+            ( (ap_req.ticket.enc_part.kvno &&
+               *ap_req.ticket.enc_part.kvno == 1) ||
+              !ap_req.ticket.enc_part.kvno) &&
+            do_again == 1 )
+        {
+            do_again = 0;
+            goto TRYAGAIN;
+        }
+
+        if( ret == KRB5KRB_AP_ERR_BAD_INTEGRITY &&
+            krb5_principal_compare( context, server, service ) == FALSE )
+        {
+            /* If we actually got a keytab entry out of the keytab, we want
+             * to make sure that it is the key for the same principal the
+             * ticket was encrypted with.  If it is different fail with this
+             * WRONG_PRINC error. If we don't fail here we will get a hard
+             * to understand DECRYPT_INTEGRITY failure. */
+            krb5_clear_error_string(context);
+            ret = KRB5KRB_AP_WRONG_PRINC;
+            goto out;
+        }
+    }
+
+    krb5_free_keyblock(context, keyblock);
 
     } else {
 	/*
