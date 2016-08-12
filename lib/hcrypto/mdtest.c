@@ -295,7 +295,7 @@ hash_test (struct hash_foo *hash, struct test *tests)
 
 	(*hash->final) (res, ctx);
 	if (memcmp (res, t->hash, hash->hsize) != 0) {
-	    int i;
+	    unsigned i;
 
 	    printf ("%s(\"%s\") failed\n", hash->name, t->str);
 	    printf("should be:  ");

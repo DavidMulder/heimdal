@@ -329,7 +329,8 @@ int
 main(int argc, char **argv)
 {
     int ret = 0;
-    int i, idx = 0;
+    unsigned i;
+    int idx = 0;
 
     setprogname(argv[0]);
 

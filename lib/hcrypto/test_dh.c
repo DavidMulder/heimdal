@@ -42,6 +42,7 @@
 
 #include <ctype.h>
 #include <getarg.h>
+#include <vers.h>
 
 #include <dh.h>
 #include <evp.h>
@@ -360,7 +361,7 @@ static int check_prime(ENGINE *engine, struct prime *pr)
 
     /* 3. compute shared secret */
     size = DH_size(dh1);
-    if (size != DH_size(dh2)) {
+    if (size != (unsigned) DH_size(dh2)) {
 	fprintf(stderr, "size does not match!\n");
 	exit(EXIT_FAILURE);
     }

@@ -155,7 +155,7 @@ test_BN_import_export(void)
 {
     BIGNUM *bn;
     int ret = 0;
-    int i;
+    unsigned i;
 
     bn = BN_new();
 

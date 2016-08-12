@@ -37,6 +37,7 @@
 #include <err.h>
 #include <roken.h>
 #include <getarg.h>
+#include <vers.h>
 
 #include <krb5-types.h> /* or <inttypes.h> */
 #include <heimntlm.h>

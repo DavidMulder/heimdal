@@ -34,6 +34,7 @@
 #include <config.h>
 #include <roken.h>
 #include <getarg.h>
+#include <vers.h>
 
 #include <engine.h>
 #include <evp.h>
@@ -79,7 +80,7 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
 {
     unsigned char *res, *res2;
     unsigned int len2;
-    int keylen;
+    unsigned keylen;
 
     res = malloc(RSA_size(rsa));
     if (res == NULL)
@@ -95,7 +96,7 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
     if (keylen <= 0)
 	errx(1, "failed to private encrypt: %d %d", (int)len, (int)keylen);
 
-    if (keylen > RSA_size(rsa))
+    if (keylen > (unsigned) RSA_size(rsa))
 	errx(1, "keylen > RSA_size(rsa)");
 
     keylen = RSA_public_decrypt(keylen, res, res2, rsa, padding);
@@ -114,7 +115,7 @@ check_rsa(const unsigned char *in, size_t len, RSA *rsa, int padding)
     if (keylen <= 0)
 	errx(1, "failed to public encrypt: %d", (int)keylen);
 
-    if (keylen > RSA_size(rsa))
+    if (keylen > (unsigned) RSA_size(rsa))
 	errx(1, "keylen > RSA_size(rsa)");
 
     keylen = RSA_private_decrypt(keylen, res, res2, rsa, padding);

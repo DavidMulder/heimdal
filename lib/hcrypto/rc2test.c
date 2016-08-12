@@ -123,7 +123,7 @@ main(int argc, char **argv)
     RC2_KEY key;
     unsigned char t[8];
     unsigned char out[40];
-    int i;
+    unsigned i;
 
     for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
 	RC2_set_key(&key, tests[i].keylen, tests[i].key, tests[i].bitsize);

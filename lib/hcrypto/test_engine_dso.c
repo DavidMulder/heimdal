@@ -34,6 +34,7 @@
 #include <config.h>
 #include <roken.h>
 #include <getarg.h>
+#include <vers.h>
 
 #include <engine.h>
 #include <evp.h>
@@ -260,7 +261,7 @@ main(int argc, char **argv)
 
     if (dh_flag) {
 	DH *server, *client;
-	int i;
+	unsigned i;
 
 	/* RFC2412-MODP-group2 */
 	const char *p =

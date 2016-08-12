@@ -138,7 +138,7 @@ int
 main(int argc, char **argv)
 {
     int ret = 0;
-    int i;
+    unsigned i;
 
     for (i = 0; i < sizeof(pkcs5_tests)/sizeof(pkcs5_tests[0]); i++)
 	ret += test_pkcs5_pbe2(&pkcs5_tests[i]);
