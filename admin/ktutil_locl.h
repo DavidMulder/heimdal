@@ -55,6 +55,8 @@
 
 #include "crypto-headers.h"
 #include <krb5.h>
+#include <kadm5/admin.h>
+#include <kadm5/kadm5_err.h>
 
 #include <sl.h>
 #include <getarg.h>
