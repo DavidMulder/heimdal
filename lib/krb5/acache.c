@@ -70,7 +70,7 @@ static const struct {
     { ccErrContextNotFound,	KRB5_CC_NOTFOUND },
     { ccIteratorEnd,		KRB5_CC_END },
     { ccErrNoMem,		KRB5_CC_NOMEM },
-    { ccErrServerUnavailable,	KRB5_CC_NOSUPP },
+    { ccErrServerUnavailable,	KRB5_CC_IO },
     { ccErrInvalidCCache,	KRB5_CC_BADNAME },
     { ccNoError,		0 }
 };
