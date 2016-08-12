@@ -42,7 +42,7 @@ kt_remove(struct remove_options *opt, int argc, char **argv)
     krb5_keytab_entry entry;
     krb5_keytab keytab;
     krb5_principal principal = NULL;
-    krb5_enctype enctype = 0;
+    krb5_enctype enctype = ETYPE_NULL;
 
     if(opt->principal_string) {
 	ret = krb5_parse_name(context, opt->principal_string, &principal);
@@ -56,7 +56,7 @@ kt_remove(struct remove_options *opt, int argc, char **argv)
 	if(ret) {
 	    int t;
 	    if(sscanf(opt->enctype_string, "%d", &t) == 1)
-		enctype = t;
+		enctype = (krb5_enctype) t;
 	    else {
 		krb5_warn(context, ret, "%s", opt->enctype_string);
 		if(principal)

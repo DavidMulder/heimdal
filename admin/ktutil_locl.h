@@ -73,6 +73,14 @@ extern char *keytab_string;
 
 krb5_keytab ktutil_open_keytab(void);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "ktutil-commands.h"
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __KTUTIL_LOCL_H__ */

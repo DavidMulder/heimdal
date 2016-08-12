@@ -87,7 +87,7 @@ kt_copy (void *opt, int argc, char **argv)
 	    krb5_warn(context, ret, "krb5_unparse_name");
 	    name_str = NULL; /* XXX */
 	}
-	ret = krb5_enctype_to_string(context, entry.keyblock.keytype, &etype_str);
+	ret = krb5_enctype_to_string(context, (krb5_enctype) entry.keyblock.keytype, &etype_str);
 	if(ret) {
 	    krb5_warn(context, ret, "krb5_enctype_to_string");
 	    etype_str = NULL; /* XXX */
@@ -95,7 +95,7 @@ kt_copy (void *opt, int argc, char **argv)
 	ret = krb5_kt_get_entry(context, dst_keytab,
 				entry.principal,
 				entry.vno,
-				entry.keyblock.keytype,
+				(krb5_enctype) entry.keyblock.keytype,
 				&dummy);
 	if(ret == 0) {
 	    /* this entry is already in the new keytab, so no need to

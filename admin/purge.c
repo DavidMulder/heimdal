@@ -71,7 +71,7 @@ add_entry (krb5_principal princ, int vno, time_t timestamp, struct e **head)
 	}
 	return;
     }
-    e = malloc (sizeof (*e));
+    e = (struct e *) malloc (sizeof (*e));
     if (e == NULL)
 	krb5_errx (context, 1, "malloc: out of memory");
     ret = krb5_copy_principal (context, princ, &e->principal);

@@ -79,7 +79,7 @@ kt_add(struct add_options *opt, int argc, char **argv)
     if(ret) {
 	int t;
 	if(sscanf(opt->enctype_string, "%d", &t) == 1)
-	    enctype = t;
+	    enctype = (krb5_enctype) t;
 	else {
 	    krb5_warn(context, ret, "%s", opt->enctype_string);
 	    goto out;

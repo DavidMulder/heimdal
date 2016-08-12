@@ -53,9 +53,17 @@
 #define hex_encode rk_hex_encode
 #define hex_decode rk_hex_decode
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 ROKEN_LIB_FUNCTION ssize_t ROKEN_LIB_CALL
 	hex_encode(const void *, size_t, char **);
 ROKEN_LIB_FUNCTION ssize_t ROKEN_LIB_CALL
 	hex_decode(const char *, void *, size_t);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _rk_HEX_H_ */

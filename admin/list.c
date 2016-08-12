@@ -95,7 +95,7 @@ do_list(struct list_options *opt, const char *keytab_str)
 	rtbl_add_column_entry_by_id(table, 0, buf);
 
 	ret = krb5_enctype_to_string(context,
-				     entry.keyblock.keytype, &s);
+				     (krb5_enctype) entry.keyblock.keytype, &s);
 	if (ret != 0) {
 	    snprintf(buf, sizeof(buf), "unknown (%d)", entry.keyblock.keytype);
 	    rtbl_add_column_entry_by_id(table, 1, buf);
@@ -114,7 +114,7 @@ do_list(struct list_options *opt, const char *keytab_str)
 	}
 	if(opt->keys_flag) {
 	    size_t i;
-	    s = malloc(2 * entry.keyblock.keyvalue.length + 1);
+	    s = (char *) malloc(2 * entry.keyblock.keyvalue.length + 1);
 	    if (s == NULL) {
 		krb5_warnx(context, "malloc failed");
 		ret = ENOMEM;
