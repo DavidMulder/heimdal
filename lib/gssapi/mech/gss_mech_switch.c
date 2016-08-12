@@ -427,6 +427,7 @@ _gss_load_mech(void)
 	HEIMDAL_MUTEX_unlock(&_gss_mech_mutex);
 }
 
+gss_OID GSSAPI_LIB_VARIABLE GSS_MSKRB5_MECHANISM;
 gssapi_mech_interface
 __gss_get_mechanism(gss_const_OID mech)
 {

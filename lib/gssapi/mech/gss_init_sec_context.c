@@ -28,6 +28,7 @@
 
 #include "mech_locl.h"
 
+gss_OID GSSAPI_LIB_VARIABLE GSS_MSKRB5_MECHANISM;
 static gss_cred_id_t
 _gss_mech_cred_find(gss_const_cred_id_t cred_handle, gss_OID mech_type)
 {

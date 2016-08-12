@@ -830,6 +830,7 @@ repl_mutual
  * gss_init_sec_context
  */
 
+gss_OID GSSAPI_LIB_VARIABLE GSS_MSKRB5_MECHANISM;
 OM_uint32 GSSAPI_CALLCONV _gsskrb5_init_sec_context
 (OM_uint32 * minor_status,
  gss_const_cred_id_t cred_handle,

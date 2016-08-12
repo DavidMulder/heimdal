@@ -371,6 +371,7 @@ spnego_initial
     return GSS_S_CONTINUE_NEEDED;
 }
 
+gss_OID GSSAPI_LIB_VARIABLE GSS_MSKRB5_MECHANISM;
 static OM_uint32
 spnego_reply
            (OM_uint32 * minor_status,
@@ -465,9 +466,15 @@ spnego_reply
 		   ctx->preferred_mech_type->elements,
 		   ctx->oidlen) != 0)
 	{
-	    gss_delete_sec_context(&minor, &ctx->negotiated_ctx_id,
-				   GSS_C_NO_BUFFER);
-	    ctx->negotiated_ctx_id = GSS_C_NO_CONTEXT;
+        if( memcmp( ctx->oidbuf + sizeof(ctx->oidbuf) - ctx->oidlen,
+                    GSS_MSKRB5_MECHANISM->elements,
+                    ctx->oidlen ) ||
+            !gss_oid_equal( ctx->preferred_mech_type, GSS_KRB5_MECHANISM ) )
+        {
+            gss_delete_sec_context(&minor, &ctx->negotiated_ctx_id, 
+                    GSS_C_NO_BUFFER);
+            ctx->negotiated_ctx_id = GSS_C_NO_CONTEXT;
+        }
 	}
     } else if (ctx->oidlen == 0) {
 	free_NegotiationToken(&resp);
