@@ -573,7 +573,7 @@ fortuna_bytes(unsigned char *outdata, int size)
 	goto out;
 
     resend_bytes += size;
-    if (resend_bytes > FORTUNA_RESEED_BYTE || resend_bytes < size) {
+    if (resend_bytes > FORTUNA_RESEED_BYTE || resend_bytes < (unsigned)size) {
 	resend_bytes = 0;
 	fortuna_reseed();
     }
