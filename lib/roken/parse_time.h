@@ -46,6 +46,10 @@
 #endif
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 parse_time (const char *s, const char *def_unit);
 
@@ -76,5 +80,9 @@ unparse_time_approx (int t, char *s, size_t len);
 
 ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL
 print_time_table (FILE *f);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __PARSE_TIME_H__ */

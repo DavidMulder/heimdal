@@ -195,7 +195,7 @@ main(int argc, char **argv)
 	if(ret)
 	    krb5_err(context, 1, ret, "krb5_cc_retrieve_cred");
 
-	ret = decode_Ticket(c.ticket.data, c.ticket.length, &ticket, NULL);
+	ret = decode_Ticket( (unsigned char *) c.ticket.data, c.ticket.length, &ticket, NULL);
 	if (ret) {
 	    krb5_clear_error_message(context);
 	    krb5_err(context, 1, ret, "decode_Ticket");

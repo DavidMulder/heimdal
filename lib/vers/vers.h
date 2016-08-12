@@ -36,6 +36,14 @@
 #ifndef __VERS_H__
 #define __VERS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void print_version(const char *);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /*  __VERS_H__ */

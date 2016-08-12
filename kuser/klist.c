@@ -160,7 +160,7 @@ print_cred_verbose(krb5_context context, krb5_creds *cred, int do_json)
 	size_t len;
 	char *s;
 
-	decode_Ticket(cred->ticket.data, cred->ticket.length, &t, &len);
+	decode_Ticket((unsigned char *) cred->ticket.data, cred->ticket.length, &t, &len);
 	ret = krb5_enctype_to_string(context, t.enc_part.etype, &s);
 	printf(N_("Ticket etype: ", ""));
 	if (ret == 0) {
@@ -173,7 +173,7 @@ print_cred_verbose(krb5_context context, krb5_creds *cred, int do_json)
 	    printf(N_(", kvno %d", ""), *t.enc_part.kvno);
 	printf("\n");
 	if(cred->session.keytype != t.enc_part.etype) {
-	    ret = krb5_enctype_to_string(context, cred->session.keytype, &str);
+	    ret = krb5_enctype_to_string(context, (krb5_enctype) cred->session.keytype, &str);
 	    if(ret)
 		krb5_warn(context, ret, "session keytype");
 	    else {

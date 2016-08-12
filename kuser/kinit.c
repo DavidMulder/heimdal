@@ -579,7 +579,7 @@ get_new_tickets(krb5_context context,
     if (etype_str.num_strings) {
 	int i;
 
-	enctype = malloc(etype_str.num_strings * sizeof(*enctype));
+	enctype = (krb5_enctype *)malloc(etype_str.num_strings * sizeof(*enctype));
 	if (enctype == NULL)
 	    errx(1, "out of memory");
 	for(i = 0; i < etype_str.num_strings; i++) {
@@ -894,7 +894,7 @@ static time_t
 renew_func(void *ptr)
 {
     krb5_error_code ret;
-    struct renew_ctx *ctx = ptr;
+    struct renew_ctx *ctx = (struct renew_ctx *)ptr;
     time_t renew_expire;
     static time_t exp_delay = 1;
 

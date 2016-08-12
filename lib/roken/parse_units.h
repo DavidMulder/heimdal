@@ -49,6 +49,10 @@
 #endif
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct units {
     const char *name;
     unsigned mult;
@@ -111,5 +115,9 @@ unparse_flags (int num, const struct units *units, char *s, size_t len);
 
 ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL
 print_flags_table (const struct units *units, FILE *f);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __PARSE_UNITS_H__ */

@@ -72,6 +72,10 @@
 #define		SNAME_SZ	40
 #define		INST_SZ		40
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct ktext {
     unsigned int length;		/* Length of the text */
     unsigned char dat[MAX_KTXT_LEN];	/* The data itself */
@@ -139,5 +143,9 @@ _krb5_krb_dest_tkt(krb5_context, const char *);
 
 #define krb_time_to_life	_krb5_krb_time_to_life
 #define krb_life_to_time	_krb5_krb_life_to_time
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /*  __KRB5_V4COMPAT_H__ */

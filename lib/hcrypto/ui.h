@@ -36,11 +36,19 @@
 #ifndef _HEIM_UI_H
 #define _HEIM_UI_H 1
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* symbol renaming */
 #define UI_UTIL_read_pw_string hc_UI_UTIL_read_pw_string
 
 int	UI_UTIL_read_pw_string(char *, int, const char *, int); /* XXX */
 int UI_UTIL_read_pw_string_with_verify_prompt(char*, int, char*, char*);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _HEIM_UI_H */
 

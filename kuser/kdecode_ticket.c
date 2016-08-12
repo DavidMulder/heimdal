@@ -51,7 +51,7 @@ print_and_decode_tkt (krb5_context context,
     krb5_keyblock key;
     Ticket tkt;
 
-    ret = decode_Ticket (ticket->data, ticket->length, &tkt, &len);
+    ret = decode_Ticket ((unsigned char *) ticket->data, ticket->length, &tkt, &len);
     if (ret)
 	krb5_err (context, 1, ret, "decode_Ticket");
 
@@ -59,7 +59,7 @@ print_and_decode_tkt (krb5_context context,
     if (ret)
 	krb5_err (context, 1, ret, "krb5_string_to_key");
 
-    ret = krb5_crypto_init(context, &key, 0, &crypto);
+    ret = krb5_crypto_init(context, &key, ETYPE_NULL, &crypto);
     if (ret)
 	krb5_err (context, 1, ret, "krb5_crypto_init");
 
@@ -154,7 +154,7 @@ main(int argc, char **argv)
 	krb5_err (context, 1, ret, "krb5_get_credentials");
 
     print_and_decode_tkt (context, &out->ticket, out->server,
-			  out->session.keytype);
+			  (krb5_enctype)out->session.keytype);
 
     krb5_free_cred_contents(context, out);
     return 0;
