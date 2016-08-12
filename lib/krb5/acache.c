@@ -84,7 +84,7 @@ translate_cc_error(krb5_context context, cc_int32 error, char *error_string)
 	if (cc_errors[i].error == error)
 	    return cc_errors[i].ret;
     if( error_string )
-        krb5_set_error_message(context, error, error_string );
+        krb5_set_error_message(context, error, "%s", error_string );
     else
         krb5_set_error_message(context, error, "Unknown CCAPI error");
     return KRB5_FCC_INTERNAL;
