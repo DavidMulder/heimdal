@@ -46,6 +46,10 @@
 #endif
 #endif
 
+#if defined(SOLARIS) || defined(IRIX)
+#define ssize_t size_t
+#endif
+
 #define hex_encode rk_hex_encode
 #define hex_decode rk_hex_decode
 
