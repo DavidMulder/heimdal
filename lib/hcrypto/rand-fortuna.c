@@ -475,7 +475,7 @@ fortuna_reseed(void)
 #ifdef HAVE_ARC4RANDOM
     {
 	uint32_t buf[INIT_BYTES / sizeof(uint32_t)];
-	int i;
+	size_t i;
 
 	for (i = 0; i < sizeof(buf)/sizeof(buf[0]); i++)
 	    buf[i] = arc4random();
