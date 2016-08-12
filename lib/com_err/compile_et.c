@@ -120,6 +120,18 @@ generate_c(void)
 	    "num_errors);\n", name, name);
     fprintf(c_file, "}\n");
 
+    fprintf( c_file, "\n" );
+    fprintf( c_file, "const char *%s_get_error_name( int errcode )\n", name );
+    fprintf( c_file, "{\n");
+    fprintf( c_file, "\tswitch ( errcode )\n" );
+    fprintf( c_file, "\t{\n");
+    for(ec = codes, n = 0; ec; ec = ec->next, n++) {
+        fprintf(c_file, "\t\tcase %s: return \"%s\";\n", ec->name, ec->name); 
+    }
+    fprintf( c_file, "\t\tdefault: return \"UNKNOWN\";\n");
+    fprintf( c_file, "\t}\n");
+    fprintf( c_file, "}\n");
+
     fclose(c_file);
     return 0;
 }
@@ -145,6 +157,7 @@ generate_h(void)
     fprintf(h_file, "\n");
     fprintf(h_file, "#ifndef %s\n", fn);
     fprintf(h_file, "#define %s\n", fn);
+    fprintf(h_file, "const char *%s_get_error_name( int errcode );\n", name );
     fprintf(h_file, "\n");
     fprintf(h_file, "struct et_list;\n");
     fprintf(h_file, "\n");
