@@ -124,7 +124,7 @@ read_string(const char *preprompt, const char *prompt,
     sa.sa_handler = intr;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    for(i = 1; i < sizeof(sigs) / sizeof(sigs[0]); i++)
+    for(i = 1; (size_t)i < sizeof(sigs) / sizeof(sigs[0]); i++)
 	if (i != SIGALRM)
 	    if (sigaction(i, &sa, &sigs[i]) == 0)
 		oksigs[i] = 1;
@@ -170,7 +170,7 @@ read_string(const char *preprompt, const char *prompt,
     if(tty != stdin)
 	fclose(tty);
 
-    for(i = 1; i < sizeof(sigs) / sizeof(sigs[0]); i++)
+    for(i = 1; (size_t)i < sizeof(sigs) / sizeof(sigs[0]); i++)
 	if (oksigs[i])
 	    sigaction(i, &sigs[i], NULL);
 
