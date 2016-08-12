@@ -76,7 +76,6 @@ generate_c(void)
     if(c_file == NULL)
 	return 1;
 
-    fprintf(c_file, "/* Generated from %s */\n", filename);
     if(id_str)
 	fprintf(c_file, "/* %s */\n", id_str);
     fprintf(c_file, "\n");
@@ -141,7 +140,6 @@ generate_h(void)
 	if(!isalnum((unsigned char)*p))
 	    *p = '_';
 
-    fprintf(h_file, "/* Generated from %s */\n", filename);
     if(id_str)
 	fprintf(h_file, "/* %s */\n", id_str);
     fprintf(h_file, "\n");
