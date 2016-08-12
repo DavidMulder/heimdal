@@ -76,13 +76,17 @@ static const struct {
 };
 
 static krb5_error_code
-translate_cc_error(krb5_context context, cc_int32 error)
+translate_cc_error(krb5_context context, cc_int32 error, char *error_string)
 {
     size_t i;
     krb5_clear_error_message(context);
     for(i = 0; i < sizeof(cc_errors)/sizeof(cc_errors[0]); i++)
 	if (cc_errors[i].error == error)
 	    return cc_errors[i].ret;
+    if( error_string )
+        krb5_set_error_message(context, error, error_string );
+    else
+        krb5_set_error_message(context, error, "Unknown CCAPI error");
     return KRB5_FCC_INTERNAL;
 }
 
@@ -511,7 +515,7 @@ acc_alloc(krb5_context context, krb5_ccache *id)
     error = (*init_func)(&a->context, ccapi_version_3, NULL, NULL);
     if (error) {
 	krb5_data_free(&(*id)->data);
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
     }
 
     a->cache_name = NULL;
@@ -539,7 +543,7 @@ acc_resolve(krb5_context context, krb5_ccache *id, const char *res)
 	if (error != ccNoError) {
 	    acc_close(context, *id);
 	    *id = NULL;
-	    return translate_cc_error(context, error);
+	    return translate_cc_error(context, error, NULL);
 	}
 
 	error = (*a->ccache->func->get_kdc_time_offset)(a->ccache,
@@ -553,7 +557,7 @@ acc_resolve(krb5_context context, krb5_ccache *id, const char *res)
 	a->cache_name = NULL;
     } else {
 	*id = NULL;
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
     }
 
     return 0;
@@ -586,6 +590,7 @@ acc_initialize(krb5_context context,
     krb5_error_code ret;
     int32_t error;
     char *name;
+    char *error_string = NULL;
 
     ret = krb5_unparse_name(context, primary_principal, &name);
     if (ret)
@@ -596,9 +601,13 @@ acc_initialize(krb5_context context,
 						       cc_credentials_v5,
 						       name,
 						       &a->ccache);
-	free(name);
-	if (error == ccNoError)
+	if (error == ccNoError) {
 	    error = get_cc_name(a);
+    } else {
+        asprintf( &error_string,
+                  "api ccache: create new ccache for %s failed with error %d",
+                  name, error );
+    }
     } else {
 	cc_credentials_iterator_t iter;
 	cc_credentials_t ccred;
@@ -606,18 +615,67 @@ acc_initialize(krb5_context context,
 	error = (*a->ccache->func->new_credentials_iterator)(a->ccache, &iter);
 	if (error) {
 	    free(name);
-	    return translate_cc_error(context, error);
+        asprintf( &error_string,
+                  "api ccache: new_credentials_iterator failed with %d",
+                  error );
+        ret = translate_cc_error(context, error, error_string );
+        if( error_string ) free( error_string );
+        return( ret );
 	}
 
 	while (1) {
 	    error = (*iter->func->next)(iter, &ccred);
-	    if (error)
+        if (error == ccIteratorEnd )
+        {
 		break;
-	    (*a->ccache->func->remove_credentials)(a->ccache, ccred);
-	    (*ccred->func->release)(ccred);
 	}
-	(*iter->func->release)(iter);
-
+        else
+        {
+            asprintf( &error_string,
+                      "api_ccache: iterator_enxt returned an unexpected error (%d)",
+                      error );
+            ret = translate_cc_error(context, error, error_string);
+            if( error_string ) free( error_string );
+            free( name );
+            return( ret );
+        }
+        error = (*a->ccache->func->remove_credentials)(a->ccache, ccred);
+        if( error == ccNoError )
+        {
+            error = (*ccred->func->release)(ccred);
+            if( error != ccNoError )
+            {
+                asprintf( &error_string,
+                          "api ccache: unexpected error releasing creds (%d)",
+                          error );
+                ret = translate_cc_error(context, error, error_string);
+                if( error_string ) free(error_string);
+                free( name );
+                return( ret );
+            }
+        }
+        else
+        {
+            asprintf( &error_string,
+                      "api ccache: remove_credentials failed with unexpected error (%d)",
+                      error );
+            ret = translate_cc_error(context, error, error_string);
+            if( error_string ) free( error_string );
+            return( ret );
+        }
+    }
+       error = (*iter->func->release)(iter);
+    if( error != ccNoError )
+    {
+        asprintf( &error_string,
+                  "api ccache: unexpected error releasing iterator (%d)",
+                  error );
+        ret = translate_cc_error(context, error, error_string);
+        if( error_string ) free( error_string );
+        free( name );
+        return( ret );
+    }
+ 
 	error = (*a->ccache->func->set_principal)(a->ccache,
 						  cc_credentials_v5,
 						  name);
@@ -628,7 +686,10 @@ acc_initialize(krb5_context context,
 							cc_credentials_v5,
 							context->kdc_sec_offset);
 
-    return translate_cc_error(context, error);
+    free( name );
+    ret = translate_cc_error(context, error, error_string);
+    if( error_string ) free( error_string );
+    return ret;
 }
 
 static krb5_error_code KRB5_CALLCONV
@@ -668,7 +729,7 @@ acc_destroy(krb5_context context,
 	error = (a->context->func->release)(a->context);
 	a->context = NULL;
     }
-    return translate_cc_error(context, error);
+    return translate_cc_error(context, error, NULL);
 }
 
 static krb5_error_code KRB5_CALLCONV
@@ -699,7 +760,7 @@ acc_store_cred(krb5_context context,
 
     error = (*a->ccache->func->store_credentials)(a->ccache, &cred);
     if (error)
-	ret = translate_cc_error(context, error);
+	ret = translate_cc_error(context, error, NULL);
 
     free_ccred(&v5cred);
 
@@ -726,7 +787,7 @@ acc_get_principal(krb5_context context,
 					      cc_credentials_v5,
 					      &name);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
 
     ret = krb5_parse_name(context, name->data, principal);
 
@@ -773,7 +834,7 @@ acc_get_next (krb5_context context,
     while (1) {
 	error = (*iter->func->next)(iter, &cred);
 	if (error)
-	    return translate_cc_error(context, error);
+	    return translate_cc_error(context, error, NULL);
 	if (cred->data->version == cc_credentials_v5)
 	    break;
 	(*cred->func->release)(cred);
@@ -832,7 +893,7 @@ acc_remove_cred(krb5_context context,
     if (error) {
 	free(server);
 	free(client);
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
     }
 
     ret = KRB5_CC_NOTFOUND;
@@ -910,7 +971,7 @@ acc_get_cache_first(krb5_context context, krb5_cc_cursor *cursor)
     error = (*init_func)(&iter->context, ccapi_version_3, NULL, NULL);
     if (error) {
 	free(iter);
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
     }
 
     error = (*iter->context->func->new_ccache_iterator)(iter->context,
@@ -935,7 +996,7 @@ acc_get_cache_next(krb5_context context, krb5_cc_cursor cursor, krb5_ccache *id)
 
     error = (*iter->iter->func->next)(iter->iter, &cache);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
 
     ret = _krb5_cc_allocate(context, &krb5_acc_ops, id);
     if (ret) {
@@ -957,7 +1018,7 @@ acc_get_cache_next(krb5_context context, krb5_cc_cursor cursor, krb5_ccache *id)
     if (error) {
 	acc_close(context, *id);
 	*id = NULL;
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
     }
     return 0;
 }
@@ -989,7 +1050,7 @@ acc_move(krb5_context context, krb5_ccache from, krb5_ccache to)
 						      cc_credentials_v5,
 						      &name);
 	if (error)
-	    return translate_cc_error(context, error);
+	    return translate_cc_error(context, error, NULL);
 
 	error = (*ato->context->func->create_new_ccache)(ato->context,
 							 cc_credentials_v5,
@@ -997,14 +1058,14 @@ acc_move(krb5_context context, krb5_ccache from, krb5_ccache to)
 							 &ato->ccache);
 	(*name->func->release)(name);
 	if (error)
-	    return translate_cc_error(context, error);
+	    return translate_cc_error(context, error, NULL);
     }
 
     error = (*ato->ccache->func->move)(afrom->ccache, ato->ccache);
 
     acc_destroy(context, from);
 
-    return translate_cc_error(context, error);
+    return translate_cc_error(context, error, NULL);
 }
 
 static krb5_error_code KRB5_CALLCONV
@@ -1021,12 +1082,12 @@ acc_get_default_name(krb5_context context, char **str)
 
     error = (*init_func)(&cc, ccapi_version_3, NULL, NULL);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
 
     error = (*cc->func->get_default_ccache_name)(cc, &name);
     if (error) {
 	(*cc->func->release)(cc);
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
     }
 
     error = asprintf(str, "API:%s", name->data);
@@ -1052,7 +1113,7 @@ acc_set_default(krb5_context context, krb5_ccache id)
 
     error = (*a->ccache->func->set_default)(a->ccache);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
 
     return 0;
 }
@@ -1072,7 +1133,7 @@ acc_lastchange(krb5_context context, krb5_ccache id, krb5_timestamp *mtime)
 
     error = (*a->ccache->func->get_change_time)(a->ccache, &t);
     if (error)
-	return translate_cc_error(context, error);
+	return translate_cc_error(context, error, NULL);
 
     *mtime = t;
 
