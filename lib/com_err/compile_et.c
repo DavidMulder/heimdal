@@ -157,6 +157,7 @@ generate_h(void)
     fprintf(h_file, "\n");
     fprintf(h_file, "#ifndef %s\n", fn);
     fprintf(h_file, "#define %s\n", fn);
+    fprintf( h_file, "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n" );
     fprintf(h_file, "const char *%s_get_error_name( int errcode );\n", name );
     fprintf(h_file, "\n");
     fprintf(h_file, "struct et_list;\n");
@@ -183,7 +184,7 @@ generate_h(void)
     fprintf(h_file, "#define COM_ERR_BINDDOMAIN_%s \"heim_com_err%ld\"\n", name, base_id);
     fprintf(h_file, "\n");
     fprintf(h_file, "#endif /* %s */\n", fn);
-
+    fprintf( h_file, "#ifdef __cplusplus\n}\n#endif /* extern C */\n\n" );
 
     fclose(h_file);
     return 0;
