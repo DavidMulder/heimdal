@@ -348,6 +348,21 @@ get_nodes (const char *nodename,
 			       &current, const_v4, he, &flags);
 	    freehostent (he);
 	}
+        else
+        {
+            he = gethostbyname(nodename);
+            if(he != NULL)
+            {
+                ret = add_hostent(port,
+                                  protocol,
+                                  socktype,
+                                  &current,
+                                  const_v4,
+                                  he,
+                                  &flags);
+                freehostent (he);
+            }
+        }
     }
     *res = first;
     return ret;
