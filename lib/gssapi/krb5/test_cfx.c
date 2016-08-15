@@ -141,7 +141,7 @@ main(int argc, char **argv)
     krb5_error_code ret;
     krb5_context context;
     krb5_crypto crypto;
-    int i;
+    unsigned i;
 
     ret = krb5_init_context(&context);
     if (ret)
@@ -160,7 +160,7 @@ main(int argc, char **argv)
     test_special(context, crypto, 1, 60);
     test_special(context, crypto, 0, 60);
 
-    for (i = 0; i < (int) (sizeof(tests)/sizeof(tests[0])); i++) {
+    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
 	test_range(&tests[i], 1, context, crypto);
 	test_range(&tests[i], 0, context, crypto);
     }

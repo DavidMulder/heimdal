@@ -37,14 +37,15 @@ static void
 test_int8(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-    int i;
+    unsigned i;
     int8_t val[] = {
 	0, 1, -1, 128, -127
     }, v;
+    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < (int) sizeof(val)/sizeof(val[0]); i++) {
+    for (i = 0; i < val_len; i++) {
 
 	ret = krb5_store_int8(sp, val[i]);
 	if (ret)
@@ -62,14 +63,15 @@ static void
 test_int16(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-    int i;
+    unsigned i;
     int16_t val[] = {
 	0, 1, -1, 32768, -32767
     }, v;
+    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < (int) sizeof(val)/sizeof(val[0]); i++) {
+    for (i = 0; i < val_len; i++) {
 
 	ret = krb5_store_int16(sp, val[i]);
 	if (ret)
@@ -87,14 +89,15 @@ static void
 test_int32(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-    int i;
+    unsigned i;
     int32_t val[] = {
 	0, 1, -1, 2147483647, -2147483646
     }, v;
+    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < (int) sizeof(val)/sizeof(val[0]); i++) {
+    for (i = 0; i < val_len; i++) {
 
 	ret = krb5_store_int32(sp, val[i]);
 	if (ret)
@@ -112,14 +115,15 @@ static void
 test_uint8(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-    int i;
+    unsigned i;
     uint8_t val[] = {
 	0, 1, 255
     }, v;
+    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < (int) sizeof(val)/sizeof(val[0]); i++) {
+    for (i = 0; i < val_len; i++) {
 
 	ret = krb5_store_uint8(sp, val[i]);
 	if (ret)
@@ -137,14 +141,15 @@ static void
 test_uint16(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-    int i;
+    unsigned i;
     uint16_t val[] = {
 	0, 1, 65535
     }, v;
+    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < (int) sizeof(val)/sizeof(val[0]); i++) {
+    for (i = 0; i < val_len; i++) {
 
 	ret = krb5_store_uint16(sp, val[i]);
 	if (ret)
@@ -162,14 +167,15 @@ static void
 test_uint32(krb5_context context, krb5_storage *sp)
 {
     krb5_error_code ret;
-    int i;
+    unsigned i;
     uint32_t val[] = {
 	0, 1, 4294967295UL
     }, v;
+    unsigned val_len = sizeof(val[0])/sizeof(val);
 
     krb5_storage_truncate(sp, 0);
 
-    for (i = 0; i < (int) sizeof(val)/sizeof(val[0]); i++) {
+    for (i = 0; i < val_len; i++) {
 
 	ret = krb5_store_uint32(sp, val[i]);
 	if (ret)

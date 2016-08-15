@@ -183,7 +183,8 @@ main(int argc, char **argv)
 {
     krb5_context context;
     krb5_error_code ret;
-    int i, optidx = 0;
+    unsigned i;
+    int optidx = 0;
 
     setprogname(argv[0]);
 
@@ -205,7 +206,7 @@ main(int argc, char **argv)
     if (ret)
 	errx (1, "krb5_init_context failed: %d", ret);
 
-    for (i = 0; i < (int) (sizeof(tests)/sizeof(tests[0])); i++) {
+    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
 	test_dh2key(i, context, &tests[i].X, NULL, NULL,
 		    tests[i].type, &tests[i].key);
     }
