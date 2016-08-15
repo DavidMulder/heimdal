@@ -246,7 +246,7 @@ init_tgs_req (krb5_context context,
     }
     {
 	size_t i;
-	for (i = 0; i < padata->len; i++) {
+	for (i = 0; (size_t)i < padata->len; i++) {
 	    ret = copy_PA_DATA(&padata->val[i], &t->padata->val[i + 1]);
 	    if (ret) {
 		krb5_set_error_message(context, ret,
