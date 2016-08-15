@@ -47,6 +47,10 @@
 #include <roken.h>
 
 #ifdef HAVE_PTHREAD_H
+#if AIX43
+typedef int crid_t;
+typedef unsigned int class_id_t;
+#endif
 #include <pthread.h>
 #endif
 
