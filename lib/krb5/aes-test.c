@@ -218,7 +218,8 @@ string_to_key_test(krb5_context context)
     krb5_data password, opaque;
     krb5_error_code ret;
     krb5_salt salt;
-    int i, val = 0;
+    unsigned i;
+    int val = 0;
     char iter[4];
 
     for (i = 0; i < sizeof(keys)/sizeof(keys[0]); i++) {
@@ -745,7 +746,7 @@ krb_enc_test(krb5_context context)
     krb5_crypto crypto;
     krb5_keyblock kb;
     krb5_data cipher, plain;
-    int i;
+    unsigned i;
 
     for (i = 0; i < sizeof(krbencs)/sizeof(krbencs[0]); i++) {
 

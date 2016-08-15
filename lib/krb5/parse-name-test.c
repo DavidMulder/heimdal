@@ -79,7 +79,7 @@ main(int argc, char **argv)
 
     for (t = tests; t->input_string; ++t) {
 	krb5_principal princ;
-	int i, j;
+	unsigned i, j;
 	char name_buf[1024];
 	char *s;
 

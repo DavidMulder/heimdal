@@ -85,7 +85,7 @@ test_expand_hostname(krb5_context context)
 	{ 0, "pstnproxy.su.se", "pstnproxy.su.se" },
     };
 
-    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
+    for (i = 0; i < (int) (sizeof(tests)/sizeof(tests[0])); i++) {
 	errors += expand_hostname(context, tests[i].orig_hostname);
     }
 

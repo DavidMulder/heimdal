@@ -35,7 +35,7 @@
 static void
 print_data(unsigned char *data, size_t len)
 {
-    int i;
+    unsigned i;
     for(i = 0; i < len; i++) {
 	if(i > 0 && (i % 16) == 0)
 	    printf("\n            ");

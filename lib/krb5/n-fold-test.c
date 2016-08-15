@@ -98,7 +98,7 @@ main(int argc, char **argv)
     int ret = 0;
 
     for (t = tests; t->str; ++t) {
-	int i;
+	unsigned i;
 
 	ret = _krb5_n_fold (t->str, strlen(t->str), data, t->n);
 	if (ret)

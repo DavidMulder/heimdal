@@ -326,7 +326,7 @@ test_def_cc_name(krb5_context context)
 {
     krb5_error_code ret;
     char *str;
-    int i;
+    unsigned i;
 
     for (i = 0; i < sizeof(cc_names)/sizeof(cc_names[0]); i++) {
 	ret = _krb5_expand_default_cc_name(context, cc_names[i].str, &str);
