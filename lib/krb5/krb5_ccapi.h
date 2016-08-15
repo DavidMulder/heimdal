@@ -84,7 +84,9 @@ enum {
     ccErrServerInsecure,
     ccErrServerCantBecomeUID,
 
-    ccErrTimeOffsetNotSet				/* 226 */
+    ccErrTimeOffsetNotSet,				/* 226 */
+    ccErrBadInternalMessage,
+    ccErrNotImplemented
 };
 
 typedef int32_t cc_int32;

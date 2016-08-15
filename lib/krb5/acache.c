@@ -63,16 +63,36 @@ static krb5_error_code KRB5_CALLCONV acc_close(krb5_context, krb5_ccache);
 static const struct {
     cc_int32 error;
     krb5_error_code ret;
+    const char *string;
 } cc_errors[] = {
-    { ccErrBadName,		KRB5_CC_BADNAME },
-    { ccErrCredentialsNotFound,	KRB5_CC_NOTFOUND },
-    { ccErrCCacheNotFound,	KRB5_FCC_NOFILE },
-    { ccErrContextNotFound,	KRB5_CC_NOTFOUND },
-    { ccIteratorEnd,		KRB5_CC_END },
-    { ccErrNoMem,		KRB5_CC_NOMEM },
-    { ccErrServerUnavailable,	KRB5_CC_IO },
-    { ccErrInvalidCCache,	KRB5_CC_BADNAME },
-    { ccNoError,		0 }
+    { ccNoError,       0,          "No error" },
+    { ccIteratorEnd,       KRB5_CC_END,        "Iterator end" },
+    { ccErrBadParam,       KRB5_FCC_INTERNAL,  "Bad parameter" },
+    { ccErrNoMem,      KRB5_CC_NOMEM,      "Out of memory" },
+    { ccErrInvalidContext, KRB5_FCC_INTERNAL,  "Invalid context" },
+    { ccErrInvalidCCache,  KRB5_CC_BADNAME,    "Invalid credential cache" },
+    { ccErrInvalidString,  KRB5_FCC_INTERNAL,  "Invalid string" },
+    { ccErrInvalidCredentials, KRB5_FCC_INTERNAL,  "Invalid credentials" },
+    { ccErrInvalidCCacheIterator,KRB5_FCC_INTERNAL,    "Invalid credential cache iterator" },
+    { ccErrInvalidLock,        KRB5_FCC_INTERNAL,  "Invalid lock" },
+    { ccErrBadName,        KRB5_CC_BADNAME,    "Bad name" },
+    { ccErrBadCredentialsVersion,KRB5_FCC_INTERNAL,    "Bad credentials version" },
+    { ccErrBadAPIVersion,  KRB5_FCC_INTERNAL,  "Bad API version" },
+    { ccErrContextLocked,  KRB5_FCC_INTERNAL,  "Context locked" },
+    { ccErrContextUnlocked,    KRB5_FCC_INTERNAL,  "Context unlocked" },
+    { ccErrCCacheLocked,   KRB5_FCC_INTERNAL,  "Credential cache locked" },
+    { ccErrCCacheUnlocked, KRB5_FCC_INTERNAL,  "Credential cache unlocked" },
+    { ccErrBadLockType,        KRB5_FCC_INTERNAL,  "Bad lock type" },
+    { ccErrNeverDefault,   KRB5_FCC_INTERNAL,  "Never default" },
+    { ccErrCredentialsNotFound,    KRB5_CC_NOTFOUND,   "Credentials not found" },
+    { ccErrCCacheNotFound, KRB5_FCC_NOFILE,    "Credential cache not found" },
+    { ccErrContextNotFound,    KRB5_CC_NOTFOUND,   "Context not found" },
+    { ccErrServerUnavailable,  KRB5_CC_IO,     "Server unavailable" },
+    { ccErrServerInsecure, KRB5_FCC_INTERNAL,  "Server insecure" },
+    { ccErrServerCantBecomeUID,    KRB5_FCC_INTERNAL,  "Server can't become UID" },
+    { ccErrTimeOffsetNotSet,   KRB5_FCC_INTERNAL,  "Time offset not set" },
+    { ccErrBadInternalMessage, KRB5_FCC_INTERNAL,  "Bad internal message" },
+    { ccErrNotImplemented, KRB5_CC_NOSUPP,     "Not implemented" },
 };
 
 static krb5_error_code
@@ -80,13 +100,15 @@ translate_cc_error(krb5_context context, cc_int32 error, char *error_string)
 {
     size_t i;
     krb5_clear_error_message(context);
-    for(i = 0; i < sizeof(cc_errors)/sizeof(cc_errors[0]); i++)
-	if (cc_errors[i].error == error)
-	    return cc_errors[i].ret;
-    if( error_string )
-        krb5_set_error_message(context, error, "%s", error_string );
-    else
-        krb5_set_error_message(context, error, "Unknown CCAPI error");
+
+    for (i = 0; i < sizeof(cc_errors)/sizeof(cc_errors[0]); i++) {
+        if (cc_errors[i].error == error) {
+            krb5_set_error_message(context, error, "%s", error_string ? error_string : cc_errors[i].string);
+	        return cc_errors[i].ret;
+        }
+    }
+
+    krb5_set_error_message(context, error, "Unknown CCAPI error");
     return KRB5_FCC_INTERNAL;
 }
 
