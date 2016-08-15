@@ -460,9 +460,10 @@ display_v5_ccache (krb5_context context, krb5_ccache ccache,
 	    printf("{}");
 	    return 0;
 	}
-	if(ret == ENOENT) {
+	/* the acache at least now returns CC_NOTFOUND (not ENOENT)*/
+	if(ret == ENOENT || ret == KRB5_CC_NOTFOUND) {
 	    if (!do_test)
-		krb5_warnx(context, N_("No ticket file: %s", ""),
+		krb5_warnx(context, "No ccache exists with name: %s",
 			   krb5_cc_get_name(context, ccache));
 	    return 1;
 	} else
