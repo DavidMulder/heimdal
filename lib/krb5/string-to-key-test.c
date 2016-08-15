@@ -108,7 +108,7 @@ main(int argc, char **argv)
     for (t = tests; t->principal_name; ++t) {
 	krb5_keyblock key;
 	krb5_principal principal;
-	int i;
+	size_t i;
 
 	ret = krb5_parse_name (context, t->principal_name, &principal);
 	if (ret)
