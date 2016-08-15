@@ -36,6 +36,10 @@
 #ifndef __ifaddrs_h__
 #define __ifaddrs_h__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifndef ROKEN_LIB_FUNCTION
 #ifdef _WIN32
 #define ROKEN_LIB_FUNCTION
@@ -75,5 +79,9 @@ rk_freeifaddrs(struct ifaddrs*);
 
 #define getifaddrs(a) rk_getifaddrs(a)
 #define freeifaddrs(a) rk_freeifaddrs(a)
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __ifaddrs_h__ */
