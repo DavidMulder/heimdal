@@ -1322,7 +1322,7 @@ const EVP_CIPHER *
 EVP_get_cipherbyname(const char *name)
 {
     int i;
-    for (i = 0; i < sizeof(cipher_name)/sizeof(cipher_name[0]); i++) {
+    for (i = 0; (size_t)i < sizeof(cipher_name)/sizeof(cipher_name[0]); i++) {
 	if (strcasecmp(cipher_name[i].name, name) == 0)
 	    return (*cipher_name[i].func)();
     }
@@ -1412,7 +1412,7 @@ EVP_BytesToKey(const EVP_CIPHER *type,
 
 	i = 0;
 	if (keylen) {
-	    size_t sz = min(keylen, mds);
+	    size_t sz = min((unsigned int)keylen, mds);
 	    if (key) {
 		memcpy(key, buf, sz);
 		key += sz;
@@ -1421,7 +1421,7 @@ EVP_BytesToKey(const EVP_CIPHER *type,
 	    i += sz;
 	}
 	if (ivlen && mds > i) {
-	    size_t sz = min(ivlen, (mds - i));
+	    size_t sz = min((unsigned int)ivlen, (mds - i));
 	    if (iv) {
 		memcpy(iv, &buf[i], sz);
 		iv += sz;
