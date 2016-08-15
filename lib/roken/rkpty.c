@@ -59,6 +59,7 @@
 #endif /* STREAMPTY */
 
 #include "roken.h"
+#include "err.h"
 #include <getarg.h>
 
 struct command {
