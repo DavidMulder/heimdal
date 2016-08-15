@@ -1424,7 +1424,7 @@ krb5_config_vget_int_default (krb5_context context,
 	char *endptr;
 	long l;
 	l = strtol(str, &endptr, 0);
-	if (endptr == str)
+	if (l == LONG_MIN || l == LONG_MAX || endptr == str)
 	    return def_value;
 	else
 	    return l;
