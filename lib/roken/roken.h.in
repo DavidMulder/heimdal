@@ -249,7 +249,9 @@ struct sockaddr_dl;
 #ifdef HAVE_ERRNO_H
 #include <errno.h>
 #endif
+#ifdef HAVE_ERR_H
 #include <err.h>
+#endif
 #ifdef HAVE_TERMIOS_H
 #include <termios.h>
 #endif
@@ -617,6 +619,11 @@ ROKEN_LIB_FUNCTION const char * ROKEN_LIB_CALL hstrerror(int);
 extern int h_errno;
 #endif
 
+/* add errx (for AIX) */
+#if !HAVE_ERRX
+void ROKEN_LIB_FUNCTION errx(int eval, const char *fmt, ...);
+#endif
+
 #if !defined(HAVE_INET_ATON) || defined(NEED_INET_ATON_PROTO)
 #ifndef HAVE_INET_ATON
 #define inet_aton rk_inet_aton
@@ -733,6 +740,18 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 #endif
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL innetgr(const char*, const char*,
     const char*, const char*);
+#endif
+
+#if defined(NEED_SETNETGRENT_PROTO)
+void ROKEN_LIB_FUNCTION setnetgrent( const char * );
+#endif
+
+#if defined(NEED_GETNETGRENT_PROTO)
+int ROKEN_LIB_FUNCTION getnetgrent( char **, char **, char ** );
+#endif
+
+#if defined(NEED_ENDNETGRENT_PROTO)
+void ROKEN_LIB_FUNCTION endnetgrent( void );
 #endif
 
 #ifndef HAVE_IRUSEROK
@@ -878,6 +897,16 @@ ROKEN_LIB_VARIABLE extern int optind;
 #endif
 #if !HAVE_DECL_OPTERR
 ROKEN_LIB_VARIABLE extern int opterr;
+#endif
+
+/* OSX fix where environ isn't available */
+#ifndef HAVE_ENVIRON_DECLARATION
+# ifdef USE_NSGETENVIRON_FOR_ENVIRON
+#  include <crt_externs.h>
+#  define environ (*_NSGetEnviron())
+# else
+   extern char **environ;
+# endif
 #endif
 
 #ifndef HAVE_GETIPNODEBYNAME
@@ -1185,6 +1214,10 @@ unvis(char *, int, int *, int);
 #endif
 ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
 vis(char *, int, int, int);
+#endif
+
+#ifdef NEED_SETTIMEOFDAY_PROTO
+int settimeofday(const struct timeval *, const struct timezone *);
 #endif
 
 #if !defined(HAVE_CLOSEFROM)
