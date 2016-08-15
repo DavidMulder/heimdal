@@ -102,14 +102,14 @@ main(int argc, char **argv)
 	buf = rk_test_mem_alloc(RK_TM_OVERRUN, "overrun",
 				tests[i].str, tests[i].size + 1);
 	j = parse_time(buf, "s");
-	if (j != tests[i].val)
+	if (j != (unsigned) tests[i].val)
 	    errx(1, "parse_time failed for test %d", i);
 	rk_test_mem_free("overrun");
 
 	buf = rk_test_mem_alloc(RK_TM_UNDERRUN, "underrun",
 				tests[i].str, tests[i].size + 1);
 	j = parse_time(buf, "s");
-	if (j != tests[i].val)
+	if (j != (unsigned) tests[i].val)
 	    errx(1, "parse_time failed for test %d", i);
 	rk_test_mem_free("underrun");
 

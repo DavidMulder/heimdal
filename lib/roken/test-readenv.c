@@ -35,6 +35,7 @@
 
 #include "roken.h"
 #include "test-mem.h"
+#include "err.h"
 
 char *s1 = "VAR1=VAL1#comment\n\
 VAR2=VAL2 VAL2 #comment\n\
