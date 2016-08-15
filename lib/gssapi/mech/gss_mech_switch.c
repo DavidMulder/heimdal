@@ -154,7 +154,6 @@ do {									\
 	m->gm_mech.gm_ ## name = dlsym(so, "gss_" #name);		\
 	if (!m->gm_mech.gm_ ## name ||					\
 	    m->gm_mech.gm_ ##name == gss_ ## name) {			\
-		fprintf(stderr, "can't find symbol gss_" #name "\n");	\
 		goto bad;						\
 	}								\
 } while (0)
