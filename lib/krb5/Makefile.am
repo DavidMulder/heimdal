@@ -126,6 +126,7 @@ dist_libkrb5_la_SOURCES =			\
 	changepw.c				\
 	codec.c					\
 	config_file.c				\
+	krb5_util.c				\
 	convert_creds.c				\
 	constants.c				\
 	context.c				\
@@ -418,7 +419,8 @@ EXTRA_DIST = \
 	$(man_MANS) \
 	version-script.map \
 	test_config_strings.cfg \
-	krb5.moduli
+	krb5.moduli \
+	krb5_util.h
 
 #sysconf_DATA = krb5.moduli
 

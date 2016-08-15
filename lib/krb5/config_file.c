@@ -34,6 +34,7 @@
  */
 
 #include "krb5_locl.h"
+#include "krb5_util.h"
 
 #if defined(HAVE_FRAMEWORK_COREFOUNDATION)
 #include <CoreFoundation/CoreFoundation.h>
@@ -45,32 +46,6 @@ struct fileptr {
     const char *s;
     FILE *f;
 };
-
-static char *
-config_fgets(char *str, size_t len, struct fileptr *ptr)
-{
-    /* XXX this is not correct, in that they don't do the same if the
-       line is longer than len */
-    if(ptr->f != NULL)
-	return fgets(str, len, ptr->f);
-    else {
-	/* this is almost strsep_copy */
-	const char *p;
-	ssize_t l;
-	if(*ptr->s == '\0')
-	    return NULL;
-	p = ptr->s + strcspn(ptr->s, "\n");
-	if(*p == '\n')
-	    p++;
-	l = min(len, (size_t)(p - ptr->s));
-	if(len > 0) {
-	    memcpy(str, ptr->s, l);
-	    str[l] = '\0';
-	}
-	ptr->s = p;
-	return str;
-    }
-}
 
 static krb5_error_code parse_section(char *p, krb5_config_section **s,
 				     krb5_config_section **res,
@@ -153,30 +128,52 @@ static krb5_error_code
 parse_list(struct fileptr *f, unsigned *lineno, krb5_config_binding **parent,
 	   const char **err_message)
 {
-    char buf[KRB5_BUFSIZ];
+    char    *buf = NULL;
+    size_t  buf_size = 0;
     krb5_error_code ret;
     krb5_config_binding *b = NULL;
     unsigned beg_lineno = *lineno;
 
-    while(config_fgets(buf, sizeof(buf), f) != NULL) {
+    while( krb5_readline( f->f, &buf, &buf_size ) >= 0 ) {
 	char *p;
 
 	++*lineno;
-	buf[strcspn(buf, "\r\n")] = '\0';
+    if( *buf != '\0' )
+    {
+        if( buf[strlen(buf) - 1] == '\n' )
+            buf[strlen(buf) - 1] = '\0';
+        if( buf[strlen(buf) - 1] == '\r' )
+            buf[strlen(buf) - 1] = '\0';
+    }
 	p = buf;
 	while(isspace((unsigned char)*p))
 	    ++p;
 	if (*p == '#' || *p == ';' || *p == '\0')
+    {
+        if( buf ) free( buf );
+        buf = NULL;
 	    continue;
+    }
 	while(isspace((unsigned char)*p))
 	    ++p;
 	if (*p == '}')
+    {
+        if( buf ) free( buf );
+        buf = NULL;
 	    return 0;
+    }
 	if (*p == '\0')
+    {
+        if( buf ) free( buf );
+        buf = NULL;
 	    continue;
+    }
 	ret = parse_binding (f, lineno, p, &b, parent, err_message);
-	if (ret)
+	if (ret) {
+        if( buf ) free(  buf );
+        buf = NULL;
 	    return ret;
+    }
     }
     *lineno = beg_lineno;
     *err_message = "unclosed {";
@@ -386,27 +383,40 @@ krb5_config_parse_debug (struct fileptr *f,
 {
     krb5_config_section *s = NULL;
     krb5_config_binding *b = NULL;
-    char buf[KRB5_BUFSIZ];
-    krb5_error_code ret;
+    char    *buf = NULL;
+    size_t  buf_size = 0;
+    krb5_error_code ret = 0;
 
-    while (config_fgets(buf, sizeof(buf), f) != NULL) {
+    while( krb5_readline( f->f, &buf, &buf_size ) >= 0 ) {
+
 	char *p;
 
 	++*lineno;
-	buf[strcspn(buf, "\r\n")] = '\0';
+    if( *buf != '\0' )
+    {
+        if( buf[strlen(buf) - 1] == '\n' )
+            buf[strlen(buf) - 1] = '\0';
+        if( buf[strlen(buf) - 1] == '\r' )
+            buf[strlen(buf) - 1] = '\0';
+    }
 	p = buf;
 	while(isspace((unsigned char)*p))
 	    ++p;
 	if (*p == '#' || *p == ';')
+    {
+        if( buf ) free( buf );
+        buf = NULL;
 	    continue;
-        if (*p == '[') {
+    }
+	if (*p == '[') {
 	    ret = parse_section(p, &s, res, err_message);
 	    if (ret)
-		return ret;
+		goto out;
 	    b = NULL;
 	} else if (*p == '}') {
 	    *err_message = "unmatched }";
-	    return KRB5_CONFIG_BADFORMAT;
+	    ret = KRB5_CONFIG_BADFORMAT;
+	    goto out;
         } else if (strncmp(p, "include", sizeof("include") - 1) == 0 &&
             isspace(p[sizeof("include") - 1])) {
             p += sizeof("include");
@@ -438,14 +448,19 @@ krb5_config_parse_debug (struct fileptr *f,
 	} else if(*p != '\0') {
 	    if (s == NULL) {
 		*err_message = "binding before section";
-		return KRB5_CONFIG_BADFORMAT;
+		ret = KRB5_CONFIG_BADFORMAT;
+        goto out;
 	    }
 	    ret = parse_binding(f, lineno, p, &b, &s->u.list, err_message);
 	    if (ret)
-		return ret;
+		goto out;
 	}
     }
-    return 0;
+
+out:
+    if( buf ) free( buf );
+    buf = NULL;
+    return ret;
 }
 
 static int
