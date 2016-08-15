@@ -174,7 +174,7 @@ BN_hex2bn(BIGNUM **bnp, const char *in)
 	negative = 0;
 
     ret = hex_decode(in, data, len);
-    if (ret < 0) {
+    if ((int) ret < 0) {
 	free(data);
 	return 0;
     }
@@ -204,7 +204,7 @@ BN_bn2hex(const BIGNUM *bn)
 
     ret = hex_encode(data, len, &str);
     free(data);
-    if (ret < 0)
+    if ( (int) ret < 0)
 	return 0;
 
     return str;
