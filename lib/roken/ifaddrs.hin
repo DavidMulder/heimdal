@@ -77,9 +77,6 @@ rk_getifaddrs(struct ifaddrs**);
 void ROKEN_LIB_FUNCTION
 rk_freeifaddrs(struct ifaddrs*);
 
-#define getifaddrs(a) rk_getifaddrs(a)
-#define freeifaddrs(a) rk_freeifaddrs(a)
-
 #ifdef __cplusplus
 }
 #endif
