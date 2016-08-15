@@ -237,7 +237,7 @@ akf_next_entry(krb5_context context,
 
     pos = krb5_storage_seek(cursor->sp, 0, SEEK_CUR);
 
-    if ((pos - 4) / (4 + 8) >= d->num_entries)
+    if ((pos - 4) / (4 + 8) >= ( off_t )d->num_entries)
 	return KRB5_KT_END;
 
     ret = krb5_make_principal (context, &entry->principal,
