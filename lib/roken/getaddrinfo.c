@@ -173,7 +173,7 @@ const_v6 (struct addrinfo *a, void *data, int port)
    for in6addr_loopback but no actual symbol in libc */
 #if defined(HAVE_IPV6) && !defined(HAVE_IN6ADDR_LOOPBACK) && defined(IN6ADDR_LOOPBACK_INIT)
 #define in6addr_loopback _roken_in6addr_loopback
-struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;
+struct in6_addr in6addr_loopback = { { IN6ADDR_LOOPBACK_INIT } };
 #endif
 
 static int
