@@ -91,12 +91,20 @@ doit (int af,
  *
  */
 
+#ifdef _AIX
+int ROKEN_LIB_FUNCTION
+getnameinfo(const struct sockaddr *sa, size_t salen,
+           char *host, size_t hostlen,
+           char *serv, size_t servlen,
+           int flags)
+#else
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 getnameinfo(const struct sockaddr *sa, socklen_t salen,
 	    char *host, size_t hostlen,
 	    char *serv, size_t servlen,
 	    int flags)
 {
+#endif
     switch (sa->sa_family) {
 #ifdef HAVE_IPV6
     case AF_INET6 : {
