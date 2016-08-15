@@ -33,6 +33,7 @@
 
 #include <config.h>
 #include <roken.h>
+#include <err.h>
 #include <getarg.h>
 #include <vers.h>
 
