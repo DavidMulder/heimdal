@@ -96,7 +96,7 @@ static const struct {
 };
 
 static krb5_error_code
-translate_cc_error(krb5_context context, cc_int32 error, char *error_string)
+translate_cc_error(krb5_context context, cc_int32 error, const char *error_string)
 {
     size_t i;
     krb5_clear_error_message(context);
