@@ -299,7 +299,7 @@ arg_printusage_i18n (struct getargs *args,
 	max_len = max(max_len, len);
     }
     if (extra_string) {
-	check_column(stderr, col, extra_string + 1, columns);
+	check_column(stderr, col, extra_string, columns);
 	fprintf (stderr, " %s\n", extra_string);
     } else
 	fprintf (stderr, "\n");
