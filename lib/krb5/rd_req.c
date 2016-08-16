@@ -785,11 +785,12 @@ get_key_from_keytab(krb5_context context,
 		    krb5_ap_req *ap_req,
 		    krb5_const_principal server,
 		    krb5_keytab keytab,
-		    krb5_keyblock **out_key)
+		    krb5_keyblock **out_key,
+		    int get_highest)
 {
     krb5_keytab_entry entry;
     krb5_error_code ret;
-    int kvno;
+    int kvno = 0;
     krb5_keytab real_keytab;
 
     if(keytab == NULL)
@@ -797,10 +798,31 @@ get_key_from_keytab(krb5_context context,
     else
 	real_keytab = keytab;
 
+    /* Begin VAS Modification described above */
+    if (get_highest > 0)
+        kvno = 0;
+    else if (get_highest < 0)
+    {
+        /* Get the highest first so we can then request the next to
+         * highest */
+        ret = krb5_kt_get_entry (context,
+                                 real_keytab,
+                                 server,
+                                 0,
+                                 ap_req->ticket.enc_part.etype,
+                                 &entry);
+        if (!ret && entry.vno > 0) {
+            kvno = entry.vno - 1;
+        }
+        krb5_kt_free_entry (context, &entry);
+    }
+    else
+    {
     if (ap_req->ticket.enc_part.kvno)
 	kvno = *ap_req->ticket.enc_part.kvno;
     else
 	kvno = 0;
+    }
 
     ret = krb5_kt_get_entry (context,
 			     real_keytab,
@@ -928,7 +950,8 @@ krb5_rd_req_ctx(krb5_context context,
 				  &ap_req,
 				  server,
 				  id,
-				  &o->keyblock);
+				  &o->keyblock,
+				  0);
     /* VAS Modification 
      * principal names can be different, but if they don't resolve out of the 
      * keytab then throw a wrong principal error. */
@@ -963,18 +986,110 @@ krb5_rd_req_ctx(krb5_context context,
 	 * We got an exact keymatch, use that.
 	 */
 
-	ret = krb5_verify_ap_req2(context,
-				  auth_context,
-				  &ap_req,
-				  server,
-				  o->keyblock,
-				  0,
-				  &o->ap_req_options,
-				  &o->ticket,
-				  KRB5_KU_AP_REQ_AUTH);
+    /* Begin Quest Modification: jeff.webb */
+    if( ret == 0 )
+    {
+        /* VAS Modification: jeff.webb@quest.com
+         * To avoid segfaulting in the case where the entry (name&kvno)
+         * does not exist in the keytab, o->keyblock will be null
+         * and cause a segfault.  This happens in the case where
+         * a key exists in the ccache with kvno n, the keytab is rebuilt
+         * with a higher kvno entry (like from a join), and then we
+         * attempt to find the entry....
+         * See bug #24403
+         */
+        ret = krb5_verify_ap_req2(context,
+                      auth_context,
+                      &ap_req,
+                      server,
+                      o->keyblock,
+                      0,
+                      &o->ap_req_options,
+                      &o->ticket,
+                      KRB5_KU_AP_REQ_AUTH);
+    }
+    /* End quest modification */
+
+    /* VAS MODIFICATION
+     * Dan Peterson
+     *
+     * We are having trouble with Win2K3 domain controllers that have the
+     * dsHeuristic setting turned on to always use kvno=1.
+     *
+     * The following fix will be tried if using the actual kvno in the ticket
+     * to get the keytab entry fails.  This fix will grab the matching entry
+     * with the highest kvno in the keytab and try to verify it.
+     */
 
 	if (ret)
-	    goto out;
+    {
+        int do_again = 1;
+TRYAGAIN:
+        if (o->keyblock)
+        {
+            krb5_free_keyblock (context, o->keyblock);
+            o->keyblock = NULL;
+        }
+        if( o->ticket )                          
+        {
+            krb5_free_ticket(context, o->ticket );
+            o->ticket = NULL;
+        }
+        ret = get_key_from_keytab( context,
+                                   &ap_req,
+                                   server,
+                                   inctx->keytab,
+                                   &o->keyblock,
+                                   do_again == 1 ? 1 : -1); /* get highest */
+        if (ret)
+        {
+            goto out;
+        }
+        
+        ret = krb5_verify_ap_req( context,
+                                  auth_context,
+                                  &ap_req,
+                                  server,
+                                  o->keyblock,
+                                  0,
+                                  &o->ap_req_options,
+                                  &o->ticket );
+
+        /* If we have a clock skew on the ap_req make sure we return the clock skew error */
+        if( ret == KRB5KRB_AP_ERR_SKEW )
+            goto out;
+
+        /* If the highest kvno didn't work AND the users kvno is
+         * 1, then this might by Win2k behavior, and we need to use
+         * the second-highest entry to verify, as the ticket could
+         * be from before the latest password change. */
+        if( ret &&
+            ( (ap_req.ticket.enc_part.kvno &&
+               *ap_req.ticket.enc_part.kvno == 1) ||
+              !ap_req.ticket.enc_part.kvno) &&
+            do_again == 1 )
+        {
+            do_again = 0;
+            goto TRYAGAIN;
+        }
+
+        if( ret == KRB5KRB_AP_ERR_BAD_INTEGRITY &&
+            krb5_principal_compare( context, server, service ) == FALSE )
+        {
+            /* If we actually got a keytab entry out of the keytab, we want
+             * to make sure that it is the key for the same principal the
+             * ticket was encrypted with.  If it is different fail with this
+             * WRONG_PRINC error. If we don't fail here we will get a hard
+             * to understand DECRYPT_INTEGRITY failure. */
+            krb5_clear_error_string(context);
+            ret = KRB5KRB_AP_WRONG_PRINC;
+            goto out;
+        }
+        else
+        if( ret )
+            goto out;
+    }
+    /* END VAS Modification */
 
     } else {
 	/*
