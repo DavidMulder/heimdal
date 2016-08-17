@@ -191,8 +191,11 @@ mandoc_template(struct getargs *args,
 }
 
 static int
-check_column(FILE *f, int col, int len, int columns)
+check_column(FILE *f, int col, const char *output, int columns)
 {
+    char *newline = strchr(output, '\n');
+    int len = (newline) ? (newline-output) : strlen(output) + 1;
+
     if(col + len > columns) {
 	fprintf(f, "\n");
 	col = fprintf(f, "  ");
@@ -255,7 +258,7 @@ arg_printusage_i18n (struct getargs *args,
     }
     if(buf[0] != '\0') {
 	strlcat(buf, "]", sizeof(buf));
-	col = check_column(stderr, col, strlen(buf) + 1, columns);
+	col = check_column(stderr, col, buf, columns);
 	col += fprintf(stderr, " %s", buf);
     }
 
@@ -277,7 +280,7 @@ arg_printusage_i18n (struct getargs *args,
 	    strlcat(buf, "]", sizeof(buf));
 	    if(args[i].type == arg_strings)
 		strlcat(buf, "...", sizeof(buf));
-	    col = check_column(stderr, col, strlen(buf) + 1, columns);
+	    col = check_column(stderr, col, buf, columns);
 	    col += fprintf(stderr, " %s", buf);
 	}
 	if (args[i].short_name && !ISFLAG(args[i])) {
@@ -288,7 +291,7 @@ arg_printusage_i18n (struct getargs *args,
 	    strlcat(buf, "]", sizeof(buf));
 	    if(args[i].type == arg_strings)
 		strlcat(buf, "...", sizeof(buf));
-	    col = check_column(stderr, col, strlen(buf) + 1, columns);
+	    col = check_column(stderr, col, buf, columns);
 	    col += fprintf(stderr, " %s", buf);
 	}
 	if (args[i].long_name && args[i].short_name)
@@ -296,7 +299,7 @@ arg_printusage_i18n (struct getargs *args,
 	max_len = max(max_len, len);
     }
     if (extra_string) {
-	check_column(stderr, col, strlen(extra_string) + 1, columns);
+	check_column(stderr, col, extra_string, columns);
 	fprintf (stderr, " %s\n", extra_string);
     } else
 	fprintf (stderr, "\n");
