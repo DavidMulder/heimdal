@@ -843,7 +843,6 @@ krb5_rd_req_ctx(krb5_context context,
     krb5_keytab id = NULL, keytab = NULL;
     krb5_principal service = NULL;
     int got_key_from_keytab = 0;
-    krb5_keyblock *keyblock = NULL;
 
     *outctx = NULL;
 
@@ -951,8 +950,15 @@ krb5_rd_req_ctx(krb5_context context,
         int do_again = 1;
 TRYAGAIN:
         if (o->keyblock)
-            krb5_free_keyblock (context, keyblock);
-        keyblock = NULL;
+        {
+            krb5_free_keyblock (context, o->keyblock);
+            o->keyblock = NULL;
+        }
+        if( o->ticket )
+        {
+            krb5_free_ticket(context, o->ticket );
+            o->ticket = NULL;
+        }
         ret = get_key_from_keytab( context,
                                    &ap_req,
                                    server,
@@ -1001,8 +1007,6 @@ TRYAGAIN:
             goto out;
         }
     }
-
-    krb5_free_keyblock(context, keyblock);
 
     } else {
 	/*
@@ -1114,6 +1118,11 @@ TRYAGAIN:
 out:
 
     if (ret || outctx == NULL) {
+    if( o->ticket )
+    {
+        krb5_free_ticket(context, o->ticket );
+        o->ticket = NULL;
+    }
 	krb5_rd_req_out_ctx_free(context, o);
     } else
 	*outctx = o;
