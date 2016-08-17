@@ -42,6 +42,11 @@ _gsskrb5_lifetime_left(OM_uint32 *minor_status,
     krb5_timestamp now;
     krb5_error_code kret;
 
+    if (endtime == GSS_C_INDEFINITE) {
+        *lifetime_rec = GSS_C_INDEFINITE;
+        return GSS_S_COMPLETE;
+    }
+
     if (endtime == 0) {
 	*lifetime_rec = GSS_C_INDEFINITE;
 	return GSS_S_COMPLETE;
