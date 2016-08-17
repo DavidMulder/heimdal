@@ -68,11 +68,11 @@ krb5_mk_safe(krb5_context context,
 
     s.safe_body.user_data = *userdata;
 
-    krb5_us_timeofday (context, &rdata.timestamp, &rdata.usec);
+    krb5_us_timeofday (context, &rdata.timestamp, (int32_t *)&rdata.usec);
 
     if (auth_context->flags & KRB5_AUTH_CONTEXT_DO_TIME) {
 	s.safe_body.timestamp  = &rdata.timestamp;
-	s.safe_body.usec       = &rdata.usec;
+	s.safe_body.usec       = (int *)&rdata.usec;
     } else {
 	s.safe_body.timestamp  = NULL;
 	s.safe_body.usec       = NULL;

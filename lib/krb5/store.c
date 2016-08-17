@@ -1075,7 +1075,7 @@ KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_ret_principal(krb5_storage *sp,
 		   krb5_principal *princ)
 {
-    int i;
+    size_t i;
     int ret;
     krb5_principal p;
     int32_t type;

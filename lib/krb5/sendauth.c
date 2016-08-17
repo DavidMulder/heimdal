@@ -112,7 +112,7 @@ krb5_sendauth(krb5_context context,
     len = strlen(version) + 1;
     net_len = htonl(len);
     if (krb5_net_write (context, p_fd, &net_len, 4) != 4
-	|| krb5_net_write (context, p_fd, version, len) != len) {
+	|| (size_t)krb5_net_write (context, p_fd, version, len) != len) {
 	ret = errno;
 	krb5_set_error_message (context, ret, "write: %s", strerror(ret));
 	return ret;
@@ -121,7 +121,7 @@ krb5_sendauth(krb5_context context,
     len = strlen(appl_version) + 1;
     net_len = htonl(len);
     if (krb5_net_write (context, p_fd, &net_len, 4) != 4
-	|| krb5_net_write (context, p_fd, appl_version, len) != len) {
+	|| (size_t)krb5_net_write (context, p_fd, appl_version, len) != len) {
 	ret = errno;
 	krb5_set_error_message (context, ret, "write: %s", strerror(ret));
 	return ret;

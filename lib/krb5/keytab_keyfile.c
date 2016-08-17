@@ -421,7 +421,7 @@ akf_add_entry(krb5_context context,
     }
     ret = krb5_storage_write(sp, entry->keyblock.keyvalue.data,
 			     entry->keyblock.keyvalue.length);
-    if(ret != entry->keyblock.keyvalue.length) {
+    if((size_t)ret != entry->keyblock.keyvalue.length) {
 	if (ret < 0)
 	    ret = errno;
 	else

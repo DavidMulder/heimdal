@@ -395,7 +395,7 @@ RAND_file_name(char *filename, size_t size)
     else
 	ret = snprintf(filename, size, "%s", e);
 
-    if (ret <= 0 || ret >= size)
+    if (ret <= 0 || (size_t)ret >= size)
 	return NULL;
 
     return filename;

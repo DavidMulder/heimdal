@@ -39,7 +39,7 @@
 static void
 print_addresses (krb5_context context, const krb5_addresses *addrs)
 {
-    int i;
+    size_t i;
     char buf[256];
     size_t len;
 

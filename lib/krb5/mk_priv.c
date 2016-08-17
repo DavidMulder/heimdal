@@ -66,11 +66,11 @@ krb5_mk_priv(krb5_context context,
 
     part.user_data = *userdata;
 
-    krb5_us_timeofday (context, &rdata.timestamp, &rdata.usec);
+    krb5_us_timeofday (context, &rdata.timestamp, (int32_t *)&rdata.usec);
 
     if (auth_context->flags & KRB5_AUTH_CONTEXT_DO_TIME) {
 	part.timestamp = &rdata.timestamp;
-	part.usec      = &rdata.usec;
+	part.usec      = (int *)&rdata.usec;
     } else {
 	part.timestamp = NULL;
 	part.usec      = NULL;
