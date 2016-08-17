@@ -68,7 +68,7 @@ krb5_expand_hostname (krb5_context context,
     struct addrinfo *ai, *a, hints;
     int error;
 
-    if ((context->flags & KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME) == 0)
+    if (context && (context->flags & KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME) == 0)
 	return copy_hostname (context, orig_hostname, new_hostname);
 
     memset (&hints, 0, sizeof(hints));
