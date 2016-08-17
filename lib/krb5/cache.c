@@ -1298,7 +1298,7 @@ krb5_cc_move(krb5_context context, krb5_ccache from, krb5_ccache to)
 
     if (strcmp(from->ops->prefix, to->ops->prefix) != 0) {
 	krb5_set_error_message(context, KRB5_CC_NOSUPP,
-			       N_("Moving credentials between diffrent "
+			       N_("Moving credentials between different "
 				 "types not yet supported", ""));
 	return KRB5_CC_NOSUPP;
     }
