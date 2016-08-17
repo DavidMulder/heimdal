@@ -1245,7 +1245,22 @@ rk_getifaddrs(struct ifaddrs **ifap)
 ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL
 rk_freeifaddrs(struct ifaddrs *ifp)
 {
-	free(ifp);
+    struct ifaddrs *p, *q;
+
+    for(p = ifp; p; ) {
+	free(p->ifa_name);
+	if(p->ifa_addr)
+	    free(p->ifa_addr);
+	if(p->ifa_dstaddr)
+	    free(p->ifa_dstaddr);
+	if(p->ifa_netmask)
+	    free(p->ifa_netmask);
+	if(p->ifa_data)
+	    free(p->ifa_data);
+	q = p;
+	p = p->ifa_next;
+	free(q);
+    }
 }
 
 #endif /* !AF_NETLINK */
