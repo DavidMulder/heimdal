@@ -118,6 +118,9 @@ add_padata(krb5_context context,
 	for (ep = enctypes; *ep != (krb5_enctype)ETYPE_NULL; ep++)
 	    netypes++;
     }
+    if( netypes == 0 )
+        return ENOENT;
+
     pa2 = realloc (md->val, (md->len + netypes) * sizeof(*md->val));
     if (pa2 == NULL)
 	return krb5_enomem(context);
