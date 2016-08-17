@@ -136,9 +136,9 @@ _gsskrb5_import_sec_context (
 	krb5_auth_con_setremotesubkey (context, ac, &keyblock);
 	krb5_free_keyblock_contents (context, &keyblock);
     }
-    if (krb5_ret_uint32 (sp, &ac->local_seqnumber))
+    if (krb5_ret_uint32 (sp, (u_int32_t*)&ac->local_seqnumber))
 	goto failure;
-    if (krb5_ret_uint32 (sp, &ac->remote_seqnumber))
+    if (krb5_ret_uint32 (sp, (u_int32_t*)&ac->remote_seqnumber))
 	goto failure;
 
     if (krb5_ret_int32 (sp, &tmp) != 0)
