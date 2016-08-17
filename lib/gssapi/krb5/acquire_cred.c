@@ -411,6 +411,8 @@ acquire_acceptor_cred(OM_uint32 * minor_status,
 	}
 	krb5_kt_end_seq_get (context, handle->keytab, &c);
     }
+    if( handle->endtime == 0 )
+        handle->endtime = GSS_C_INDEFINITE;
 end:
     if (ret != GSS_S_COMPLETE) {
 	if (handle->keytab != NULL)
