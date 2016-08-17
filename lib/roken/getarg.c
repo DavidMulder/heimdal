@@ -194,7 +194,7 @@ static int
 check_column(FILE *f, int col, const char *output, int columns)
 {
     char *newline = strchr(output, '\n');
-    int len = (newline) ? (newline-output) : strlen(output) + 1;
+    int len = (newline) ? (newline-output) : (int) strlen(output) + 1;
 
     if(col + len > columns) {
 	fprintf(f, "\n");
