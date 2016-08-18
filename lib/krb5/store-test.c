@@ -68,12 +68,15 @@ int
 main(int argc, char **argv)
 {
     int nerr = 0;
+    int ret = 0;
     krb5_storage *sp;
     krb5_context context;
     krb5_principal principal;
 
 
-    krb5_init_context(&context);
+    ret = krb5_init_context(&context);
+    if (ret)
+        errx (1, "krb5_init_context failed: %d", ret);
 
     sp = krb5_storage_emem();
     krb5_store_int32(sp, 0x01020304);
