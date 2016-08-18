@@ -705,7 +705,7 @@ match(Char *name, Char *pat, Char *patend)
 
 	while (pat < patend) {
 		c = *pat++;
-		switch (c & M_MASK) {
+		switch (c) {
 		case M_ALL:
 			if (pat == patend)
 				return(1);
