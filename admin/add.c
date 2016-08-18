@@ -101,7 +101,7 @@ kt_add(struct add_options *opt, int argc, char **argv)
         if( fgets(buf, sizeof(buf), stdin) == NULL )
             goto out;
         buf[strcspn(buf, "\r\n")] = '\0';
-        opt->encrypted_string = buf;
+        opt->password_string = buf;
     } else if(opt->password_string == NULL && opt->random_flag == 0) {
 	if(UI_UTIL_read_pw_string(buf, sizeof(buf), "Password: ", 1)) {
 	    ret = 1;
@@ -151,7 +151,7 @@ kt_add(struct add_options *opt, int argc, char **argv)
         int i = 0;
         int len = 0;
         char buf2[3];
-        len = strlen(opt->encrypted_string) / 2;
+        len = strlen(opt->password_string) / 2;
         entry.keyblock.keyvalue.data = malloc( len );
         if( !entry.keyblock.keyvalue.data )
             goto out;
@@ -159,8 +159,8 @@ kt_add(struct add_options *opt, int argc, char **argv)
         for( i = 0; i < len; ++i )
         {
             unsigned int v;
-            buf2[0] = opt->encrypted_string[2*i];
-            buf2[1] = opt->encrypted_string[2*i+1];
+            buf2[0] = opt->password_string[2*i];
+            buf2[1] = opt->password_string[2*i+1];
             buf2[2] = '\0';
             sscanf( buf2, "%x", &v );
 
