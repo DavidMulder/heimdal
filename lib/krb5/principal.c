@@ -326,11 +326,15 @@ krb5_parse_name_flags(krb5_context context,
 	    start = q;
 	    continue;
 	}
+#ifdef __APPLE__
 	if (got_realm && (c == '/' || c == '\0')) {
+#else
+	if (got_realm && (c == ':' || c == '/' || c == '\0')) {
+#endif
 	    ret = KRB5_PARSE_MALFORMED;
         /* the old error message was misleading */
 	    krb5_set_error_message(context, ret,
-				   N_("principal name contains invalid characters", ""));
+				   N_("principal name %s contains invalid characters", start ? start : "Not Set"));
 	    goto exit;
 	}
 	*q++ = c;
