@@ -322,7 +322,7 @@ typedef struct krb5_context_data {
 #endif
 
 #ifndef KRB5_ADDRESSLESS_DEFAULT
-#define KRB5_ADDRESSLESS_DEFAULT TRUE
+#define KRB5_ADDRESSLESS_DEFAULT FALSE
 #endif
 
 #ifndef KRB5_FORWARDABLE_DEFAULT
