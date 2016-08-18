@@ -662,7 +662,7 @@ der_match_tag_and_length (const unsigned char *p, size_t len,
  * Old versions of DCE was based on a very early beta of the MIT code,
  * which used MAVROS for ASN.1 encoding. MAVROS had the interesting
  * feature that it encoded data in the forward direction, which has
- * it's problems, since you have no idea how long the data will be
+ * its problems, since you have no idea how long the data will be
  * until after you're done. MAVROS solved this by reserving one byte
  * for length, and later, if the actual length was longer, it reverted
  * to indefinite, BER style, lengths. The version of MAVROS used by
