@@ -35,9 +35,6 @@
 
 #include "roken.h"
 
-#undef roken_gethostbyname
-#undef roken_gethostbyaddr
-
 static struct sockaddr_in dns_addr;
 static char *dns_req;
 

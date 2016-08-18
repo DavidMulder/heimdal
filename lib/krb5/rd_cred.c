@@ -60,7 +60,7 @@ krb5_rd_cred(krb5_context context,
 	     krb5_replay_data *outdata)
 {
     krb5_error_code ret;
-    size_t len;
+    size_t len = 0;
     KRB_CRED cred;
     EncKrbCredPart enc_krb_cred_part;
     krb5_data enc_krb_cred_part_data;
@@ -68,6 +68,8 @@ krb5_rd_cred(krb5_context context,
     size_t i;
 
     memset(&enc_krb_cred_part, 0, sizeof(enc_krb_cred_part));
+    /* Initialize these variables to avoid crashed during cleanup */
+    memset(&cred, 0, sizeof(cred));
     krb5_data_zero(&enc_krb_cred_part_data);
 
     if ((auth_context->flags &
@@ -220,14 +222,18 @@ krb5_rd_cred(krb5_context context,
 
 	krb5_timeofday (context, &sec);
 
-	if (enc_krb_cred_part.timestamp == NULL ||
-	    enc_krb_cred_part.usec      == NULL ||
-	    labs(*enc_krb_cred_part.timestamp - sec)
-	    > context->max_skew) {
+    /* Microsoft does not put a timestamp field into their delegated
+     * creds, but RFC 1510 s3.6.2 says that an omitted timestamp
+     * should yield KRB5KRB_AP_ERR_SKEW.  So we don't fail if there's no
+     * timestamp, but still check for skew if there is a timestamp. */
+    if( enc_krb_cred_part.timestamp != NULL && enc_krb_cred_part.usec != NULL )
+    {
+        if (abs(*enc_krb_cred_part.timestamp - sec) > context->max_skew) {
 	    krb5_clear_error_message (context);
 	    ret = KRB5KRB_AP_ERR_SKEW;
 	    goto out;
 	}
+    }
     }
 
     if ((auth_context->flags &

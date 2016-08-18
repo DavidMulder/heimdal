@@ -42,6 +42,7 @@
 
 #include "roken.h"
 
+#ifndef HAVE_CLOSEFROM
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 closefrom(int fd)
 {
@@ -55,3 +56,4 @@ closefrom(int fd)
 
     return 0;
 }
+#endif

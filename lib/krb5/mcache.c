@@ -204,6 +204,14 @@ mcc_initialize(krb5_context context,
     m->dead = 0;
     m->kdc_offset = 0;
     m->mtime = time(NULL);
+    /* don't leak the principal here. However, should
+     * we reset the primary principal if it's already set?
+     * This can be triggered if you use krb5_cc_copy to append
+     * from a file ccache to a memory ccache. */
+    if (m->primary_principal) {
+        krb5_free_principal( context, m->primary_principal );
+        m->primary_principal = NULL;
+    }
     ret = krb5_copy_principal (context,
 			       primary_principal,
 			       &m->primary_principal);

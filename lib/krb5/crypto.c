@@ -33,6 +33,11 @@
 
 #include "krb5_locl.h"
 
+/* Solaris seems to require explicit inclution of crypt.h */
+#ifdef __sun
+#include <crypt.h>
+#endif
+
 struct _krb5_key_usage {
     unsigned usage;
     struct _krb5_key_data key;

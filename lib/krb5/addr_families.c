@@ -91,7 +91,7 @@ ipv4_addr2sockaddr (const krb5_address *a,
     tmp.sin_family = AF_INET;
     memcpy (&tmp.sin_addr, a->address.data, 4);
     tmp.sin_port = port;
-    memcpy(sa, &tmp, min(sizeof(tmp), *sa_size));
+    memcpy(sa, &tmp, min(sizeof(tmp), (size_t)*sa_size));
     *sa_size = sizeof(tmp);
 }
 
@@ -107,7 +107,7 @@ ipv4_h_addr2sockaddr(const char *addr,
     tmp.sin_family = AF_INET;
     tmp.sin_port   = port;
     tmp.sin_addr   = *((const struct in_addr *)addr);
-    memcpy(sa, &tmp, min(sizeof(tmp), *sa_size));
+    memcpy(sa, &tmp, min(sizeof(tmp), (size_t)*sa_size));
     *sa_size = sizeof(tmp);
 }
 
@@ -157,7 +157,7 @@ ipv4_anyaddr (struct sockaddr *sa, krb5_socklen_t *sa_size, int port)
     tmp.sin_family = AF_INET;
     tmp.sin_port   = port;
     tmp.sin_addr.s_addr = INADDR_ANY;
-    memcpy(sa, &tmp, min(sizeof(tmp), *sa_size));
+    memcpy(sa, &tmp, min(sizeof(tmp), (size_t)*sa_size));
     *sa_size = sizeof(tmp);
 }
 
@@ -284,7 +284,7 @@ ipv6_addr2sockaddr (const krb5_address *a,
     tmp.sin6_family = AF_INET6;
     memcpy (&tmp.sin6_addr, a->address.data, sizeof(tmp.sin6_addr));
     tmp.sin6_port = port;
-    memcpy(sa, &tmp, min(sizeof(tmp), *sa_size));
+    memcpy(sa, &tmp, min(sizeof(tmp), (size_t)*sa_size));
     *sa_size = sizeof(tmp);
 }
 
@@ -300,7 +300,7 @@ ipv6_h_addr2sockaddr(const char *addr,
     tmp.sin6_family = AF_INET6;
     tmp.sin6_port   = port;
     tmp.sin6_addr   = *((const struct in6_addr *)addr);
-    memcpy(sa, &tmp, min(sizeof(tmp), *sa_size));
+    memcpy(sa, &tmp, min(sizeof(tmp), (size_t)*sa_size));
     *sa_size = sizeof(tmp);
 }
 
@@ -829,7 +829,7 @@ find_atype(krb5_address_type atype)
     struct addr_operations *a;
 
     for (a = at; a < at + num_addrs; ++a)
-	if (atype == a->atype)
+	if ((krb5_address_type)atype == a->atype)
 	    return a;
     return NULL;
 }
@@ -1311,7 +1311,7 @@ krb5_address_search(krb5_context context,
 {
     size_t i;
 
-    for (i = 0; i < addrlist->len; ++i)
+    for (i = 0; i < (int)addrlist->len; ++i)
 	if (krb5_address_compare (context, addr, &addrlist->val[i]))
 	    return TRUE;
     return FALSE;
@@ -1443,7 +1443,7 @@ krb5_append_addresses(krb5_context context,
 	if (tmp == NULL)
 	    return krb5_enomem(context);
 	dest->val = tmp;
-	for(i = 0; i < source->len; i++) {
+	for(i = 0; i < (int)source->len; i++) {
 	    /* skip duplicates */
 	    if(krb5_address_search(context, &source->val[i], dest))
 		continue;

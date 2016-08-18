@@ -44,6 +44,8 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 rk_flock(int fd, int operation)
 {
 #if defined(HAVE_FCNTL) && defined(F_SETLK)
+    /* flock is redefined for resymboling, so unset that */
+  #undef flock
   struct flock arg;
   int code, cmd;
 

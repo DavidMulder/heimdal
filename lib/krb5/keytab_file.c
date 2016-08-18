@@ -465,7 +465,7 @@ loop:
     ret = krb5_ret_int8(cursor->sp, &tmp8);
     if (ret)
 	goto out;
-    entry->vno = tmp8;
+    entry->vno = (unsigned char)tmp8;
     ret = krb5_kt_ret_keyblock (context, d, cursor->sp, &entry->keyblock);
     if (ret)
 	goto out;
@@ -475,7 +475,12 @@ loop:
     curpos = krb5_storage_seek(cursor->sp, 0, SEEK_CUR);
     if(len + 4 + pos - curpos >= 4) {
 	ret = krb5_ret_int32(cursor->sp, &tmp32);
-	if (ret == 0 && tmp32 != 0)
+    /* The length indicates that there could be a 32bit kvno value, 
+     * but because we may have been inserted into a previously deleted
+     * spot the extra length could be a lot larger than the 4 bytes necessary
+     * to hold a 32bit value.  So if we have at least 4 bytes read it, and 
+     * then see if the 32 bit value matches the 8bit kvno value */
+    if ( (ret == 0) && (tmp32 != 0) && ((tmp32 % 256) == entry->vno) )
 	    entry->vno = tmp32;
     }
     /* there might be a flags field here */
@@ -702,9 +707,13 @@ fkt_add_entry(krb5_context context,
 	    len = keytab.length;
 	    break;
 	}
+    /* Putting a smaller entry in a larger delete space has caused problems
+     * later when we are trying to determine whether a 32bit kvno value is
+     * stored as a part of this entry.  the issue will be solved in 
+     * fkt_next_entry_int() */
 	if(len < 0) {
 	    len = -len;
-	    if(len >= (int)keytab.length) {
+	    if(len >= (int32_t)keytab.length) {
 		krb5_storage_seek(sp, -4, SEEK_CUR);
 		break;
 	    }

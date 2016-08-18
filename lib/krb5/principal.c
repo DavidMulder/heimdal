@@ -231,6 +231,14 @@ krb5_parse_name_flags(krb5_context context,
     int ignore_realm = flags & KRB5_PRINCIPAL_PARSE_IGNORE_REALM;
     int no_def_realm = flags & KRB5_PRINCIPAL_PARSE_NO_DEF_REALM;
 
+    /* we should not be accepting empty principal names */
+    if( !name || (name && strlen(name) == 0) )
+    {
+        krb5_set_error_message(context, KRB5_PARSE_MALFORMED,
+                       "empty principal name");
+        return KRB5_PARSE_MALFORMED;
+    }
+
     *principal = NULL;
 
     if (no_realm && require_realm) {
@@ -292,9 +300,16 @@ krb5_parse_name_flags(krb5_context context,
 		first_at = 0;
 	} else if ((c == '/' && !enterprise) || c == '@') {
 	    if (got_realm) {
+            /* original error wasn't accurate in all cases */
+            if( c == '/' ) {
 		ret = KRB5_PARSE_MALFORMED;
 		krb5_set_error_message(context, ret,
 				       N_("part after realm in principal name", ""));
+            } else {
+               krb5_set_error_message(context, ret,
+                                      "Bad or inappropriately escaped '@' "
+                                       "symbols in realm name");
+            }
 		goto exit;
 	    } else {
 		comp[n] = malloc(q - start + 1);
@@ -313,13 +328,15 @@ krb5_parse_name_flags(krb5_context context,
 	}
 	if (got_realm && (c == '/' || c == '\0')) {
 	    ret = KRB5_PARSE_MALFORMED;
+        /* the old error message was misleading */
 	    krb5_set_error_message(context, ret,
-				   N_("part after realm in principal name", ""));
+				   N_("principal name contains invalid characters", ""));
 	    goto exit;
 	}
 	*q++ = c;
     }
     if (got_realm) {
+	int realm_size = q - start;
 	if (no_realm) {
 	    ret = KRB5_PARSE_MALFORMED;
 	    krb5_set_error_message(context, ret,
@@ -327,6 +344,13 @@ krb5_parse_name_flags(krb5_context context,
 				      "expected to be without one", ""));
 	    goto exit;
 	}
+	/* we should fail on principals like '@' which we were not doing. */
+    if( realm_size <= 0 )
+    {
+        ret = KRB5_PARSE_MALFORMED;
+        krb5_set_error_message(context, ret, "empty realm");
+        goto exit;
+    }
 	if (!ignore_realm) {
 	    realm = malloc(q - start + 1);
 	    if (realm == NULL) {
@@ -336,6 +360,8 @@ krb5_parse_name_flags(krb5_context context,
 	    memcpy(realm, start, q - start);
 	    realm[q - start] = 0;
 	}
+	/* always upper case the realm name. */
+	strupr( realm );
     } else {
 	if (require_realm) {
 	    ret = KRB5_PARSE_MALFORMED;
@@ -943,8 +969,9 @@ krb5_principal_compare_any_realm(krb5_context context,
     size_t i;
     if(princ_num_comp(princ1) != princ_num_comp(princ2))
 	return FALSE;
-    for(i = 0; i < princ_num_comp(princ1); i++){
-	if(strcmp(princ_ncomp(princ1, i), princ_ncomp(princ2, i)) != 0)
+    for(i = 0; i < (int)princ_num_comp(princ1); i++){
+     /* change to case insensitive compare */
+	if(strcasecmp(princ_ncomp(princ1, i), princ_ncomp(princ2, i)) != 0)
 	    return FALSE;
     }
     return TRUE;
@@ -1010,7 +1037,7 @@ krb5_realm_compare(krb5_context context,
 		   krb5_const_principal princ1,
 		   krb5_const_principal princ2)
 {
-    return strcmp(princ_realm(princ1), princ_realm(princ2)) == 0;
+    return strcasecmp(princ_realm(princ1), princ_realm(princ2)) == 0;
 }
 
 /**
@@ -1077,8 +1104,14 @@ krb5_sname_to_principal_old(krb5_context context,
 	else
 	    ret = krb5_expand_hostname_realms(context, hostname,
 					      &host, &realms);
-	if (ret)
+    /* krb5_expand_hostname_realms() could fail after allocating memory
+     * for the new_hostname argument, so we need to check and free it
+     * if necessary.
+     */
+	if (ret) {
+	    if (host)  free (host);
 	    return ret;
+	}
 	strlwr(host);
 	hostname = host;
 	if (!realm)

@@ -39,7 +39,7 @@ copy_hostname(krb5_context context,
 	      char **new_hostname)
 {
     *new_hostname = strdup (orig_hostname);
-    if (*new_hostname == NULL)
+    if (*new_hostname == NULL && context != NULL)
 	return krb5_enomem(context);
     strlwr (*new_hostname);
     return 0;
@@ -65,8 +65,15 @@ krb5_expand_hostname (krb5_context context,
 		      const char *orig_hostname,
 		      char **new_hostname)
 {
-    struct addrinfo *ai, *a, hints;
+    struct addrinfo *ai = NULL, *a = NULL, hints;
     int error;
+    int ret = 0;
+    char localhost[MAXHOSTNAMELEN] = {0};
+    size_t orig_len = 0;
+    struct in_addr addr;
+    struct hostent* hostinfo = NULL;
+
+    memset( &addr, 0, sizeof(addr) );
 
     if (context && (context->flags & KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME) == 0)
 	return copy_hostname (context, orig_hostname, new_hostname);
@@ -74,21 +81,127 @@ krb5_expand_hostname (krb5_context context,
     memset (&hints, 0, sizeof(hints));
     hints.ai_flags = AI_CANONNAME;
 
+    /* Allow orig_hostname to be NULL so we can consolidate all hostname 
+     * expansion logic in one place. We also process the 
+     * computer_name_override setting in the conf file.
+     * We then check the orig_hostname to see if it's already a FQDN.
+     * Then we check the results of gethostbyname/gethostbyaddr to see if
+     * there's an FQDN from there */
+    if (orig_hostname == NULL) {
+        const char* override = NULL;
+
+        if (context) {
+            override = krb5_config_get_string( context, NULL, "libdefaults",
+                                               "computer_name_override", NULL );
+        }
+
+        if (override)
+            strncpy( localhost, override, sizeof(localhost)-1 );
+        else
+            gethostname( localhost, sizeof(localhost) );
+
+        orig_hostname = localhost;
+    }
+    
+    if (strchr( orig_hostname, '.' ) && (orig_hostname[0] != '.') ) {
+        if (inet_aton( orig_hostname, &addr ) == 0) {
+            ret = copy_hostname( context, orig_hostname, new_hostname );
+            goto FINISHED;
+        } else {
+            hints.ai_flags = AI_NUMERICHOST;
+        }
+    }
+
+    if (hints.ai_flags == AI_CANONNAME ) {
+        hostinfo = gethostbyname( orig_hostname );
+    } else {
+        hostinfo = gethostbyaddr( (char*) &addr, sizeof(addr), AF_INET );
+    }
+
+    if (hostinfo && hostinfo->h_name) {
+        if (strchr( hostinfo->h_name, '.' ) && 
+            (hostinfo->h_name[0] != '.') ) {
+            ret = copy_hostname(context, hostinfo->h_name, new_hostname );
+            goto FINISHED;
+        } else {
+            int     i;
+            size_t  len = strlen( hostinfo->h_name );
+
+            for( i = 0; hostinfo->h_aliases[i]; i++ ) {
+
+                /* skip anything without a '.' in it, or that starts
+                 * with a '.' */
+                if( strchr( hostinfo->h_aliases[i], '.' ) == NULL ||
+                    hostinfo->h_aliases[i][0] == '.' )
+                    continue;
+
+                /* if the FQDN alias does not start with the same thing
+                 * as the hostname, it's probably some really weird
+                 * situation, like having a line like:
+                 * 127.0.0.1  rhas30 localhost.localdomain localhost
+                 *
+                 * in /etc/hosts. We don't want to use this hostname
+                 * in this case, it needs to match 
+                 * <orig_hostname>.fqdn.stuff.
+                 **/
+                if( strncmp( hostinfo->h_aliases[i],
+                             hostinfo->h_name,
+                             len ) ||
+                    hostinfo->h_aliases[i][len] != '.' )
+                    continue;
+
+                ret = copy_hostname( context, 
+                                     hostinfo->h_aliases[i], 
+                                     new_hostname );
+                goto FINISHED;
+            }
+        }
+    }
+
     error = getaddrinfo (orig_hostname, NULL, &hints, &ai);
-    if (error)
-	return copy_hostname (context, orig_hostname, new_hostname);
+    /* Don't failover to orig_hostname here, and check for FQDN's */
+    if( error == 0 ) {
     for (a = ai; a != NULL; a = a->ai_next) {
-	if (a->ai_canonname != NULL) {
-	    *new_hostname = strdup (a->ai_canonname);
-	    freeaddrinfo (ai);
-	    if (*new_hostname == NULL)
-		return krb5_enomem(context);
-	    else
-		return 0;
+        /* only use FQDN's, so do the strchr search too */
+        if( a->ai_canonname == NULL )
+            continue;
+
+        if( strchr( a->ai_canonname, '.' ) == NULL ||
+            a->ai_canonname[0] == '.' )
+            continue;
+
+        ret = copy_hostname( context, a->ai_canonname, new_hostname );
+        goto FINISHED;
+    }
+    }
+
+    /* if we're not doing an IP address lookup, and
+     * we haven't resolved anything, create a pseudo fqdn, otherwise
+     * failover to the orig_hostname */
+    if( context && (hints.ai_flags != AI_NUMERICHOST) ) {
+        krb5_realm  realm = NULL;
+        char*       pseudo_fqdn = NULL;
+
+        if( krb5_get_default_realm( context, &realm ) == 0 ){
+            if( asprintf( &pseudo_fqdn, "%s.%s", orig_hostname, realm ) < 0 ) {
+                free( realm );
+                goto FINISHED;
+        }
+            strlwr( pseudo_fqdn );
+            ret = copy_hostname( context, pseudo_fqdn, new_hostname );
+            free( pseudo_fqdn );
+            free( realm );
+
+            goto FINISHED;
 	}
     }
+    
+    ret = copy_hostname (context, orig_hostname, new_hostname);
+
+FINISHED:
+    if( ai )
     freeaddrinfo (ai);
-    return copy_hostname (context, orig_hostname, new_hostname);
+    return ret;
 }
 
 /*
@@ -140,38 +253,12 @@ krb5_expand_hostname_realms (krb5_context context,
 			     char **new_hostname,
 			     char ***realms)
 {
-    struct addrinfo *ai, *a, hints;
-    int error;
+    /* just use the other functions to figure this out */
     krb5_error_code ret = 0;
 
-    if ((context->flags & KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME) == 0)
-	return vanilla_hostname (context, orig_hostname, new_hostname,
-				 realms);
-
-    memset (&hints, 0, sizeof(hints));
-    hints.ai_flags = AI_CANONNAME;
-
-    error = getaddrinfo (orig_hostname, NULL, &hints, &ai);
-    if (error)
-	return vanilla_hostname (context, orig_hostname, new_hostname,
-				 realms);
-
-    for (a = ai; a != NULL; a = a->ai_next) {
-	if (a->ai_canonname != NULL) {
-	    ret = copy_hostname (context, a->ai_canonname, new_hostname);
-	    if (ret) {
-		freeaddrinfo (ai);
+    ret = krb5_expand_hostname( context, orig_hostname, new_hostname );
+    if( ret )
 		return ret;
-	    }
-	    strlwr (*new_hostname);
-	    ret = krb5_get_host_realm (context, *new_hostname, realms);
-	    if (ret == 0) {
-		freeaddrinfo (ai);
-		return 0;
-	    }
-	    free (*new_hostname);
-	}
-    }
-    freeaddrinfo(ai);
-    return vanilla_hostname (context, orig_hostname, new_hostname, realms);
+
+    return krb5_get_host_realm( context, *new_hostname, realms );
 }

@@ -35,6 +35,8 @@
 #undef realloc
 
 #include <stdlib.h>
+#include <err.h>
+
 #include "roken.h"
 #undef realloc
 

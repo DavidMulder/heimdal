@@ -196,7 +196,9 @@ _krb5_get_host_realm_int(krb5_context context,
             return krb5_enomem(context);
     }
 
-    dns_locate_enable = krb5_config_get_bool_default(context, NULL, TRUE,
+    /* Set default to FALSE so that TXT record lookup is not done unless
+     * explicitly enabled */
+    dns_locate_enable = krb5_config_get_bool_default(context, NULL, FALSE,
         "libdefaults", "dns_lookup_realm", NULL);
     for (p = host; p != NULL; p = strchr (p + 1, '.')) {
         if (config_find_realm(context, p, realms) == 0) {

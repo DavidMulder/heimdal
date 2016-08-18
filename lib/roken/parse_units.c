@@ -37,6 +37,11 @@
 #include <ctype.h>
 #include <string.h>
 #include "roken.h"
+
+#if (HAVE_STRINGS_H)
+#include <strings.h>
+#endif
+
 #include "parse_units.h"
 
 /*

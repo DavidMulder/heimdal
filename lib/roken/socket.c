@@ -100,7 +100,8 @@ socket_set_address_and_port (struct sockaddr *sa, const void *ptr, int port)
 #endif
     default :
 	errx (1, "unknown address family %d", sa->sa_family);
-	break;
+/* gcc 4.0 compile fix */
+    return 0;
     }
 }
 
@@ -210,7 +211,7 @@ socket_set_port (struct sockaddr *sa, int port)
 #endif
     default :
 	errx (1, "unknown address family %d", sa->sa_family);
-	break;
+    return 0;
     }
 }
 

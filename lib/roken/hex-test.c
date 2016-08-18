@@ -59,7 +59,7 @@ main(int argc, char **argv)
     };
     for(t = tests; t->data; t++) {
 	char *str;
-	int len;
+	size_t len;
 	len = hex_encode(t->data, t->len, &str);
 	if(strcmp(str, t->result) != 0) {
 	    fprintf(stderr, "failed test %d: %s != %s\n", numtest,
@@ -84,7 +84,7 @@ main(int argc, char **argv)
 
     {
 	unsigned char buf[2] = { 0, 0xff } ;
-	int len;
+	size_t len;
 
 	len = hex_decode("A", buf, 1);
 	if (len != 1) {

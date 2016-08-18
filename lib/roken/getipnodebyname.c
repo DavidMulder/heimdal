@@ -35,7 +35,7 @@
 
 #include "roken.h"
 
-#ifndef HAVE_H_ERRNO
+#if !defined(HAVE_H_ERRNO) && !defined(h_errno)
 static int h_errno = NO_RECOVERY;
 #endif
 

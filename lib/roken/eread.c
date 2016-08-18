@@ -33,7 +33,7 @@
 
 #include <config.h>
 
-#include "roken.h"
+#include <roken.h>
 
 /*
  * Like read but never fails (and never returns partial data).

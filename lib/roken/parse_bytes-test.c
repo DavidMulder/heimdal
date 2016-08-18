@@ -57,7 +57,7 @@ static struct testcase {
 int
 main(int argc, char **argv)
 {
-    int i;
+    size_t i;
     int ret = 0;
 
     for (i = 0; i < sizeof(tests)/sizeof(tests[0]); ++i) {

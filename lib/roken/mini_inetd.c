@@ -33,6 +33,10 @@
 
 #include <config.h>
 
+#ifdef _AIX
+#include <strings.h>
+#endif
+
 #include <err.h>
 #include "roken.h"
 

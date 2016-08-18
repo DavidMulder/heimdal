@@ -76,6 +76,8 @@ _krb5_xlock(krb5_context context, int fd, krb5_boolean exclusive,
 {
     int ret;
 #ifdef HAVE_FCNTL
+    /* hack for libroken resymboling */
+    #undef flock
     struct flock l;
 
     l.l_start = 0;
@@ -119,6 +121,8 @@ _krb5_xunlock(krb5_context context, int fd)
 {
     int ret;
 #ifdef HAVE_FCNTL
+    /* hack for libroken resymboling */
+    #undef flock
     struct flock l;
     l.l_start = 0;
     l.l_len = 0;
@@ -425,7 +429,15 @@ again:
     fd = open(filename, flags, mode);
     if(fd < 0) {
 	char buf[128];
+        /* it turns out that on HPUX at least some     *
+         * open failures leave errno set to 0.  Who knows what error it   *
+         * should actually be set to, but some error is better than       *
+         * returning success on error. */
+        if( errno != 0 ) {
 	ret = errno;
+        } else {
+            ret = -1;
+        }
 	rk_strerror_r(ret, buf, sizeof(buf));
 	krb5_set_error_message(context, ret, N_("%s open(%s): %s", "file, error"),
 			       operation, filename, buf);

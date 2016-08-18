@@ -107,6 +107,86 @@ krb5_auth_con_free(krb5_context context,
     return 0;
 }
 
+krb5_error_code KRB5_LIB_FUNCTION
+krb5_auth_con_copy( krb5_context context,
+                    krb5_auth_context src,
+                    krb5_auth_context *dst )
+{
+    krb5_error_code rval;
+
+    /* Zero the outparam */
+    *dst = NULL;
+
+    /* Initialize the dst context */
+    if( (rval = krb5_auth_con_init( context, dst )) )
+    {
+        goto FAILURE;
+    }
+
+    /* Copying fields from the source */
+    memcpy( *dst, src, sizeof(*dst) );
+
+    /* Duplicate all allocated fields */
+    if( src->authenticator )
+    {
+        (*dst)->authenticator = malloc(sizeof(krb5_authenticator_data));
+        if( (*dst)->authenticator == NULL )
+        {
+            rval = ENOMEM;
+            goto FAILURE;
+        }
+        if( ( rval = copy_Authenticator( src->authenticator,
+                                         ((*dst)->authenticator) )) )
+        {
+            goto FAILURE;
+        }
+    }
+    if(src->local_address)
+    {
+	    (*dst)->local_address = malloc(sizeof(krb5_address));
+        if( (*dst)->local_address == NULL )
+        {
+            rval = ENOMEM;
+            goto FAILURE;
+        }
+        if( ( rval = copy_HostAddress( src->local_address,
+                                       ((*dst)->local_address) )) )
+        {
+            goto FAILURE;
+        }
+	}
+    if(src->remote_address)
+    {
+	    (*dst)->remote_address = malloc(sizeof(krb5_address));
+        if( (*dst)->remote_address == NULL )
+        {
+            rval = ENOMEM;
+            goto FAILURE;
+        }
+        
+        if( ( rval = copy_HostAddress( src->remote_address,
+                                       ((*dst)->remote_address) )) )
+        {
+            goto FAILURE;
+        }
+	}
+    krb5_auth_con_getkey( context, src, &((*dst)->keyblock) );
+    krb5_auth_con_getlocalsubkey( context, src, &((*dst)->local_subkey) );
+    krb5_auth_con_getremotesubkey( context, src, &((*dst)->remote_subkey) );
+
+    return 0;
+
+FAILURE:
+    if( *dst )
+    {
+        krb5_auth_con_free( context, *dst );
+        *dst = NULL;
+    }
+    
+    return rval;
+
+}
+
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_auth_con_setflags(krb5_context context,
 		       krb5_auth_context auth_context,

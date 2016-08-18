@@ -180,7 +180,7 @@ DES_is_weak_key(DES_cblock *key)
     int weak = 0;
     int i;
 
-    for (i = 0; i < sizeof(weak_keys)/sizeof(weak_keys[0]); i++)
+    for (i = 0; (size_t)i < sizeof(weak_keys)/sizeof(weak_keys[0]); i++)
 	weak ^= (ct_memcmp(weak_keys[i], key, DES_CBLOCK_LEN) == 0);
 
     return !!weak;

@@ -94,8 +94,15 @@ krb5_mk_req(krb5_context context,
 
     ret = krb5_expand_hostname_realms (context, hostname,
 				       &real_hostname, &realms);
+    /* krb5_expand_hostname_realms() could fail extracting the realm for the 
+     * hostname, while real_hostname could still have been allocated. Don't
+     * leak this memory
+     */
     if (ret)
+    {
+        if( real_hostname ) free( real_hostname );
 	return ret;
+    }
 
     ret = krb5_build_principal (context, &server,
 				strlen(*realms),

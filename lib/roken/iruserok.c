@@ -29,6 +29,10 @@
 
 #include <config.h>
 
+#ifdef _AIX
+struct dom_binding;
+#endif
+
 #include <stdio.h>
 #include <ctype.h>
 #ifdef HAVE_SYS_TYPES_H
@@ -247,10 +251,13 @@ again:
 		 * are protected read/write owner only.
 		 */
 		uid = geteuid();
-		if (seteuid(pwd->pw_uid) < 0)
+        /* forward port of changes for older AIX systems
+         * that don't have seteuid() (or a broken one)
+         */
+        if(setreuid(-1, pwd->pw_uid) < 0 )
 			return (-1);
 		hostf = fopen(pbuf, "r");
-		seteuid(uid);
+        setreuid(-1,uid);
 
 		if (hostf == NULL)
 			return (-1);
