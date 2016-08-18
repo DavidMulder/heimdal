@@ -345,6 +345,12 @@ do_delegation (krb5_context context,
     fwd_flags.forwarded = 1;
     fwd_flags.forwardable = 1;
 
+    /* Delegation wasn't passing renewable.
+     * If the original tgt isn't renewable, this does nothing
+     * ( the delegated tgt is also not renewable ).
+     */
+    fwd_flags.renewable = 1;
+
     if (name->name.name_string.len < 2)
 	goto out;
 

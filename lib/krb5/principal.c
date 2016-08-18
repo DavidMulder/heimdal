@@ -360,8 +360,13 @@ krb5_parse_name_flags(krb5_context context,
 	    memcpy(realm, start, q - start);
 	    realm[q - start] = 0;
 	}
-	/* always upper case the realm name. */
-	strupr( realm );
+    /* If the first character is upper, and the next lower, and the very last
+     * one is upper, then its very unlikely they are mis-typing the domain case-wise,
+     * so leave it as-is. But in every other case, uppercase it. */
+    if( !( isupper((int)realm[0]) &&
+                islower((int)realm[1]) &&
+                isupper((int)realm[strlen(realm) - 1] ) ) )
+        strupr( realm );
     } else {
 	if (require_realm) {
 	    ret = KRB5_PARSE_MALFORMED;
