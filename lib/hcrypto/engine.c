@@ -171,10 +171,17 @@ ENGINE_get_RAND(const ENGINE *engine)
  *
  */
 
+/* Added the hc_ prefix to the generated function names to simplify mknamespace
+ * parsing. Undef these symbols so they don't affect the macro expansion. */
+#undef ENGINE_get_default_DH
+#undef ENGINE_set_default_DH
+#undef ENGINE_get_default_RSA
+#undef ENGINE_set_default_RSA
+
 #define SG_default_engine(type)			\
 static ENGINE *type##_engine;			\
 int						\
-ENGINE_set_default_##type(ENGINE *engine)	\
+hc_ENGINE_set_default_##type(ENGINE *engine)	\
 {						\
     if (type##_engine)				\
 	ENGINE_finish(type##_engine);		\
@@ -184,7 +191,7 @@ ENGINE_set_default_##type(ENGINE *engine)	\
     return 1;					\
 }						\
 ENGINE *					\
-ENGINE_get_default_##type(void)			\
+hc_ENGINE_get_default_##type(void)			\
 {						\
     if (type##_engine)				\
 	ENGINE_up_ref(type##_engine);		\
