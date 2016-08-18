@@ -223,29 +223,6 @@ acquire_initiator_cred(OM_uint32 *minor_status,
      * If we don't have any such ccache, then use a MEMORY ccache.
      */
 
-    if (handle->principal != NULL) {
-        /*
-         * Not default credential case.  See if we can find a ccache in
-         * the cccol for the desired_name.
-         */
-	kret = krb5_cc_cache_match(context,
-				   handle->principal,
-				   &ccache);
-	if (kret == 0) {
-            kret = krb5_cc_get_lifetime(context, ccache, &lifetime);
-            if (kret == 0) {
-                if (lifetime > 0)
-                    goto found;
-                else
-                    goto try_keytab;
-            }
-	}
-        /*
-         * Fall through.  We shouldn't find this in the default ccache
-         * either, but we'll give it a try, then we'll try using a keytab.
-         */
-    }
-
     /*
      * Either desired_name was GSS_C_NO_NAME (default cred) or
      * krb5_cc_cache_match() failed (or found expired).
