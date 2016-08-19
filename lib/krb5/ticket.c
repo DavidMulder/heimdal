@@ -518,9 +518,18 @@ noreferral:
 	(krb5_realm_compare(context, requested, returned) != TRUE &&
 	 krb5_principal_is_krbtgt(context, returned) != TRUE))
     {
-	krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
-			       N_("Not same server principal returned "
-				  "as requested", ""));
+        char* requested_str = NULL;
+        char* returned_str = NULL;
+        krb5_unparse_name( context, requested, &requested_str );
+        krb5_unparse_name( context, returned, &returned_str );
+        krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
+                              "Not same server principal returned as requested. "
+                              " Requested %s, returned %s", requested_str ? requested_str : "Not Set", 
+                              returned_str ? returned_str : "Not Set" );
+        if( returned_str )
+            free( returned_str );
+        if( requested_str )
+            free( requested_str );
 	return KRB5KRB_AP_ERR_MODIFIED;
     }
     return 0;
@@ -542,9 +551,18 @@ check_client_referral(krb5_context context,
     if (krb5_principal_compare(context, requested, mapped) == FALSE &&
 	!rep->enc_part.flags.enc_pa_rep)
     {
-	krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
-			       N_("Not same client principal returned "
-				  "as requested", ""));
+        char* requested_str = NULL;
+        char* returned_str = NULL;
+        krb5_unparse_name( context, requested, &requested_str );
+        krb5_unparse_name( context, mapped, &returned_str );
+        krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
+                              "Not same client principal returned as returned. "
+                              " Requested %s, returned %s", requested_str ? requested_str : "Not Set", 
+                              returned_str ? returned_str : "Not Set" );
+        if( returned_str )
+            free( returned_str );
+        if( requested_str )
+            free( requested_str );
 	return KRB5KRB_AP_ERR_MODIFIED;
     }
     return 0;
