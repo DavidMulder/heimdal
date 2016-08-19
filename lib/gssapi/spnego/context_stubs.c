@@ -286,6 +286,45 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_compare_name
     return GSS_S_COMPLETE;
 }
 
+extern OM_uint32 GSSAPI_CALLCONV _gsskrb5_display_status
+           (OM_uint32 * minor_status,
+            OM_uint32 status_value,
+            int status_type,
+            const gss_OID mech_type,
+            OM_uint32 *message_context,
+            gss_buffer_t status_string);
+
+extern OM_uint32 GSSAPI_CALLCONV _gss_ntlm_display_status
+           (OM_uint32 * minor_status,
+            OM_uint32 status_value,
+            int status_type,
+            const gss_OID mech_type,
+            OM_uint32 *message_context,
+            gss_buffer_t status_string);
+
+OM_uint32 GSSAPI_CALLCONV _gss_spnego_display_status
+           (OM_uint32 * minor_status,
+            OM_uint32 status_value,
+            int status_type,
+            const gss_OID mech_type,
+            OM_uint32 *message_context,
+            gss_buffer_t status_string)
+{
+    OM_uint32 major = 0, minor = 0;
+
+    /* Query Kerberos. */
+    major = _gsskrb5_display_status(&minor, status_value, status_type,
+           GSS_KRB5_MECHANISM, message_context, status_string);
+
+    if (status_string->length == 0) /* Query NTLM. */
+       major = _gss_ntlm_display_status(&minor, status_value, status_type,
+               GSS_NTLM_MECHANISM, message_context, status_string);
+
+    *minor_status = minor;
+
+    return major;
+}
+
 OM_uint32 GSSAPI_CALLCONV _gss_spnego_display_name
            (OM_uint32 * minor_status,
             gss_const_name_t input_name,

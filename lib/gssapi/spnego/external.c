@@ -98,7 +98,7 @@ static gssapi_mech_interface_desc spnego_mech = {
     _gss_spnego_verify_mic,
     _gss_spnego_wrap,
     _gss_spnego_unwrap,
-    NULL, /* gm_display_status */
+    _gss_spnego_display_status,
     NULL, /* gm_indicate_mechs */
     _gss_spnego_compare_name,
     _gss_spnego_display_name,
