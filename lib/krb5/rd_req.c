@@ -834,7 +834,6 @@ krb5_rd_req_ctx(krb5_context context,
     krb5_rd_req_out_ctx o = NULL;
     krb5_keytab id = NULL, keytab = NULL;
     krb5_principal service = NULL;
-    int got_key_from_keytab = 0;
 
     *outctx = NULL;
 
@@ -912,7 +911,7 @@ krb5_rd_req_ctx(krb5_context context,
 				  0);
     /* principal names can be different, but if they don't resolve out of the 
      * keytab then throw a wrong principal error. */
-    if( server && service && ret )
+    if( server && service && ret && ret != KRB5_KT_NOTFOUND )
     {
         /* If these are not the same we are going to be using the kvno for one
          * ticket to get another ticket.  This will most likely fail, but even
@@ -925,7 +924,7 @@ krb5_rd_req_ctx(krb5_context context,
             goto out;
         }
     }
-	if (ret) {
+	if (ret && ret != KRB5_KT_NOTFOUND) {
 	    /* If caller specified a server, fail. */
 	    if (service == NULL && (context->flags & KRB5_CTX_F_RD_REQ_IGNORE) == 0)
 		goto out;
@@ -934,7 +933,6 @@ krb5_rd_req_ctx(krb5_context context,
 	     */
 	    o->keyblock = NULL;
 	}
-    got_key_from_keytab = 1;
     }
 
     if (o->keyblock) {
@@ -952,7 +950,13 @@ krb5_rd_req_ctx(krb5_context context,
 				  &o->ticket,
 				  KRB5_KU_AP_REQ_AUTH);
 
-    if (got_key_from_keytab && ret)
+    /* We are having trouble with Win2K3 domain controllers that have the
+     * dsHeuristic setting turned on to always use kvno=1.
+     *
+     * The following fix will be tried if using the actual kvno in the ticket
+     * to get the keytab entry fails.  This fix will grab the matching entry
+     * with the highest kvno in the keytab and try to verify it. */
+    if (ret)
     {
         int do_again = 1;
 TRYAGAIN:
@@ -987,6 +991,10 @@ TRYAGAIN:
                                   &o->ap_req_options,
                                   &o->ticket );
 
+        /* If we have a clock skew on the ap_req make sure we return the clock skew error */
+        if( ret == KRB5KRB_AP_ERR_SKEW )
+            goto out;
+
         /* If the highest kvno didn't work AND the users kvno is
          * 1, then this might by Win2k behavior, and we need to use
          * the second-highest entry to verify, as the ticket could
@@ -1013,6 +1021,9 @@ TRYAGAIN:
             ret = KRB5KRB_AP_WRONG_PRINC;
             goto out;
         }
+        else
+        if( ret )
+            goto out;
     }
 
     } else {
