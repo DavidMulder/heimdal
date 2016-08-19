@@ -45,7 +45,7 @@ hostent_find_fqdn (const struct hostent *he)
     const char *ret = he->h_name;
     const char **h;
 
-    if (strchr (ret, '.') == NULL)
+    if (strchr (ret, '.') == NULL && he->h_aliases != NULL)
 	for (h = (const char **)he->h_aliases; *h != NULL; ++h) {
 	    if (strchr (*h, '.') != NULL) {
 		ret = *h;
