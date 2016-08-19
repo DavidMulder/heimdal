@@ -1723,6 +1723,7 @@ krb5_get_renewed_creds(krb5_context context,
     if (ret == 0) {
 	flags.b.forwardable = template->flags.b.forwardable;
 	flags.b.proxiable = template->flags.b.proxiable;
+	in.session.keytype = template->session.keytype;
 	krb5_free_creds (context, template);
     }
 
