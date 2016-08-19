@@ -31,6 +31,7 @@
  */
 
 #include "spnego_locl.h"
+#include "mech_locl.h"
 
 static OM_uint32
 spnego_supported_mechs(OM_uint32 *minor_status, gss_OID_set *mechs)
@@ -668,8 +669,34 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_canonicalize_name (
             gss_name_t * output_name
            )
 {
-    /* XXX */
-    return gss_duplicate_name(minor_status, input_name, output_name);
+    /* Implement this with a call to the actual mech's canonicalize function
+     * and encapsulate the result in a spnego_name. */
+    OM_uint32 major_status;
+    struct _gss_mechanism_name *mn;
+    gssapi_mech_interface m;
+    const spnego_name spname = (const spnego_name) input_name;
+    /* Not pretty, but we need to know the internal (real) name type. */
+    const gss_OID nametype = (*(struct _gss_name*)spname->mech).gn_mn.slh_first->gmn_mech_oid;
+    spnego_name newspname = NULL;
+    gss_name_t inner_name = GSS_C_NO_NAME;
+
+    major_status = gss_canonicalize_name(minor_status, spname->mech, nametype, &inner_name);
+
+    if (major_status)
+        return major_status;
+
+    newspname = calloc(1, sizeof(*newspname));
+    if (!newspname) {
+        *minor_status = ENOMEM;
+        return GSS_S_FAILURE;
+    }
+
+    /* XXX: Copy OID? Set it to SPNEGO? */
+    newspname->mech = inner_name;
+
+    *output_name = (gss_name_t)newspname;
+
+    return major_status;
 }
 
 OM_uint32 GSSAPI_CALLCONV _gss_spnego_duplicate_name (
