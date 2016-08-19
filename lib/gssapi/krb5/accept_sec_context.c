@@ -36,17 +36,6 @@
 HEIMDAL_MUTEX gssapi_keytab_mutex = HEIMDAL_MUTEX_INITIALIZER;
 krb5_keytab _gsskrb5_keytab;
 
-void _gsskrb5_free_keytab(void)
-{
-    krb5_context context;
-    HEIMDAL_MUTEX_lock(&gssapi_keytab_mutex);
-    if(_gsskrb5_keytab != NULL && !_gsskrb5_init(&context)) {
-        krb5_kt_close(context, _gsskrb5_keytab);
-        _gsskrb5_keytab = NULL;
-    }
-    HEIMDAL_MUTEX_unlock(&gssapi_keytab_mutex);
-}
-
 static krb5_error_code
 validate_keytab(krb5_context context, const char *name, krb5_keytab *id)
 {

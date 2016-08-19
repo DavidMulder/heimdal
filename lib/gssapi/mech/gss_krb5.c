@@ -185,11 +185,6 @@ out:
     return major_status;
 }
 
-void _gsskrb5_free_mechs( void )
-{
-    _gss_unload_mech();
-}
-
 GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
 gsskrb5_register_acceptor_identity(const char *identity)
 {
