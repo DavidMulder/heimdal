@@ -244,6 +244,11 @@ ROKEN_LIB_FUNCTION const char * ROKEN_LIB_CALL
 ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL
 	rk_dns_srv_order(struct rk_dns_reply*);
 
+#ifdef TEST_RESOLVE
+struct rk_dns_reply*
+parse_reply(const unsigned char *data, size_t len);
+#endif
+
 #ifdef __cplusplus
 }
 #endif
