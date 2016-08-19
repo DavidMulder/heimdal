@@ -184,10 +184,14 @@ gss_display_status(OM_uint32 *minor_status,
 		if (GSS_SUPPLEMENTARY_INFO(status_value))
 		    e = asprintf(&buf, "%s", supplementary_error(
 		        GSS_SUPPLEMENTARY_INFO(status_value)));
-		else
+		else {
+		    if (GSS_CALLING_ERROR(status_value))
 		    e = asprintf (&buf, "%s %s",
 		        calling_error(GSS_CALLING_ERROR(status_value)),
 			routine_error(GSS_ROUTINE_ERROR(status_value)));
+		    else
+		    buf = strdup(routine_error(GSS_ROUTINE_ERROR(status_value)));
+		}
 
 		if (e < 0 || buf == NULL)
 		    break;
