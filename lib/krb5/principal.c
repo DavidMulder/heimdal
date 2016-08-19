@@ -450,9 +450,7 @@ quote_string(const char *s, char *out, size_t idx, size_t len, int display)
     const char *p, *q;
     for(p = s; *p && idx < len; p++){
 	q = strchr(quotable_chars, *p);
-	if (q && display) {
-	    add_char(out, idx, len, replace_chars[q - quotable_chars]);
-	} else if (q) {
+	if (q) {
 	    add_char(out, idx, len, '\\');
 	    add_char(out, idx, len, replace_chars[q - quotable_chars]);
 	}else
