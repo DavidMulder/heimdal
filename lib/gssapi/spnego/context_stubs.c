@@ -31,6 +31,7 @@
  */
 
 #include "spnego_locl.h"
+#include "mech_locl.h"
 
 static OM_uint32
 spnego_supported_mechs(OM_uint32 *minor_status, gss_OID_set *mechs)
@@ -668,8 +669,21 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_canonicalize_name (
             gss_name_t * output_name
            )
 {
-    /* XXX */
-    return gss_duplicate_name(minor_status, input_name, output_name);
+    /* Implement this with a call to the actual mech's canonicalize function. */
+    OM_uint32 major_status;
+    struct _gss_mechanism_name *mn;
+    gssapi_mech_interface m;
+    const spnego_name spname = (const spnego_name) input_name;
+
+    major_status = _gss_find_mn(minor_status, (struct _gss_name *)spname->mech, mech_type, &mn);
+    if (major_status)
+        return major_status;
+
+    m = mn->gmn_mech;
+
+    major_status = m->gm_canonicalize_name(minor_status, mn->gmn_name, mech_type, output_name);
+
+    return major_status;
 }
 
 OM_uint32 GSSAPI_CALLCONV _gss_spnego_duplicate_name (

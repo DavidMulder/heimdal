@@ -68,8 +68,15 @@ gss_canonicalize_name(OM_uint32 *minor_status,
 	*output_name = 0;
 
 	major_status = _gss_find_mn(minor_status, name, mech_type, &mn);
-	if (major_status)
-		return major_status;
+   if (major_status) {
+       /* Might be a nested mech. */
+       if (name->gn_mn.slh_first) {
+           /* XXX: Iterate through mechs */
+           mn = name->gn_mn.slh_first;
+       } else {
+           return major_status; /* No nested mechs */
+       }
+   }
 
 	m = mn->gmn_mech;
 	major_status = m->gm_canonicalize_name(minor_status,
@@ -79,33 +86,20 @@ gss_canonicalize_name(OM_uint32 *minor_status,
 		return (major_status);
 	}
 
-	/*
-	 * Now we make a new name and mark it as an MN.
-	 */
-	*minor_status = 0;
-	name = malloc(sizeof(struct _gss_name));
-	if (!name) {
-		m->gm_release_name(minor_status, &new_canonical_name);
-		*minor_status = ENOMEM;
-		return (GSS_S_FAILURE);
-	}
-	memset(name, 0, sizeof(struct _gss_name));
+    /* Return the name type as-is instead of wrapping it in
+     * a struct _gss_name. (This does not refer to GSSAPI Wrapping)
+     *
+     * Previously if you requested a KRB5_MECHANISM name you got a name
+     * wrapped in a SPNEGO name, which was twice wrapped here into a
+     * _gss_name, effectively:
+     *   _gss_name(spnego_name(_gss_name(krb5_principal))).
+     *
+     * Removing the _gss_name wrapping altogether means our existing
+     * functions work. It should possibly return a: _gss_name(krb5_principal)
+     * although callers would then need a way to get the krb5_principal
+     * out of the _gss_name() so they can do science on it.
+     */
+    *output_name = new_canonical_name;
 
-	mn = malloc(sizeof(struct _gss_mechanism_name));
-	if (!mn) {
-		m->gm_release_name(minor_status, &new_canonical_name);
-		free(name);
-		*minor_status = ENOMEM;
-		return (GSS_S_FAILURE);
-	}
-
-	HEIM_SLIST_INIT(&name->gn_mn);
-	mn->gmn_mech = m;
-	mn->gmn_mech_oid = &m->gm_mech_oid;
-	mn->gmn_name = new_canonical_name;
-	HEIM_SLIST_INSERT_HEAD(&name->gn_mn, mn, gmn_link);
-
-	*output_name = (gss_name_t) name;
-
-	return (GSS_S_COMPLETE);
+    return (GSS_S_COMPLETE);
 }
