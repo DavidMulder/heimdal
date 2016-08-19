@@ -37,6 +37,23 @@ struct _gss_mech_switch_list _gss_mechs = { NULL } ;
 gss_OID_set _gss_mech_oids;
 static HEIMDAL_MUTEX _gss_mech_mutex = HEIMDAL_MUTEX_INITIALIZER;
 
+void _gsskrb5_free_keytab( void );
+void
+_gss_unload_mech(void)
+{
+    OM_uint32 minor;
+    struct _gss_mech_switch    *m;
+    HEIMDAL_MUTEX_lock(&_gss_mech_mutex);
+    gss_release_oid_set( &minor, &_gss_mech_oids );
+    while( ( m = SLIST_FIRST(&_gss_mechs ) ) )
+    {
+        SLIST_REMOVE_HEAD(&_gss_mechs, gm_link );
+        free(m);
+    }
+    HEIMDAL_MUTEX_unlock(&_gss_mech_mutex);
+    _gsskrb5_free_keytab();
+}
+
 /*
  * Convert a string containing an OID in 'dot' form
  * (e.g. 1.2.840.113554.1.2.2) to a gss_OID.

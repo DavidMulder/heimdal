@@ -47,6 +47,20 @@ destroy_context(void *ptr)
     krb5_free_context(context);
 }
 
+void
+_gsskrb5_deinit ( void )
+{
+    _gss_mechglue_free();
+    _gsskrb5_free_mechs();
+
+    HEIMDAL_MUTEX_lock(&context_mutex);
+    if (created_key) {
+        HEIMDAL_key_delete( context_key );
+        created_key = 0;
+    }
+    HEIMDAL_MUTEX_unlock(&context_mutex);
+}
+
 krb5_error_code
 _gsskrb5_init (krb5_context *context)
 {

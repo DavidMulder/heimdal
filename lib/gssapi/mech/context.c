@@ -28,6 +28,15 @@ destroy_context(void *ptr)
     free(mg);
 }
 
+void _gss_mechglue_free( void )
+{
+    HEIMDAL_MUTEX_lock(&context_mutex);
+    if (created_key) {
+       HEIMDAL_key_delete(context_key);
+       created_key = 1;
+    }
+    HEIMDAL_MUTEX_unlock(&context_mutex);
+}
 
 static struct mg_thread_ctx *
 _gss_mechglue_thread(void)

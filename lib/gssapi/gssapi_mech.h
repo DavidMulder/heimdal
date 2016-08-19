@@ -477,6 +477,10 @@ typedef OM_uint32 GSSAPI_CALLCONV _gss_authorize_localname_t (
 /* mechglue internal */
 struct gss_mech_compat_desc_struct;
 
+void _gss_mechglue_free(void);
+void _gsskrb5_free_mechs(void);
+void _gss_unload_mech(void);
+
 #define GMI_VERSION 5
 
 /* gm_flags */
