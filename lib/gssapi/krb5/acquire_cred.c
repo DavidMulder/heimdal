@@ -54,19 +54,47 @@ __gsskrb5_ccache_lifetime(OM_uint32 *minor_status,
     return GSS_S_COMPLETE;
 }
 
+/* Derive the keytab name from the service principal name */
+static char* _service_from_princ( const krb5_principal princ )
+{
+    char* serviceName = NULL;
+    if( princ == NULL ) 
+        return serviceName;
+    if( princ->name.name_type == KRB5_NT_PRINCIPAL )
+    {
+        if( princ->name.name_string.len == 2 )
+        {   
+            serviceName = princ->name.name_string.val[0];
+        }
+    }
+    return serviceName;
+}
 
-
+static char* _basename( char* name )
+{
+    int i = 0;
+    int len = strlen( name );
+    for( i = len -1; i >= 0; i-- )
+    {
+        if( name[i] == '/' )
+        {    
+           name[i] = '\0';
+            return name;
+        }
+    }
+    return NULL;
+}
 
 static krb5_error_code
-get_keytab(krb5_context context, krb5_keytab *keytab)
+get_keytab(krb5_context context, krb5_keytab *keytab, const krb5_principal princ)
 {
+    char *name = NULL;
     krb5_error_code kret;
+    char* service = _service_from_princ( princ );
 
     HEIMDAL_MUTEX_lock(&gssapi_keytab_mutex);
 
     if (_gsskrb5_keytab != NULL) {
-	char *name = NULL;
-
 	kret = krb5_kt_get_full_name(context, _gsskrb5_keytab, &name);
 	if (kret == 0) {
 	    kret = krb5_kt_resolve(context, name, keytab);
@@ -74,6 +102,30 @@ get_keytab(krb5_context context, krb5_keytab *keytab)
 	}
     } else
 	kret = krb5_kt_default(context, keytab);
+
+    /* Derive the keytab name from the service principal name */
+    {
+        char* service_kt_name = NULL;
+        struct stat stb;
+        memset( &stb, 0, sizeof(stb) );
+       
+        if( service != NULL )
+        {
+            kret = krb5_kt_get_name(context, *keytab, name, sizeof(name));
+
+            char* basename = _basename( name );
+
+            asprintf( &service_kt_name, "%s/%s.keytab", name, service );
+        }
+        if( service_kt_name && stat( service_kt_name, &stb ) == 0 )
+        {
+            // free keytab
+            (*keytab)->close(context, *keytab);
+            *keytab = NULL; 
+            kret = krb5_kt_resolve(context, service_kt_name, keytab);
+        }
+        if( service_kt_name ) free( service_kt_name );
+    }
 
     HEIMDAL_MUTEX_unlock(&gssapi_keytab_mutex);
 
@@ -269,7 +321,7 @@ try_keytab:
         if (kret)
             goto end;
     }
-    kret = get_keytab(context, &keytab);
+    kret = get_keytab(context, &keytab, handle->principal);
     if (kret)
         goto end;
 
@@ -357,7 +409,7 @@ acquire_acceptor_cred(OM_uint32 * minor_status,
 
     ret = GSS_S_FAILURE;
 
-    kret = get_keytab(context, &handle->keytab);
+    kret = get_keytab(context, &handle->keytab, handle->principal);
     if (kret)
 	goto end;
 
