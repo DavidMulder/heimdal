@@ -163,6 +163,9 @@ gss_acquire_cred(OM_uint32 *minor_status,
 	if (time_rec)
 		*time_rec = min_time;
 	*output_cred_handle = (gss_cred_id_t) cred;
-	*minor_status = 0;
+    /* Don't set the minor status to zero if  *
+     * there was an error in this case.  There could easily have  *
+     * been an error.                                             */
+    /* *minor_status = 0; */
 	return (GSS_S_COMPLETE);
 }

@@ -593,12 +593,12 @@ _krb5_kt_principal_not_found(krb5_context context,
 	kvno_str[0] = '\0';
 
     krb5_set_error_message (context, ret,
-			    N_("Failed to find %s%s in keytab %s (%s)",
+			    N_("Failed to find %s%s in keytab %s (enctype: %s)",
 			       "principal, kvno, keytab file, enctype"),
 			    princ,
 			    kvno_str,
-			    kt_name ? kt_name : "unknown keytab",
-			    enctype_str ? enctype_str : "unknown enctype");
+			    kt_name ? kt_name : "(unknown keytab)",
+			    enctype_str ? enctype_str : "unknown");
     free(kt_name);
     if (enctype_str)
 	free(enctype_str);
