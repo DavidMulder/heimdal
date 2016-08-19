@@ -900,7 +900,19 @@ krb5_rd_req_ctx(krb5_context context,
 	    if (ret)
 		goto out;
 
-    if(server && service )
+    if(server == NULL){
+        server = service;
+	}
+
+	ret = get_key_from_keytab(context,
+				  &ap_req,
+				  server,
+				  id,
+				  &o->keyblock,
+				  0);
+    /* principal names can be different, but if they don't resolve out of the 
+     * keytab then throw a wrong principal error. */
+    if( server && service && ret )
     {
         /* If these are not the same we are going to be using the kvno for one
          * ticket to get another ticket.  This will most likely fail, but even
@@ -913,17 +925,6 @@ krb5_rd_req_ctx(krb5_context context,
             goto out;
         }
     }
-    else
-    if(server == NULL){
-        server = service;
-	}
-
-	ret = get_key_from_keytab(context,
-				  &ap_req,
-				  server,
-				  id,
-				  &o->keyblock,
-				  0);
 	if (ret) {
 	    /* If caller specified a server, fail. */
 	    if (service == NULL && (context->flags & KRB5_CTX_F_RD_REQ_IGNORE) == 0)
