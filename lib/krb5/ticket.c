@@ -556,7 +556,7 @@ check_client_referral(krb5_context context,
         krb5_unparse_name( context, requested, &requested_str );
         krb5_unparse_name( context, mapped, &returned_str );
         krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
-                              "Not same client principal returned as returned. "
+                              "Not same client principal returned as requested. "
                               " Requested %s, returned %s", requested_str ? requested_str : "Not Set", 
                               returned_str ? returned_str : "Not Set" );
         if( returned_str )
