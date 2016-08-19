@@ -900,6 +900,20 @@ krb5_rd_req_ctx(krb5_context context,
 	    if (ret)
 		goto out;
 
+    if(server && service )
+    {
+        /* If these are not the same we are going to be using the kvno for one
+         * ticket to get another ticket.  This will most likely fail, but even
+         * if it didn't then we would eventually hit a decrypt integrity check
+         * failure */
+        if( krb5_principal_compare(context,server,service) == FALSE )
+        {
+            krb5_clear_error_message(context);
+            ret = KRB5KRB_AP_WRONG_PRINC;
+            goto out;
+        }
+    }
+    else
     if(server == NULL){
         server = service;
 	}
