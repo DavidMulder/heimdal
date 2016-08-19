@@ -569,7 +569,7 @@ get_cred_kdc(krb5_context context,
 				   0,
 				   &krbtgt->addresses,
 				   nonce,
-				   eflags,
+				   eflags | EXTRACT_TICKET_ALLOW_SERVER_MISMATCH,
 				   NULL,
 				   decrypt_tkt_with_subkey,
 				   subkey);
