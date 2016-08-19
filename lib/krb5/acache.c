@@ -651,10 +651,10 @@ acc_initialize(krb5_context context,
         {
 		break;
 	}
-        else
+        else if (error == ccNoError)
         {
             asprintf( &error_string,
-                      "api_ccache: iterator_enxt returned an unexpected error (%d)",
+                      "api_ccache: iterator_next returned an unexpected error (%d)",
                       error );
             ret = translate_cc_error(context, error, error_string);
             if( error_string ) free( error_string );
