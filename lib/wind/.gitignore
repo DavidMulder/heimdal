@@ -1,0 +1,12 @@
+*_table.*
+idn-lookup
+punycode_examples.*
+test-bidi
+test-ldap
+test-map
+test-normalize
+test-prohibited
+test-punycode
+test-rw
+test-utf8
+wind_err.[ch]
