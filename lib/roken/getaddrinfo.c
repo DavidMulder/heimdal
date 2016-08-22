@@ -295,7 +295,7 @@ static void map_v4_v6 (const struct in_addr *v4addr,
  * determine whether IPv6-mapped-IPv4 addresses should be returned.
  * Returns nonzero if IPv4 address mapping should be done.
  */
-int is_v4mapping (int family, int flags, const struct addrinfo *first) {
+static int is_v4mapping (int family, int flags, const struct addrinfo *first) {
     return ((family == PF_INET6 && (flags & AI_V4MAPPED))
 	    && (!first || (flags & AI_ALL)));
 }
