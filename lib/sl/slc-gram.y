@@ -690,6 +690,7 @@ gen_wrapper(struct assignment *as)
     cprint(1, "return 0;\n");
     cprint(0, "}\n");
     cprint(0, "\n");
+    free(n);
 }
 
 char cname[PATH_MAX];
