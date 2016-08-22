@@ -48,8 +48,11 @@ gss_krb5_copy_ccache(OM_uint32 *minor_status,
 				  cred,
 				  GSS_KRB5_COPY_CCACHE_X,
 				  &data_set);
-    if (ret)
+    if (ret) {
+        OM_uint32 ig_minor;
+        gss_release_buffer_set(&ig_minor, &data_set);
 	return ret;
+    }
 
     if (data_set == GSS_C_NO_BUFFER_SET || data_set->count < 1) {
 	gss_release_buffer_set(minor_status, &data_set);
