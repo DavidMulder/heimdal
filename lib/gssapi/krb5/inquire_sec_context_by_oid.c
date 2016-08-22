@@ -176,6 +176,7 @@ out:
 	*minor_status = ret;
 	maj_stat = GSS_S_FAILURE;
     }
+    krb5_free_keyblock (context, key);
     return maj_stat;
 }
 
