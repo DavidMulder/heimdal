@@ -38,6 +38,11 @@ copy_hostname(krb5_context context,
 	      const char *orig_hostname,
 	      char **new_hostname)
 {
+
+    /* Check for a NULL orig_hostname so we don't segfault */
+    if(orig_hostname == NULL)
+    return EINVAL;
+
     *new_hostname = strdup (orig_hostname);
     if (*new_hostname == NULL && context != NULL)
 	return krb5_enomem(context);
@@ -82,7 +87,7 @@ krb5_expand_hostname (krb5_context context,
 
     memset( &addr, 0, sizeof(addr) );
 
-    if (context && (context->flags & KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME) == 0)
+    if ((context->flags & KRB5_CTX_F_DNS_CANONICALIZE_HOSTNAME) == 0)
 	return copy_hostname (context, orig_hostname, new_hostname);
 
     memset (&hints, 0, sizeof(hints));
