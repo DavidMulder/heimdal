@@ -581,6 +581,8 @@ acceptor_start
 
 	if (ret == GSS_S_COMPLETE || ret == GSS_S_CONTINUE_NEEDED) {
 	    ctx->preferred_mech_type = preferred_mech_type;
+	    /* NULL to avoid double-free, it's owned by ctx now. */
+	    preferred_mech_type = GSS_C_NO_OID;
 	    if (ret == GSS_S_COMPLETE)
 		ctx->open = 1;
 
@@ -601,6 +603,10 @@ acceptor_start
 	}
     }
 
+    /* release (free) preferred_mech_type */
+    gss_release_oid(NULL, &preferred_mech_type);
+    preferred_mech_type = GSS_C_NO_OID;
+
     /*
      * If opportunistic token failed, lets try the other mechs.
      */
@@ -612,6 +618,11 @@ acceptor_start
 
 	/* Call glue layer to find first mech we support */
 	for (j = 1; j < ni->mechTypes.len; ++j) {
+	    /* free previous */
+	    if (preferred_mech_type != GSS_C_NO_OID) {
+	        gss_release_oid(NULL, &preferred_mech_type);
+	        preferred_mech_type = GSS_C_NO_OID;
+	    }
 	    ret = select_mech(minor_status,
 			      &ni->mechTypes.val[j],
 			      1,
@@ -626,6 +637,8 @@ acceptor_start
 	}
 
 	ctx->preferred_mech_type = preferred_mech_type;
+	/* NULL preferred_mech_type since ctx now owns it. */
+	preferred_mech_type = GSS_C_NO_OID;
     }
 
     /*
