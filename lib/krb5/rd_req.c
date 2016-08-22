@@ -747,7 +747,7 @@ get_key_from_keytab(krb5_context context,
 {
     krb5_keytab_entry entry;
     krb5_error_code ret;
-    int kvno;
+    int kvno = 0;
     krb5_keytab real_keytab;
 
     if(keytab == NULL)

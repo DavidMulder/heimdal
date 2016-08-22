@@ -531,6 +531,9 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 #undef HAVE_STRDUP
 
 #ifndef HAVE_STRDUP
+#ifdef strdup
+#undef strdup
+#endif
 #define strdup rk_strdup
 ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL strdup(const char *);
 #endif
