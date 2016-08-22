@@ -414,6 +414,9 @@ get_nodes (const char *nodename,
                                   const_v4,
                                   he,
                                   &flags);
+                /* Under weird circumstances this causes segfaults.
+                 * To leak memory on some platforms or segfault
+                 * on random occassions, that is the question. */
                 freehostent (he);
             }
         }
