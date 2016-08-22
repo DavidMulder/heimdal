@@ -197,10 +197,6 @@ open_syslog(krb5_context context,
 			    log_syslog, close_syslog, sd);
 }
 
-#ifdef SOLARIS
-/* The #define doesn't work when mode is passed in by pointer. */
-#undef fopen
-#endif
 struct file_data{
     const char *filename;
     const char *mode;
