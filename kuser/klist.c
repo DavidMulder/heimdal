@@ -75,12 +75,14 @@ printable_time_long(time_t t)
 static void
 print_cred(krb5_context context, krb5_creds *cred, rtbl_t ct, int do_flags)
 {
-    char *str;
+    char *str = NULL;
     krb5_error_code ret;
     krb5_timestamp sec;
 
     krb5_timeofday (context, &sec);
 
+    /* Check to see if it's a config principal */
+    if( ! krb5_is_config_principal(context, cred->server) ) {
 
     if(cred->times.starttime)
 	rtbl_add_column_entry(ct, COL_ISSUED,
@@ -124,8 +126,55 @@ print_cred(krb5_context context, krb5_creds *cred, rtbl_t ct, int do_flags)
 	    *sp++ = 'H';
 	*sp = '\0';
 	rtbl_add_column_entry(ct, COL_FLAGS, s);
+    } /* Add support to view a ccache config entries */
+    } else {
+
+        krb5_data ticket = cred->ticket;
+        unsigned int i;
+        char* tdata = NULL;
+
+        PrincipalName name = cred->server->name;
+
+        for (i = 0; i < name.name_string.len; i++) {
+            switch( i ) {
+                case 0:
+                    rtbl_add_column_entry(ct, COL_ISSUED, name.name_string.val[i]);
+                    break;
+                case 1:
+                    tdata = strndup((char*)(ticket.data), ticket.length);
+                    rtbl_add_column_entryv(ct, COL_EXPIRES, "%s = %s", name.name_string.val[i], tdata);
+                    free(tdata);
+                    tdata=NULL;
+                    break;
+                case 2:
+                    if(name.name_string.val[i])
+                        tdata = strndup(name.name_string.val[i], strlen(name.name_string.val[i]));
+                    break;
+                default:
+                    /* Reallocate tdata and append new data onto the end of it, seperated by a space.
+                       As of right now we shouldn't hit this code, but let's at least handle it if
+                       for some reason config cache has more than 3 components.
+                       (krb5_ccache_conf_data, configuration key, principal associated to key [optional])
+                       See: http://web.mit.edu/Kerberos/krb5-1.12/doc/formats/ccache_file_format.html
+                    */
+                    if(tdata) {
+                        const char* delm = " ";
+
+                        char * tmp = NULL;
+                        asprintf(&tmp, "%s%s%s", tdata, delm, name.name_string.val[i]);
+                        free(tdata);
+                        tdata = tmp;
+                    }
+                    break;
+            }
+        }
+
+        rtbl_add_column_entry(ct, COL_PRINCIPAL, tdata ? tdata : "");
+
+        if(tdata) free(tdata);
     }
-    free(str);
+
+    if(str) free(str);
 }
 
 static void
@@ -318,7 +367,7 @@ print_tickets (krb5_context context,
 				     ccache,
 				     &cursor,
 				     &creds)) == 0) {
-	if (!do_hidden && krb5_is_config_principal(context, creds.server)) {
+	if (!do_hidden && ( ( str && str[0] == '@' ) || krb5_is_config_principal(context, creds.server))) { /* Check to see if it's a config principal */
 	    ;
 	}else if(do_verbose){
 	    print_cred_verbose(context, &creds, do_json);
