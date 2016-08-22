@@ -534,13 +534,7 @@ acc_alloc(krb5_context context, krb5_ccache *id)
 
     a = ACACHE(*id);
 
-    error = (*init_func)(&a->context, 
-#if DARWIN > 11
-                         ccapi_version_7,
-#else
-                         ccapi_version_3,
-#endif
-                         NULL, NULL);
+    error = (*init_func)(&a->context, ccapi_version_3, NULL, NULL);
     if (error) {
 	krb5_data_free(&(*id)->data);
 	return translate_cc_error(context, error, NULL);
