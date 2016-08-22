@@ -45,6 +45,13 @@ copy_hostname(krb5_context context,
     return 0;
 }
 
+static int hostname_matches_fqdn(const char *hostname, const char *fqdn) {
+    if (!hostname || !fqdn)
+        return 0;
+
+    return (strstr(fqdn, hostname) == fqdn && fqdn[strlen(hostname)] == '.');
+}
+
 /**
  * krb5_expand_hostname() tries to make orig_hostname into a more
  * canonical one in the newly allocated space returned in
@@ -144,10 +151,7 @@ krb5_expand_hostname (krb5_context context,
                  * in this case, it needs to match 
                  * <orig_hostname>.fqdn.stuff.
                  **/
-                if( strncmp( hostinfo->h_aliases[i],
-                             hostinfo->h_name,
-                             len ) ||
-                    hostinfo->h_aliases[i][len] != '.' )
+                if (!hostname_matches_fqdn(orig_hostname, hostinfo->h_aliases[i]))
                     continue;
 
                 ret = copy_hostname( context, 
@@ -168,6 +172,10 @@ krb5_expand_hostname (krb5_context context,
 
         if( strchr( a->ai_canonname, '.' ) == NULL ||
             a->ai_canonname[0] == '.' )
+            continue;
+
+        /* Only accept FQDNs that match the local hostname */
+        if (!hostname_matches_fqdn(orig_hostname, a->ai_canonname))
             continue;
 
         ret = copy_hostname( context, a->ai_canonname, new_hostname );
