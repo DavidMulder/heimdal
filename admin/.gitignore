@@ -1,0 +1,10 @@
+/Makefile
+/Makefile.in
+/*.o
+/*.a
+/ktutil-commands.c
+/ktutil-commands.h
+/ktutil
+/inst-ktutil
+/*.cbp
+/*.layout

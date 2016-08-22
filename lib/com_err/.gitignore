@@ -1,0 +1,10 @@
+/Makefile
+/Makefile.in
+/*.o
+/*.a
+/lex.c
+/parse.h
+/parse.c
+/compile_et
+/*.cbp
+/*.layout

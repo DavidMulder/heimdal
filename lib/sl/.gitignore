@@ -1,0 +1,16 @@
+/Makefile
+/Makefile.in
+/*.o
+/*.a
+/slc
+/getprogname.c
+/slc-lex.c
+/snprintf.c
+/strdup.c
+/strtok_r.c
+/strupr.c
+/slc-gram.h
+/slc-gram.c
+/test_sl
+/*.cbp
+/*.layout

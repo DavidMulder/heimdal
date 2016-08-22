@@ -1,0 +1,16 @@
+/Makefile
+/Makefile.in
+/*.o
+/*.a
+/inst-*
+/copy_cred_cache
+/generate-requests
+/kdecode_ticket
+/kdestroy
+/kgetcred
+/kinit
+/klist
+/kswitch
+/kverify
+/*.cbp
+/*.layout

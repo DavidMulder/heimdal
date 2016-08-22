@@ -1,0 +1,7 @@
+/Makefile
+/Makefile.in
+/*.o
+/*.a
+/test_ntlm
+/*.cbp
+/*.layout
