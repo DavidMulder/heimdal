@@ -688,6 +688,7 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_canonicalize_name (
     newspname = calloc(1, sizeof(*newspname));
     if (!newspname) {
         *minor_status = ENOMEM;
+        gss_release_name(NULL, &inner_name);
         return GSS_S_FAILURE;
     }
 
