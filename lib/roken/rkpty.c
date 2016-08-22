@@ -33,7 +33,7 @@
 
 #include "config.h"
 
-#ifndef HAVE_SYS_TYPES_H
+#ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
 #ifdef HAVE_SYS_WAIT_H
