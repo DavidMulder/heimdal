@@ -212,6 +212,12 @@ _gss_ntlm_accept_sec_context
 		heim_ntlm_free_type3(&type3);
 		_gss_ntlm_delete_sec_context(minor_status,
 					     context_handle, NULL);
+                /* Don't leak. */
+                if (n) {
+                    free(n->user);
+                    free(n->domain);
+                free(n);
+                }
 		return maj_stat;
 	    }
 	    *src_name = (gss_name_t)n;
