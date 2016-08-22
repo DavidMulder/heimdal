@@ -69,6 +69,9 @@ doit(const char *fn)
     if (fout == NULL)
 	err(1, "fopen: output file");
 
+    free(fnout);
+    fnout = NULL;
+
     while (fgets(buf, sizeof(buf), f) != NULL) {
 	char *ptr, *class, *type, *tag, *length, *data, *foo;
 	int ret, l, c, ty, ta;
