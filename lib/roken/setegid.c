@@ -42,13 +42,15 @@
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 setegid(gid_t egid)
 {
-#ifdef HAVE_SETREGID
-    return setregid(-1, egid);
-#endif
-
+    /* use setresgid first, setregid doesn't 
+     * appear to work in a HP 9000  container.
+     * Change was to reverse order of these. */
 #ifdef HAVE_SETRESGID
     return setresgid(-1, egid, -1);
 #endif
 
+#ifdef HAVE_SETREGID
+    return setregid(-1, egid);
+#endif
     return -1;
 }
