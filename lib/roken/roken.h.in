@@ -525,6 +525,11 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
      __attribute__ ((__format__ (__printf__, 3, 0)));
 #endif
 
+/* Sometimes calling apps provide their own broken strdup, so we always use the
+ * roken version. Ensure this is not a duplicate definition. */
+#undef strdup
+#undef HAVE_STRDUP
+
 #ifndef HAVE_STRDUP
 #define strdup rk_strdup
 ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL strdup(const char *);
