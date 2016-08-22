@@ -296,8 +296,13 @@ static void map_v4_v6 (const struct in_addr *v4addr,
  * Returns nonzero if IPv4 address mapping should be done.
  */
 static int is_v4mapping (int family, int flags, const struct addrinfo *first) {
+#if defined(AI_V4MAPPED) && defined(AI_ALL)
+    /* Only platforms that define these flags will ever be able to use them. */
     return ((family == PF_INET6 && (flags & AI_V4MAPPED))
 	    && (!first || (flags & AI_ALL)));
+#else
+    return 0;
+#endif
 }
 #endif /* HAVE_IPV6 */
 
