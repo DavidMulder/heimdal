@@ -617,6 +617,10 @@ krb5_kt_get_entry_wrapped(krb5_context context,
     krb5_error_code ret;
     krb5_kt_cursor cursor;
 
+    /* We shoud make sure that the id is not NULL before trying to use it */
+    if(!id)
+        return KRB5_KT_NOTFOUND;
+ 
     if(id->get)
 	return (*id->get)(context, id, principal, kvno, enctype, entry);
 
