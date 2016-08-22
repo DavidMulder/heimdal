@@ -36,9 +36,6 @@
 #include <string.h>
 
 #ifndef HAVE_STRDUP
-#ifdef strdup
-#undef strdup
-#endif
 ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
 strdup(const char *old)
 {
