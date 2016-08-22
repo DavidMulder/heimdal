@@ -124,7 +124,7 @@ krb5_auth_con_copy( krb5_context context,
     }
 
     /* Copying fields from the source */
-    memcpy( *dst, src, sizeof(*dst) );
+    memcpy( *dst, src, sizeof(**dst) );
 
     /* Duplicate all allocated fields */
     if( src->authenticator )
