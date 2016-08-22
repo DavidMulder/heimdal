@@ -344,6 +344,7 @@ gen_command(struct assignment *as)
 	if(strcmp(a->name, "name") == 0)
 	    cprint(1, "    { \"%s\", NULL, NULL, NULL },\n", a->u.value);
     cprint(0, "\n");
+    free(f);
 }
 
 static void
