@@ -145,7 +145,7 @@ rk_test_mem_alloc(enum rk_test_mem_type type, const char *name,
     if (ret < 0)
 	err (1, "mprotect");
 
-    ret = mprotect (p + map.size - pagesize, pagesize, 0);
+    ret = mprotect ((void*)(p + map.size - pagesize), pagesize, 0);
     if (ret < 0)
 	err (1, "mprotect");
 
