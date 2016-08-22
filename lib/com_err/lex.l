@@ -1,3 +1,8 @@
+%top{
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+}
 %{
 /*
  * Copyright (c) 1998 - 2017 Kungliga Tekniska Högskolan
